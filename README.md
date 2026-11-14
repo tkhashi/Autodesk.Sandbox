@@ -38,3 +38,5 @@ Forma Embedded View 拡張（`forma-embedded-view-sdk` + Vite + TypeScript）の
 - サンプルは検証目的の最小構成です。本番利用時はトークンの保管方法やエラーハンドリングを見直してください
 
 - `sample-c-issues-enrichment/` — 指摘事項（Issues）拡張デモ①：ピン先要素のプロパティ（階・通り芯・断面・設計かぶり等）を Issue のカスタムフィールドへ自動付与するデモ（実モデルから抽出したデータ使用、単一HTML）
+
+- `sample-d-issues-3d/` — 指摘事項 拡張デモ②：Issue選択で対象箇所＋周辺の3Dを表示。①APS Viewer分離表示と③部分ジオメトリ切り出し（GLB）を比較できるデモ（要サーバー起動）

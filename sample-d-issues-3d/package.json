@@ -1,0 +1,6 @@
+{
+  "name": "sample-d-issues-3d",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "node server.mjs" }
+}

@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>指摘事項 拡張デモ② 対象箇所の3D表示（①Viewer方式／③部分切り出し方式）</title>
+<link rel="stylesheet" href="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/style.min.css">
+<style>
+  :root { --blue:#0696d7; --ink:#22303c; --mut:#5a6b7a; --line:#d5dee6; --bg:#f4f7fa; --ok:#1e7d46; --accent:#e8590c; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans CJK JP",sans-serif; color:var(--ink); background:var(--bg); }
+  header { background:#fff; border-bottom:1px solid var(--line); padding:18px 26px 12px; }
+  h1 { font-size:21px; margin:0 0 6px; }
+  .sub { color:var(--mut); font-size:13px; line-height:1.7; }
+  .sub b { color:var(--ink); }
+  .issues { display:flex; gap:10px; flex-wrap:wrap; padding:16px 26px 4px; }
+  .issue { background:#fff; border:1.5px solid var(--line); border-radius:10px; padding:9px 13px; cursor:pointer; max-width:300px; text-align:left; font:inherit; }
+  .issue:hover { border-color:var(--blue); }
+  .issue.sel { border-color:var(--blue); background:#eef7fc; box-shadow:0 0 0 2px #bfe6f7; }
+  .issue .t { font-size:13.5px; font-weight:700; line-height:1.45; }
+  .issue .e { font-size:11.5px; color:var(--mut); margin-top:3px; line-height:1.5; }
+  .detail { margin:10px 26px 0; font-size:13px; color:var(--mut); }
+  .detail b { color:var(--ink); }
+  .panels { display:grid; grid-template-columns:1fr 1fr; gap:16px; padding:14px 26px 6px; }
+  @media (max-width: 1100px) { .panels { grid-template-columns:1fr; } }
+  .panel { background:#fff; border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  .panel h2 { font-size:15px; margin:0; padding:11px 14px 4px; }
+  .panel .desc { font-size:12px; color:var(--mut); padding:0 14px 9px; line-height:1.6; }
+  .stage { position:relative; height:470px; background:#e9eff4; }
+  #viewer { position:absolute; inset:0; }
+  #three { position:absolute; inset:0; }
+  #three canvas { display:block; }
+  .stat { display:flex; gap:16px; flex-wrap:wrap; padding:9px 14px 12px; font-size:12.5px; color:var(--mut); border-top:1px solid var(--line); }
+  .stat b { color:var(--ink); font-size:14px; }
+  .stat .big { color:var(--accent); }
+  .placeholder { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--mut); font-size:13px; padding:20px; text-align:center; line-height:1.8; }
+  .compare { margin:8px 26px 0; background:#fff; border:1px solid var(--line); border-radius:12px; padding:12px 16px; font-size:13.5px; line-height:1.8; }
+  footer { padding:14px 26px 26px; color:var(--mut); font-size:12px; line-height:1.85; }
+</style>
+</head>
+<body>
+<header>
+  <h1>指摘事項 拡張デモ②：対象箇所＋周辺の3D表示 ― ①Viewer方式 vs ③部分切り出し方式</h1>
+  <div class="sub">
+    対象モデル：<b>Snowdon Towers Sample Structural.rvt</b>（Forma 実環境のサンプルプロジェクト）／ Issue はデモ用データ（ピンは必ず要素前提、要望3デモと同一の6件）<br>
+    仮説：「モデル全体を開かず、対象箇所の部分データだけ読めば高速に表示できるはず」を、2つの実装方式で比べる。
+  </div>
+</header>
+<div class="issues" id="issues"></div>
+<div class="detail" id="detail">Issue を選んでください。</div>
+<div class="panels">
+  <div class="panel">
+    <h2>① APS Viewer 方式（モデル全体を配信して分離表示）</h2>
+    <div class="desc">変換データ（SVF）はクラウドから逐次配信。表示側で対象＋周辺の要素だけを分離（isolate）してカメラを寄せる、標準的な実装。</div>
+    <div class="stage"><div id="viewer"></div><div class="placeholder" id="viewerPh">Issue を選択するとモデルを読み込みます</div></div>
+    <div class="stat" id="statA"><span>状態：未読み込み</span></div>
+  </div>
+  <div class="panel">
+    <h2>③ 部分切り出し方式（対象＋周辺だけの軽量ファイル）</h2>
+    <div class="desc">起票時に裏側で対象＋周辺のジオメトリだけを切り出して用意しておく想定（このデモでは事前に切り出し済み）。表示は three.js で軽量ファイル（GLB）を読むだけ。</div>
+    <div class="stage"><div id="three"></div><div class="placeholder" id="threePh">Issue を選択すると部分モデルを表示します</div></div>
+    <div class="stat" id="statB"><span>状態：未読み込み</span></div>
+  </div>
+</div>
+<div class="compare" id="compare">比較結果はここに表示されます。</div>
+<footer>
+  実装メモ：要素の対応付けは Model Derivative のプロパティ（objectid）→ externalId → 変換データ同梱のプロパティDB（model.sdb）の id、という経路で解決している（SVF2 ではこの3つの番号が一致しない）。「周辺」の定義はデモ仕様：対象要素のバウンディングボックスを水平±10ft／上下±6ft 広げ、交差する要素を近い順に最大60件。③の切り出しは svf-utils の glTF 変換（dbId フィルタ）で生成し、GLB 化した。①の Viewer はトークン発行のため同梱サーバー（server.mjs）経由でのみ動作する。③は静的ファイルだけでも動作する。
+</footer>
+<script src="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/viewer3D.min.js"></script>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/" } }
+</script>
+<script>
+const DATA = {"urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLlpSRjFpamFyWFJTN1gzbWk3QllpRmc_dmVyc2lvbj0x", "issues": [{"id": "ISSUE-001", "title": "柱脚ベースプレート アンカーボルトの位置ずれ"}, {"id": "ISSUE-002", "title": "大梁端部 ハイテンションボルトの締め忘れ"}, {"id": "ISSUE-003", "title": "杭頭天端の高さ相違"}, {"id": "ISSUE-004", "title": "基礎スラブ下面 かぶり不足の疑い"}, {"id": "ISSUE-005", "title": "地中梁 かぶり・主筋位置の確認依頼"}, {"id": "ISSUE-006", "title": "スラブ厚 計測値の相違"}], "elements": {"ISSUE-001": {"name": "W Shapes-Column [608201]", "category": "Structural Columns", "typeName": "W14x109", "level": "L1_37_Med", "locationMark": "E-5"}, "ISSUE-002": {"name": "W Shapes [608386]", "category": "Structural Framing", "typeName": "W18x55", "level": "L2 TOS", "locationMark": null}, "ISSUE-003": {"name": "SFD_Round [784236]", "category": "Structural Foundations", "typeName": "24x24x25'", "level": "Top of Footing", "locationMark": null}, "ISSUE-004": {"name": "Foundation Slab [680685]", "category": "Structural Foundations", "typeName": "FNDN-36", "level": "Elevator Pit", "locationMark": null}, "ISSUE-005": {"name": "Concrete-Rectangular Beam [606873]", "category": "Structural Framing", "typeName": "CB24x24", "level": "L1_35_Low", "locationMark": null}, "ISSUE-006": {"name": "Floor [621720]", "category": "Floors", "typeName": "NW Concrete on Metal Deck", "level": "M1", "locationMark": null}}, "subsets": {"ISSUE-001": {"targetDbId": 3284, "neighborDbIds": [13, 10, 17, 15, 19, 18, 4, 5, 6, 14, 2, 3, 11, 4702, 4384, 8242, 8539, 8538, 8540, 8545, 8544, 5379, 4460, 5402, 4036, 4006, 3576, 5262, 5454, 4089, 3477, 5455, 3359, 4090, 5168, 5549, 3844, 3476, 5167, 3358, 7, 3928, 3259, 12, 4701, 4383, 3619, 5592, 5295, 6010, 4385, 4703, 4700, 4382, 3618, 5591, 5294, 6009, 4704, 4386], "targetGlb": "assets/subsets/ISSUE-001-target.glb", "targetBytes": 277908, "neighborsGlb": "assets/subsets/ISSUE-001-neighbors.glb", "neighborsBytes": 3038760}, "ISSUE-002": {"targetDbId": 3316, "neighborDbIds": [10, 3367, 3370, 3369, 3368, 4731, 4732, 4733, 6543, 4730, 3294, 3296, 14, 3384, 3339, 3382, 4006, 3, 13, 3338, 3352, 4729, 3337, 2, 8232, 3860, 3225, 4728, 3336, 3394, 3391], "targetGlb": "assets/subsets/ISSUE-002-target.glb", "targetBytes": 71172, "neighborsGlb": "assets/subsets/ISSUE-002-neighbors.glb", "neighborsBytes": 1960976}, "ISSUE-003": {"targetDbId": 5009, "neighborDbIds": [16, 4995, 20, 3062, 3993, 4738, 4837, 8, 3163, 3167, 5015, 5010, 3061], "targetGlb": "assets/subsets/ISSUE-003-target.glb", "targetBytes": 34924, "neighborsGlb": "assets/subsets/ISSUE-003-neighbors.glb", "neighborsBytes": 107632}, "ISSUE-004": {"targetDbId": 3942, "neighborDbIds": [4067, 4068, 4065, 4066, 16, 5033, 5032, 5030, 5031, 20, 4738, 8, 3163, 3169], "targetGlb": "assets/subsets/ISSUE-004-target.glb", "targetBytes": 2072, "neighborsGlb": "assets/subsets/ISSUE-004-neighbors.glb", "neighborsBytes": 145240}, "ISSUE-005": {"targetDbId": 3237, "neighborDbIds": [3923, 3924, 3246, 3271, 3247, 3831, 8216, 12, 3047, 3752, 3048, 3272, 11, 3034, 3031, 3932, 5711, 3030, 3198, 5710], "targetGlb": "assets/subsets/ISSUE-005-target.glb", "targetBytes": 2020, "neighborsGlb": "assets/subsets/ISSUE-005-neighbors.glb", "neighborsBytes": 479092}, "ISSUE-006": {"targetDbId": 3420, "neighborDbIds": [3049, 3034, 3029, 3030, 5711, 3047, 3289, 3290, 13, 14, 3752, 3297, 3347, 3356, 3789, 3775, 3753, 3774, 3764, 3757, 3758, 3759, 3760, 3761, 3762, 3763, 8628, 8371, 8300, 8578, 8501, 8303, 8369, 8500, 8511, 8506, 8304, 8368, 4631, 3349, 3348, 3575, 3357, 8483, 8482, 8550, 8366, 8367, 8627, 8626, 8625, 3048, 3050, 8372, 8370, 8481, 10, 3, 2, 8484], "targetGlb": "assets/subsets/ISSUE-006-target.glb", "targetBytes": 3656, "neighborsGlb": "assets/subsets/ISSUE-006-neighbors.glb", "neighborsBytes": 3665992}}};
+const issuesEl = document.getElementById('issues');
+let selected = null;
+for (const iss of DATA.issues) {
+  const e = DATA.elements[iss.id];
+  const b = document.createElement('button');
+  b.className = 'issue'; b.id = 'btn-' + iss.id;
+  b.innerHTML = '<div class="t">' + iss.id + '：' + iss.title + '</div><div class="e">📌 ' + e.name + '（' + e.category + '）<br>' + (e.level ?? '') + (e.locationMark ? ' ／ 通り芯 ' + e.locationMark : '') + '</div>';
+  b.addEventListener('click', () => selectIssue(iss.id));
+  issuesEl.appendChild(b);
+}
+function fmtBytes(n) { return n >= 1048576 ? (n / 1048576).toFixed(2) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB'; }
+function selectIssue(id) {
+  selected = id;
+  document.querySelectorAll('.issue').forEach(el => el.classList.toggle('sel', el.id === 'btn-' + id));
+  const iss = DATA.issues.find(i => i.id === id);
+  const e = DATA.elements[id];
+  document.getElementById('detail').innerHTML = '<b>' + iss.id + '：' + iss.title + '</b> ／ 対象要素：' + e.name + '（' + e.category + ' / ' + e.typeName + '）' + (e.locationMark ? ' ／ 位置：通り芯 ' + e.locationMark : '') + (e.level ? ' ／ 階：' + e.level : '');
+  showInViewer(id);
+  showInThree(id);
+}
+</script>
+<script>
+// ===== ① APS Viewer =====
+let viewer = null, viewerReady = null, viewerFirstLoadMs = null;
+function initViewer() {
+  if (viewerReady) return viewerReady;
+  viewerReady = new Promise((resolve, reject) => {
+    const opts = {
+      env: 'AutodeskProduction',
+      getAccessToken: async (cb) => {
+        try {
+          const r = await fetch('/api/token');
+          const j = await r.json();
+          if (!j.access_token) throw new Error('no token');
+          cb(j.access_token, j.expires_in);
+        } catch (err) { reject(new Error('トークンを取得できませんでした。①は同梱サーバー（node server.mjs）経由でのみ動作します。')); }
+      },
+    };
+    Autodesk.Viewing.Initializer(opts, () => {
+      viewer = new Autodesk.Viewing.GuiViewer3D(document.getElementById('viewer'));
+      viewer.start();
+      Autodesk.Viewing.Document.load('urn:' + DATA.urn, (doc) => {
+        const node = doc.getRoot().getDefaultGeometry();
+        viewer.loadDocumentNode(doc, node).then(() => resolve()).catch(reject);
+      }, reject);
+    });
+  });
+  return viewerReady;
+}
+async function showInViewer(id) {
+  const stat = document.getElementById('statA');
+  if (typeof Autodesk === 'undefined') {
+    stat.innerHTML = '<span>Viewer ライブラリ（Autodesk CDN）を読み込めませんでした。ネットワーク環境によっては CDN への接続が必要です。</span>';
+    return;
+  }
+  const ph = document.getElementById('viewerPh');
+  const sub = DATA.subsets[id];
+  const ids = [sub.targetDbId, ...sub.neighborDbIds];
+  const t0 = performance.now();
+  stat.innerHTML = '<span>読み込み中…</span>';
+  try {
+    const first = !viewerFirstLoadMs;
+    await initViewer();
+    if (first) {
+      await new Promise(res => {
+        const h = () => { viewer.removeEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, h); res(); };
+        viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, h);
+        setTimeout(res, 15000);
+      });
+      viewerFirstLoadMs = Math.round(performance.now() - t0);
+    }
+    if (viewer.setGhosting) viewer.setGhosting(false);
+    viewer.isolate(ids);
+    viewer.fitToView(ids);
+    const ms = Math.round(performance.now() - t0);
+    ph.style.display = 'none';
+    stat.innerHTML = (viewerFirstLoadMs ? '<span>モデル初回読み込み：<b>' + (viewerFirstLoadMs / 1000).toFixed(1) + ' 秒</b></span>' : '') +
+      '<span>この Issue の表示切替：<b>' + ms + ' ms</b></span>' +
+      '<span>分離表示した要素：<b>' + ids.length + ' 件</b>（対象1＋周辺' + sub.neighborDbIds.length + '）</span>' +
+      '<span>転送：モデル全体の変換データを逐次配信</span>';
+    updateCompare(id);
+  } catch (err) {
+    stat.innerHTML = '<span>' + err.message + '</span>';
+  }
+}
+</script>
+<script type="module">
+// ===== ③ three.js（部分GLB） =====
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+const container = document.getElementById('three');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+container.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xe9eff4);
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 5000);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8a97a5, 1.1));
+const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(60, 80, 40); scene.add(sun);
+const sun2 = new THREE.DirectionalLight(0xdfeaf5, 0.5); sun2.position.set(-50, -30, -60); scene.add(sun2);
+let group = null;
+function resize() {
+  const w = container.clientWidth, h = container.clientHeight;
+  renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(container); resize();
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+const loader = new GLTFLoader();
+async function loadTinted(url, color, opacity, emissive) {
+  const gltf = await loader.loadAsync(url);
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.7, metalness: 0.05, transparent: opacity < 1, opacity, emissive: emissive ?? 0x000000, emissiveIntensity: 0.9, depthWrite: opacity >= 1 });
+  gltf.scene.traverse(o => { if (o.isMesh) { o.material = mat; } });
+  return gltf.scene;
+}
+window.__showThree = async (id) => {
+  const stat = document.getElementById('statB');
+  const ph = document.getElementById('threePh');
+  const sub = DATA.subsets[id];
+  const t0 = performance.now();
+  stat.innerHTML = '<span>読み込み中…</span>';
+  try {
+    if (group) { scene.remove(group); group = null; }
+    group = new THREE.Group();
+    const [target, neigh] = await Promise.all([
+      loadTinted(sub.targetGlb, 0xff4400, 1, 0x7a1e00),
+      sub.neighborDbIds.length ? loadTinted(sub.neighborsGlb, 0x9fb4c6, 0.45) : Promise.resolve(null),
+    ]);
+    group.add(target); if (neigh) group.add(neigh);
+    scene.add(group);
+    const box = new THREE.Box3().setFromObject(target);
+    const tSize = box.getSize(new THREE.Vector3());
+    box.expandByVector(new THREE.Vector3(Math.max(3, tSize.x * 0.6), Math.max(3, tSize.y * 0.6), Math.max(3, tSize.z * 0.6)));
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3()).length();
+    camera.position.set(center.x + size * 0.75, center.y + size * 0.55, center.z + size * 0.75);
+    camera.near = Math.max(0.1, size / 100); camera.far = size * 30; camera.updateProjectionMatrix();
+    controls.target.copy(center); controls.update();
+    renderer.render(scene, camera);
+    const ms = Math.round(performance.now() - t0);
+    const total = sub.targetBytes + sub.neighborsBytes;
+    ph.style.display = 'none';
+    stat.innerHTML = '<span>表示まで：<b class="big">' + ms + ' ms</b></span>' +
+      '<span>転送した部分データ：<b class="big">' + fmtBytes(total) + '</b>（対象 ' + fmtBytes(sub.targetBytes) + '＋周辺 ' + fmtBytes(sub.neighborsBytes) + '）</span>' +
+      '<span>要素：<b>' + (1 + sub.neighborDbIds.length) + ' 件</b></span>';
+    window.__threeMs = ms; window.__threeBytes = total;
+    updateCompare(id);
+  } catch (err) {
+    stat.innerHTML = '<span>読み込みに失敗しました（' + err.message + '）</span>';
+  }
+};
+</script>
+<script>
+function showInThree(id) { if (window.__showThree) window.__showThree(id); else setTimeout(() => showInThree(id), 300); }
+function updateCompare(id) {
+  if (!window.__threeMs) return;
+  const sub = DATA.subsets[id];
+  const el = document.getElementById('compare');
+  el.innerHTML = '【比較】' + id + '：③部分切り出しは <b>' + fmtBytes(window.__threeBytes) + '</b> の転送で <b>' + window.__threeMs + ' ms</b> 表示。' +
+    '①Viewer はモデル全体の変換データを配信しつつ分離表示するため、初回読み込みに時間がかかる代わりに、読み込み後の切替は高速で、モデル全体へそのまま広げて見ることもできる。' +
+    '③は「Issue の箇所だけ見たい」用途では転送量・表示速度とも圧倒的に小さいが、範囲外の要素は含まれない。';
+}
+</script>
+</body>
+</html>
