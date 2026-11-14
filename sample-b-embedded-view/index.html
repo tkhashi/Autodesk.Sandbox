@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Forma Hands-on Probe Extension</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 16px; font-size: 14px; }
+      h1 { font-size: 16px; }
+      table { border-collapse: collapse; }
+      td, th { border: 1px solid #ccc; padding: 4px 8px; text-align: left; vertical-align: top; }
+      .err { color: #b00; white-space: pre-wrap; word-break: break-all; }
+      .ok { color: #070; }
+      code { word-break: break-all; }
+    </style>
+  </head>
+  <body>
+    <h1>Forma Hands-on Probe</h1>
+    <p>Embedded View SDK 経由でホスト（Forma Site Design）から何が取れるかを確認する検証用拡張。</p>
+    <table>
+      <tr><th>ping</th><td id="ping">…</td></tr>
+      <tr><th>projectId</th><td id="projectId">…</td></tr>
+      <tr><th>project</th><td id="project">…</td></tr>
+      <tr><th>rootUrn</th><td id="rootUrn">…</td></tr>
+    </table>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

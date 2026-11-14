@@ -1,0 +1,18 @@
+{
+  "description": "Autodesk Forma hands-on Sample A: external HTTP client (3-legged OAuth + PKCE, read-first)",
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "name": "forma-hands-on-sample-a",
+  "private": true,
+  "scripts": {
+    "acc": "tsx src/data-management.ts",
+    "login": "tsx src/login.ts",
+    "site": "tsx src/site-design.ts",
+    "domain": "tsx src/domain-apis.ts"
+  },
+  "type": "module",
+  "version": "0.1.0"
+}
