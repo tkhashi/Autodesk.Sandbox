@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>指摘事項 拡張デモ① 要素情報の自動付与</title>
+<style>
+  :root { --blue:#0696d7; --ink:#22303c; --mut:#5a6b7a; --line:#d5dee6; --bg:#f4f7fa; --ok:#1e7d46; --warn:#b25e09; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans CJK JP",sans-serif; color:var(--ink); background:var(--bg); }
+  header { background:#fff; border-bottom:1px solid var(--line); padding:20px 28px 14px; }
+  h1 { font-size:22px; margin:0 0 6px; }
+  .sub { color:var(--mut); font-size:13px; line-height:1.7; }
+  .sub b { color:var(--ink); }
+  .flow { display:flex; align-items:stretch; gap:0; margin:16px 28px 0; flex-wrap:wrap; }
+  .flow .step { background:#fff; border:1.5px solid var(--blue); color:var(--ink); border-radius:10px; padding:8px 14px; font-size:13px; text-align:center; }
+  .flow .step small { display:block; color:var(--mut); font-size:11px; margin-top:2px; }
+  .flow .arrow { align-self:center; padding:0 8px; color:var(--blue); font-weight:700; }
+  .toolbar { display:flex; gap:12px; align-items:center; margin:18px 28px 0; flex-wrap:wrap; }
+  button { font:inherit; cursor:pointer; border-radius:8px; border:1px solid var(--blue); background:var(--blue); color:#fff; padding:9px 18px; font-size:14px; font-weight:700; }
+  button.ghost { background:#fff; color:var(--blue); font-weight:400; padding:5px 12px; font-size:12px; }
+  button:disabled { opacity:.45; cursor:default; }
+  .note { font-size:12px; color:var(--mut); }
+  main { display:grid; grid-template-columns: 1fr 340px; gap:18px; padding:18px 28px 28px; align-items:start; }
+  @media (max-width: 980px) { main { grid-template-columns: 1fr; } }
+  .cards { display:flex; flex-direction:column; gap:14px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:12px; padding:16px 18px; }
+  .card h2 { font-size:16px; margin:0 0 4px; }
+  .meta { font-size:12px; color:var(--mut); display:flex; gap:14px; flex-wrap:wrap; margin-bottom:6px; }
+  .chip { display:inline-block; padding:1px 9px; border-radius:999px; font-size:11px; font-weight:700; color:#fff; background:#8a97a5; }
+  .chip.open { background:#c2432e; } .chip.review { background:#b25e09; } .chip.pending { background:#5a6b7a; }
+  .pin { font-size:12.5px; background:#eef4f9; border:1px solid var(--line); border-radius:8px; padding:7px 10px; margin:8px 0; }
+  .pin code { font-size:11.5px; color:#33506e; word-break:break-all; }
+  .body { font-size:13px; line-height:1.7; margin:6px 0 10px; }
+  .enrich { border:1.5px dashed #b9c9d6; border-radius:10px; padding:10px 12px; }
+  .enrich.done { border:1.5px solid var(--ok); background:#f2faf5; }
+  .enrich h3 { margin:0 0 8px; font-size:13px; color:var(--mut); display:flex; justify-content:space-between; align-items:center; }
+  .enrich.done h3 { color:var(--ok); }
+  .enrich table { width:100%; border-collapse:collapse; font-size:13px; }
+  .enrich th { text-align:left; color:var(--mut); font-weight:400; width:118px; padding:3px 8px 3px 0; vertical-align:top; }
+  .enrich td { padding:3px 0; }
+  .empty { color:var(--mut); font-size:13px; }
+  .flash { animation: fl 1s ease; }
+  @keyframes fl { 0% { background:#dff3e6; } 100% { background:transparent; } }
+  .raw { margin-top:8px; }
+  .raw pre { background:#0f1c26; color:#cfe3f2; font-size:11px; line-height:1.55; padding:10px 12px; border-radius:8px; overflow:auto; max-height:300px; display:none; }
+  .log { background:#0f1c26; color:#cfe3f2; border-radius:12px; padding:14px 16px; font-family:ui-monospace,Menlo,monospace; font-size:12px; line-height:1.75; min-height:220px; position:sticky; top:14px; }
+  .log h3 { color:#fff; font-family:inherit; margin:0 0 8px; font-size:13px; }
+  .log .ok { color:#7dd87d; } .log .dim { color:#7d99b4; }
+  footer { padding:0 28px 26px; color:var(--mut); font-size:12px; line-height:1.8; }
+</style>
+</head>
+<body>
+<header>
+  <h1>指摘事項 拡張デモ①：要素情報の自動付与</h1>
+  <div class="sub">
+    対象プロジェクト：<b>Snowdon Towers</b>（Forma / 旧ACC 実環境）／ 対象モデル：<b>Snowdon Towers Sample Structural.rvt</b><br>
+    要素のプロパティは Model Derivative API で実モデルから抽出した実データ。Issue 側はデモ用データ（前提：ピンは必ず要素に対して打たれる）。
+  </div>
+  <div class="flow">
+    <div class="step">Issue（ピン）<small>要素 ID を保持</small></div><div class="arrow">→</div>
+    <div class="step">Webhook<small>issue.created を検知</small></div><div class="arrow">→</div>
+    <div class="step">拡張サービス<small>Model Derivative で要素プロパティ取得</small></div><div class="arrow">→</div>
+    <div class="step">Issue のカスタムフィールド<small>階・位置・断面・設計かぶり等を書き戻し</small></div>
+  </div>
+  <div class="toolbar">
+    <button id="runAll">自動付与を実行（全件）</button>
+    <span class="note">付与前は Issue 側に要素情報がなく、モデルを開かないと「どこの・何の」指摘か分からない状態を再現しています。</span>
+  </div>
+</header>
+<main>
+  <div class="cards" id="cards"></div>
+  <div class="log" id="log"><h3>処理ログ</h3><div id="logBody"><span class="dim">「自動付与を実行」か、各 Issue の「この Issue に付与」を押してください。</span></div></div>
+</main>
+<footer>
+  データの出所：要素プロパティは Autodesk Platform Services の Data Management API → Model Derivative API（metadata / properties）で Snowdon Towers の実モデルから抽出（2026-11-15）。<br>
+  このサンプルは構造モデルなので「部屋」「系統」は含まれず、実データにある項目（階＝レベル、位置＝通り芯マーク／標高、断面、材質、設計かぶり）で構成しています。建築・設備モデルでは同じ仕組みで部屋・系統も対象にできます。<br>
+  注意：検証用ハブでは Issues API が有効でないため、Issue の起票・更新はデモ用データで再現しています。カスタムフィールドへの書き戻しは Issues API の PATCH を想定したモックです。
+</footer>
+<script>
+const ELEMENTS = {"ISSUE-001": {"issueRef": "ISSUE-001", "objectid": 441, "externalId": "e37453ab-55ac-464e-96ef-b2d748a679fc-000947c9", "revitId": "608201", "name": "W Shapes-Column [608201]", "category": "Structural Columns", "family": "W Shapes-Column", "typeName": "W14x109", "typeMark": null, "level": "L1_37_Med", "topLevel": "R2 TOS", "baseLevel": "L1_37_Med", "locationMark": "E-5", "usage": null, "material": "Steel", "section": "14.600 inches × 14.300 inches", "length": "61'-9 1/2\"", "thickness": null, "area": null, "volume": "13.724 CF", "elevTop": null, "elevBottom": null, "rebarCover": {}, "rawProperties": {"Constraints": {"Base Level": "L1_37_Med", "Base Offset": "0.000 ft-and-fractional-in", "Top Level": "R2 TOS", "Top Offset": "0.000 ft-and-fractional-in", "Column Style": "Vertical", "Moves With Grids": "Yes", "Column Location Mark": "E-5"}, "Dimensions": {"System Length": "61.792 ft-and-fractional-in", "Cut Length": "61.708 ft-and-fractional-in", "Volume": "13.724 CF", "Clear Web Height": "0.625 ft-and-fractional-in", "Flange Toe of Fillet": "0.000 ft-and-fractional-in", "Web Toe of Fillet": "0.000 ft-and-fractional-in", "Bolt Spacing": "0.229 ft-and-fractional-in", "Bolt Diameter": "0.000 ft-and-fractional-in"}, "Identity Data": {"Has Association": "No", "Type Name": "W14x109", "Cost": "0.000 ฿", "Section Name Key": "W14x109", "Code Name": "AISC 15.0"}, "IFC Parameters": {"Export to IFC": "By Type", "IfcGUID": "3ZT5EhLQn6JfRlijT8hpur", "Export Type to IFC": "Default", "Type IfcGUID": "0Zas40lvjEVunrJVAhu7Wl"}, "Phasing": {"Phase Created": "New Construction"}, "Structural": {"Weight": "0.000 lb", "Exact Weight": "0.000 lb", "Paint Area": "238.194 ft^2", "Section Shape": "I-shape Parallel Flange"}, "Materials and Finishes": {"Structural Material": "Steel"}, "Structural Analysis": {"Section Area": "32.000 in^2", "Perimeter": "3.860 ft²/ft", "Nominal Weight": "109.000 lb/ft", "Moment of Inertia strong axis": "1240.000 in⁴", "Moment of Inertia weak axis": "447.000 in⁴", "Elastic Modulus strong axis": "173.000 in^3", "Elastic Modulus weak axis": "61.200 in^3", "Plastic Modulus strong axis": "192.000 in^3", "Plastic Modulus weak axis": "92.700 in^3", "Torsional Moment of Inertia": "7.120 in⁴", "Torsional Modulus": "0.000 in^3", "Warping Constant": "20200.000 in⁶", "Shear Area strong axis": "0.000 in^2", "Shear Area weak axis": "0.000 in^2", "Principal Axes Angle": "0.000 °"}, "Structural Section Geometry": {"Width": "14.600 inches", "Height": "14.300 inches", "Flange Thickness": "0.860 inches", "Web Thickness": "0.525 inches", "Web Fillet": "0.600 inches", "Centroid Horizontal": "7.300 inches", "Centroid Vertical": "7.150 inches"}}}, "ISSUE-002": {"issueRef": "ISSUE-002", "objectid": 5752, "externalId": "e37453ab-55ac-464e-96ef-b2d748a679fc-00094882", "revitId": "608386", "name": "W Shapes [608386]", "category": "Structural Framing", "family": "W Shapes", "typeName": "W18x55", "typeMark": null, "level": "L2 TOS", "topLevel": null, "baseLevel": null, "locationMark": null, "usage": "Girder", "material": "Steel", "section": "7.530 inches × 18.100 inches", "length": "17'-3\"", "thickness": null, "area": null, "volume": "1.877 CF", "elevTop": "7'-4 1/2\"", "elevBottom": "5'-10 3/8\"", "rebarCover": {}, "rawProperties": {"Constraints": {"Reference Level": "L2 TOS", "Work Plane": "Level : L2 TOS", "Start Level Offset": "0.000 ft-and-fractional-in", "End Level Offset": "0.000 ft-and-fractional-in", "Orientation": "Normal", "Cross-Section Rotation": "0.000 °"}, "Dimensions": {"System Length": "17.333 ft-and-fractional-in", "Cut Length": "16.417 ft-and-fractional-in", "Volume": "1.877 CF", "Elevation at Top": "7.375 ft-and-fractional-in", "Elevation at Bottom": "5.867 ft-and-fractional-in", "Clear Web Height": "0.844 ft-and-fractional-in", "Flange Toe of Fillet": "0.000 ft-and-fractional-in", "Web Toe of Fillet": "0.000 ft-and-fractional-in", "Bolt Spacing": "0.292 ft-and-fractional-in", "Bolt Diameter": "0.000 ft-and-fractional-in"}, "Identity Data": {"Has Association": "No", "Type Name": "W18x55", "Cost": "0.000 ฿", "Section Name Key": "W12X26", "Code Name": "AISC 15.0"}, "IFC Parameters": {"Export to IFC": "By Type", "IfcGUID": "3ZT5EhLQn6JfRlijT8hp5_", "Export Type to IFC": "Default", "Type IfcGUID": "1_y_hNQfD4N8RbeJZCV0vP"}, "Phasing": {"Phase Created": "New Construction"}, "Structural": {"Stick Symbol Location": "Center of Geometry", "Structural Usage": "Girder", "Weight": "0.000 lb", "Exact Weight": "0.000 lb", "Paint Area": "856.267 ft^2", "Start Attachment Type": "End Elevation", "End Attachment Type": "End Elevation", "Section Shape": "I-shape Parallel Flange"}, "Geometric Position": {"Start Extension": "0.000 ft-and-fractional-in", "End Extension": "0.000 ft-and-fractional-in", "Start Join Cutback": "0.042 ft-and-fractional-in", "End Join Cutback": "0.042 ft-and-fractional-in", "yz Justification": "Uniform", "y Justification": "Origin", "y Offset Value": "0.000 ft-and-fractional-in", "z Justification": "Top", "z Offset Value": "-0.208 ft-and-fractional-in"}, "Materials and Finishes": {"Structural Material": "Steel"}, "Structural Analysis": {"Section Area": "16.200 in^2", "Perimeter": "49.400 ft²/ft", "Nominal Weight": "550.000 lb/ft", "Moment of Inertia strong axis": "204.000 in⁴", "Moment of Inertia weak axis": "17.300 in⁴", "Elastic Modulus strong axis": "33.400 in^3", "Elastic Modulus weak axis": "5.340 in^3", "Plastic Modulus strong axis": "37.200 in^3", "Plastic Modulus weak axis": "8.170 in^3", "Torsional Moment of Inertia": "0.300 in⁴", "Torsional Modulus": "0.000 in^3", "Warping Constant": "607.000 in⁶", "Shear Area strong axis": "0.000 in^2", "Shear Area weak axis": "0.000 in^2", "Principal Axes Angle": "0.000 °"}, "Structural Section Geometry": {"Width": "7.530 inches", "Height": "18.100 inches", "Flange Thickness": "0.630 inches", "Web Thickness": "0.390 inches", "Web Fillet": "0.688 inches", "Centroid Horizontal": "3.765 inches", "Centroid Vertical": "9.050 inches"}}}, "ISSUE-003": {"issueRef": "ISSUE-003", "objectid": 603, "externalId": "f91478b8-6352-4c8c-b922-df750a8f322d-000bf76c", "revitId": "784236", "name": "SFD_Round [784236]", "category": "Structural Foundations", "family": "SFD_Round", "typeName": "24x24x25'", "typeMark": "DP24\"-12'", "level": "Top of Footing", "topLevel": null, "baseLevel": null, "locationMark": null, "usage": null, "material": "Concrete, Cast-in-Place gray", "section": null, "length": "2'-0\"", "thickness": "25'-0\"", "area": null, "volume": null, "elevTop": "-19'-0\"", "elevBottom": "-44'-0\"", "rebarCover": {"Bottom Face": "Interior (framing, columns) <0' - 1 1/2\">", "Other Faces": "Interior (framing, columns) <0' - 1 1/2\">"}, "rawProperties": {"Constraints": {"Level": "Top of Footing", "Host": "['Level : Top of Footing', 'Level : Top of Footing']", "Height Offset From Level": "0.000 ft-and-fractional-in", "Moves With Grids": "Yes", "Chamfer Round": "No", "Chamfer Rectangular": "No", "Top Insertion": "Yes"}, "Dimensions": {"Elevation at Top": "-19.000 ft-and-fractional-in", "Elevation at Bottom": "-44.000 ft-and-fractional-in", "Chamfer Size": "0.167 ft-and-fractional-in", "Foundation Offset": "1.500 ft-and-fractional-in", "Length": "2.000 ft-and-fractional-in", "Width": "2.000 ft-and-fractional-in", "Foundation Thickness": "25.000 ft-and-fractional-in"}, "Identity Data": {"Has Association": "No", "Type Name": "24x24x25'", "Type Comments": "F22", "Cost": "0.000 ฿", "Type Mark": "DP24\"-12'"}, "IFC Parameters": {"Export to IFC": "By Type", "IfcGUID": "3v57YuOr9CZBaYttKAXCL1", "Export Type to IFC": "Default", "Type IfcGUID": "2MLqRu3Wn7NfqXawhVfEyW"}, "Phasing": {"Phase Created": "New Construction"}, "Structural": {"Rebar Cover - Bottom Face": "Interior (framing, columns) <0' - 1 1/2\">", "Rebar Cover - Other Faces": "Interior (framing, columns) <0' - 1 1/2\">"}, "Other": {"Chamfer Size actual": "0.169 ft-and-fractional-in", "Chamfer adjustment": "-0.003 ft-and-fractional-in", "Lr": "1.000 ft-and-fractional-in", "Wr": "1.000 ft-and-fractional-in", "Top Offset negative": "1.500 ft-and-fractional-in", "Top Offset positive": "0.000 ft-and-fractional-in"}, "Materials and Finishes": {"Structural Material": "Concrete, Cast-in-Place gray"}}}, "ISSUE-004": {"issueRef": "ISSUE-004", "objectid": 496, "externalId": "9bb7de5c-5395-4e8d-83ae-c451a0c42cf3-000a62ed", "revitId": "680685", "name": "Foundation Slab [680685]", "category": "Structural Foundations", "family": "Foundation Slab", "typeName": "FNDN-36", "typeMark": null, "level": "Elevator Pit", "topLevel": null, "baseLevel": null, "locationMark": null, "usage": null, "material": "Concrete, Cast-in-Place gray", "section": null, "length": "13'-9\"", "thickness": "3'-0\"", "area": "201.667 ft^2", "volume": "605.000 CF", "elevTop": "-22'-11\"", "elevBottom": "-25'-11\"", "rebarCover": {"Top Face": "Interior (slabs, walls, joists) - #3 to #11 <0' - 0 3/4\">", "Bottom Face": "Cast against earth <0' - 3\">", "Other Faces": "Exterior - #3 to #5 <0' - 1 1/2\">"}, "rawProperties": {"Constraints": {"Level": "Elevator Pit", "Height Offset From Level": "0.000 ft-and-fractional-in", "Related to Mass": "No"}, "Structural": {"Structural": "Yes", "Rebar Cover - Top Face": "Interior (slabs, walls, joists) - #3 to #11 <0' - 0 3/4\">", "Rebar Cover - Bottom Face": "Cast against earth <0' - 3\">", "Rebar Cover - Other Faces": "Exterior - #3 to #5 <0' - 1 1/2\">"}, "Identity Data": {"Has Association": "No", "Type Name": "FNDN-36", "Cost": "0.000 ฿"}, "IFC Parameters": {"Export to IFC": "By Type", "IfcGUID": "2RjzvSKvLEZOEkn56WpauU", "Export Type to IFC": "Default", "Type IfcGUID": "0B2YGPanTBc9mM6oEg4iez"}, "Phasing": {"Phase Created": "New Construction"}, "Dimensions": {"Slope": "0.000 °", "Perimeter": "56.833 ft-and-fractional-in", "Area": "201.667 ft^2", "Volume": "605.000 CF", "Elevation at Top": "-22.917 ft-and-fractional-in", "Elevation at Bottom": "-25.917 ft-and-fractional-in", "Width": "14.667 ft-and-fractional-in", "Length": "13.750 ft-and-fractional-in", "Thickness": "3.000 ft-and-fractional-in"}, "Construction": {"Default Thickness": "3.000 ft-and-fractional-in"}, "Materials and Finishes": {"Structural Material": "Concrete, Cast-in-Place gray"}, "Graphics": {"Coarse Scale Fill Color": "0"}, "Analytical Properties": {"Thermal Transmittance (U)": "0.201 BTU/(h·ft²·°F)", "Thermal Resistance (R)": "4.964 (h·ft²·°F)/BTU", "Thermal Mass": "67.595 BTU/(ft²·°F)", "Absorptance": "0.700", "Roughness": "3"}}}, "ISSUE-005": {"issueRef": "ISSUE-005", "objectid": 5697, "externalId": "e37453ab-55ac-464e-96ef-b2d748a679fc-00094299", "revitId": "606873", "name": "Concrete-Rectangular Beam [606873]", "category": "Structural Framing", "family": "Concrete-Rectangular Beam", "typeName": "CB24x24", "typeMark": null, "level": "L1_35_Low", "topLevel": null, "baseLevel": null, "locationMark": null, "usage": "Girder", "material": "Concrete, Cast-in-Place gray", "section": "2'-0\" × 2'-0\"", "length": "9'-4 1/2\"", "thickness": null, "area": null, "volume": "18.278 CF", "elevTop": "-5'-11\"", "elevBottom": "-7'-11\"", "rebarCover": {"Bottom Face": "Interior (framing, columns) <0' - 1 1/2\">", "Other Faces": "Interior (framing, columns) <0' - 1 1/2\">"}, "rawProperties": {"Constraints": {"Reference Level": "L1_35_Low", "Work Plane": "Level : L1_35_Low", "Start Level Offset": "0.000 ft-and-fractional-in", "End Level Offset": "0.000 ft-and-fractional-in", "Orientation": "Normal", "Cross-Section Rotation": "0.000 °"}, "Dimensions": {"System Length": "9.375 ft-and-fractional-in", "Cut Length": "7.833 ft-and-fractional-in", "Volume": "18.278 CF", "Elevation at Top": "-5.917 ft-and-fractional-in", "Elevation at Bottom": "-7.917 ft-and-fractional-in", "b": "2.000 ft-and-fractional-in", "h": "2.000 ft-and-fractional-in"}, "Identity Data": {"Has Association": "No", "Type Name": "CB24x24", "Cost": "0.000 ฿"}, "IFC Parameters": {"Export to IFC": "By Type", "IfcGUID": "3ZT5EhLQn6JfRlijT8hpjb", "Export Type to IFC": "Default", "Type IfcGUID": "13xWBrKJD88gLLobxhZBc3"}, "Phasing": {"Phase Created": "New Construction"}, "Structural": {"Structural Usage": "Girder", "End Attachment Type": "End Elevation", "Rebar Cover - Bottom Face": "Interior (framing, columns) <0' - 1 1/2\">", "Rebar Cover - Other Faces": "Interior (framing, columns) <0' - 1 1/2\">", "Section Shape": "Not Defined"}, "Geometric Position": {"yz Justification": "Uniform", "y Justification": "Origin", "y Offset Value": "0.000 ft-and-fractional-in", "z Justification": "Top", "z Offset Value": "0.000 ft-and-fractional-in"}, "Materials and Finishes": {"Structural Material": "Concrete, Cast-in-Place gray"}}}, "ISSUE-006": {"issueRef": "ISSUE-006", "objectid": 477, "externalId": "e86e0fb0-aaef-4c8d-af36-9f1e0c4f7962-00097c98", "revitId": "621720", "name": "Floor [621720]", "category": "Floors", "family": "Floor", "typeName": "NW Concrete on Metal Deck", "typeMark": null, "level": "M1", "topLevel": null, "baseLevel": null, "locationMark": null, "usage": null, "material": "Concrete, Cast-in-Place gray", "section": null, "length": null, "thickness": "0'-6\"", "area": "899.260 ft^2", "volume": "449.630 CF", "elevTop": "5'-6\"", "elevBottom": "5'-0\"", "rebarCover": {"Top Face": "Interior (slabs, walls, joists) - #3 to #11 <0' - 0 3/4\">", "Bottom Face": "Interior (slabs, walls, joists) - #3 to #11 <0' - 0 3/4\">", "Other Faces": "Interior (slabs, walls, joists) - #3 to #11 <0' - 0 3/4\">"}, "rawProperties": {"Constraints": {"Level": "M1", "Height Offset From Level": "0.000 ft-and-fractional-in", "Room Bounding": "Yes", "Related to Mass": "No"}, "Structural": {"Structural": "Yes", "Rebar Cover - Top Face": "Interior (slabs, walls, joists) - #3 to #11 <0' - 0 3/4\">", "Rebar Cover - Bottom Face": "Interior (slabs, walls, joists) - #3 to #11 <0' - 0 3/4\">", "Rebar Cover - Other Faces": "Interior (slabs, walls, joists) - #3 to #11 <0' - 0 3/4\">"}, "Identity Data": {"Has Association": "No", "Type Name": "NW Concrete on Metal Deck", "Description": "2VLI", "Cost": "0.000 ฿"}, "IFC Parameters": {"Export to IFC": "By Type", "IfcGUID": "3eRW_mgkzCZQysdnuCHWNw", "Export Type to IFC": "Default", "Type IfcGUID": "2POp2UXXLDvxyy2S7dJe73"}, "Phasing": {"Phase Created": "New Construction"}, "Dimensions": {"Slope": "0.000 °", "Perimeter": "149.083 ft-and-fractional-in", "Area": "899.260 ft^2", "Volume": "449.630 CF", "Elevation at Top": "5.500 ft-and-fractional-in", "Elevation at Bottom": "5.000 ft-and-fractional-in", "Thickness": "0.500 ft-and-fractional-in"}, "Construction": {"Default Thickness": "0.500 ft-and-fractional-in", "Function": "Interior"}, "Graphics": {"Coarse Scale Fill Color": "0"}, "Materials and Finishes": {"Structural Material": "Concrete, Cast-in-Place gray"}, "Analytical Properties": {"Thermal Transmittance (U)": "1.209 BTU/(h·ft²·°F)", "Thermal Resistance (R)": "0.827 (h·ft²·°F)/BTU", "Thermal Mass": "11.266 BTU/(ft²·°F)", "Absorptance": "0.700", "Roughness": "3"}}}};
+const ISSUES = [{"id": "ISSUE-001", "title": "柱脚ベースプレート アンカーボルトの位置ずれ", "status": "Open", "statusLabel": "未対応", "assignee": "鉄骨工事業者", "due": "2026-11-21", "body": "建方検査で柱脚アンカー位置にずれの疑い。通り芯との照合と、是正方法の報告を求める。"}, {"id": "ISSUE-002", "title": "大梁端部 ハイテンションボルトの締め忘れ", "status": "Open", "statusLabel": "未対応", "assignee": "鉄骨工事業者", "due": "2026-11-20", "body": "フレーム巡視で発見。一次締め状態のままの箇所あり。本締めとトルク確認、マーキングまで実施のこと。"}, {"id": "ISSUE-003", "title": "杭頭天端の高さ相違", "status": "In Review", "statusLabel": "確認中", "assignee": "基礎工事業者", "due": "2026-11-19", "body": "杭頭処理後の天端レベルが設計と相違している疑い。実測値と照合結果の報告を求める。"}, {"id": "ISSUE-004", "title": "基礎スラブ下面 かぶり不足の疑い", "status": "Open", "statusLabel": "未対応", "assignee": "鉄筋工事業者", "due": "2026-11-22", "body": "配筋検査で下面かぶりに不足の疑い。スペーサー配置を是正し、再確認を受けること。"}, {"id": "ISSUE-005", "title": "地中梁 かぶり・主筋位置の確認依頼", "status": "Pending", "statusLabel": "保留", "assignee": "鉄筋工事業者", "due": "2026-11-23", "body": "打設前にかぶりと主筋位置の再確認を行うこと。設計値との照合結果を添付のこと。"}, {"id": "ISSUE-006", "title": "スラブ厚 計測値の相違", "status": "Open", "statusLabel": "未対応", "assignee": "型枠工事業者", "due": "2026-11-24", "body": "レベル計測でスラブ厚に相違の疑い。設計厚と実測の照合を行い、原因を報告すること。"}];
+const enriched = new Set();
+const logBody = document.getElementById('logBody');
+let logStarted = false;
+function log(html) {
+  if (!logStarted) { logBody.innerHTML = ''; logStarted = true; }
+  const div = document.createElement('div'); div.innerHTML = html; logBody.appendChild(div);
+  logBody.scrollTop = logBody.scrollHeight;
+}
+function fieldRows(e) {
+  const rows = [];
+  const pos = [];
+  if (e.locationMark) pos.push('通り芯 ' + e.locationMark);
+  if (e.elevTop) pos.push('天端 ' + e.elevTop);
+  if (e.elevBottom) pos.push('下端 ' + e.elevBottom);
+  const lvl = e.topLevel ? (e.baseLevel + ' → ' + e.topLevel) : e.level;
+  rows.push(['階（レベル）', lvl]);
+  if (pos.length) rows.push(['位置', pos.join(' ／ ')]);
+  rows.push(['カテゴリ', e.category]);
+  rows.push(['タイプ', e.typeName + (e.typeMark ? '（Type Mark: ' + e.typeMark + '）' : '')]);
+  if (e.usage) rows.push(['構造用途', e.usage]);
+  if (e.material) rows.push(['材質', e.material]);
+  if (e.section) rows.push(['断面', e.section]);
+  const dims = [];
+  if (e.length) dims.push('長さ ' + e.length);
+  if (e.thickness) dims.push('厚さ ' + e.thickness);
+  if (e.area) dims.push('面積 ' + e.area);
+  if (e.volume) dims.push('体積 ' + e.volume);
+  if (dims.length) rows.push(['寸法・数量', dims.join(' ／ ')]);
+  for (const [face, val] of Object.entries(e.rebarCover || {})) rows.push(['設計かぶり（' + face + '）', val]);
+  return rows;
+}
+function render() {
+  const wrap = document.getElementById('cards');
+  wrap.innerHTML = '';
+  for (const iss of ISSUES) {
+    const e = ELEMENTS[iss.id];
+    const done = enriched.has(iss.id);
+    const card = document.createElement('div'); card.className = 'card'; card.id = 'card-' + iss.id;
+    const chipCls = iss.status === 'Open' ? 'open' : (iss.status === 'In Review' ? 'review' : 'pending');
+    let enrichHtml;
+    if (done) {
+      const rows = fieldRows(e).map(([k, v]) => '<tr><th>' + k + '</th><td>' + v + '</td></tr>').join('');
+      enrichHtml = '<div class="enrich done"><h3>カスタムフィールド（自動付与済み）</h3><table>' + rows + '</table></div>';
+    } else {
+      enrichHtml = '<div class="enrich"><h3>カスタムフィールド（未付与）</h3><div class="empty">要素情報はまだ付いていません。モデルを開いて要素を探す必要があります。</div></div>';
+    }
+    card.innerHTML =
+      '<h2>' + iss.id + '：' + iss.title + '</h2>' +
+      '<div class="meta"><span class="chip ' + chipCls + '">' + iss.statusLabel + '（' + iss.status + '）</span><span>担当：' + iss.assignee + '</span><span>期日：' + iss.due + '</span></div>' +
+      '<div class="body">' + iss.body + '</div>' +
+      '<div class="pin">📌 ピン先要素：<b>' + e.name + '</b>（' + e.category + '）<br><code>externalId: ' + e.externalId + '</code></div>' +
+      enrichHtml +
+      '<div style="margin-top:10px; display:flex; gap:8px;">' +
+        '<button class="ghost" data-enrich="' + iss.id + '"' + (done ? ' disabled' : '') + '>この Issue に付与</button>' +
+        '<button class="ghost" data-raw="' + iss.id + '">生プロパティを見る</button>' +
+      '</div>' +
+      '<div class="raw"><pre id="raw-' + iss.id + '">' + JSON.stringify(e.rawProperties, null, 1).replace(/</g, '&lt;') + '</pre></div>';
+    wrap.appendChild(card);
+  }
+  wrap.querySelectorAll('[data-enrich]').forEach(b => b.addEventListener('click', () => enrichOne(b.dataset.enrich, true)));
+  wrap.querySelectorAll('[data-raw]').forEach(b => b.addEventListener('click', () => {
+    const pre = document.getElementById('raw-' + b.dataset.raw);
+    pre.style.display = pre.style.display === 'block' ? 'none' : 'block';
+  }));
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function enrichOne(id, scroll) {
+  if (enriched.has(id)) return;
+  const e = ELEMENTS[id];
+  log('<span class="dim">[' + id + ']</span> Webhook 受信：issue の要素 ID を取得');
+  await sleep(260);
+  log('<span class="dim">[' + id + ']</span> Model Derivative：objectid ' + e.objectid + ' のプロパティを取得');
+  await sleep(260);
+  enriched.add(id); render();
+  const card = document.getElementById('card-' + id);
+  const panel = card.querySelector('.enrich');
+  if (panel) panel.classList.add('flash');
+  if (scroll) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  log('<span class="dim">[' + id + ']</span> Issues API：カスタムフィールドへ書き戻し <span class="ok">完了</span>');
+}
+document.getElementById('runAll').addEventListener('click', async (ev) => {
+  ev.target.disabled = true;
+  for (const iss of ISSUES) { await enrichOne(iss.id, false); await sleep(120); }
+  log('<span class="ok">全件の自動付与が完了しました。</span>');
+});
+render();
+</script>
+</body>
+</html>
