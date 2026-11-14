@@ -1,4 +1,4 @@
-// extract-subsets.mjs — Issue ごとの部分ジオメトリ（対象＋周辺）を SVF から切り出して GLB 化する
+// extract-subsets.mjs — Issue ごとの「コンテキストGLB」（対象＋周辺候補）を SVF から切り出す
 //
 // 前提:
 //   - ../.env に APS_CLIENT_ID / APS_CLIENT_SECRET（sample-a と同じ）
@@ -8,8 +8,9 @@
 //   既定値は Snowdon Towers 構造モデル（Structure Only ビュー）
 //
 // 処理: ①プロパティDB(model.sdb)をダウンロードし externalId -> 変換側 dbId の対応表を作る
-//       ②フラグメントのバウンディングボックスから「周辺」要素（拡張bboxに交差・近い順・最大60件）を選ぶ
-//       ③svf-utils の glTF 変換（dbId フィルタ）で対象／周辺を別々に書き出し GLB 化する
+//       ②フラグメントのバウンディングボックスから、対象表面からの距離が近い順に周辺候補を選ぶ（上限10m・最大200件）
+//       ③svf-utils の glTF 変換（dbId フィルタ）で対象＋候補を1ファイルに書き出し GLB 化する
+//         GLB 内では要素ごとにノードが分かれ、ノード名が変換側 dbId になる（表示側で距離と突き合わせて出し分ける）
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -30,6 +31,7 @@ const URN = process.argv[2] ?? 'dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLlpSRjFpamFy
 const GUID = process.argv[3] ?? '0caacd2f-a9c4-7da9-8b99-d5762178b1de';
 const elements = JSON.parse(fs.readFileSync(path.join(appRoot, 'elements.json'), 'utf8'));
 const BASE = 'https://developer.api.autodesk.com';
+const FT2M = 0.3048, MAX_DIST_FT = 10 / FT2M, CAP = 200;
 const tokRes = await fetch(BASE + '/authentication/v2/token', {
   method: 'POST',
   headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: 'Basic ' + Buffer.from(env.APS_CLIENT_ID + ':' + env.APS_CLIENT_SECRET).toString('base64') },
@@ -48,7 +50,7 @@ const idmap = new Map();
 for (const row of db.prepare('SELECT id, external_id FROM _objects_id').all()) idmap.set(row.external_id, row.id);
 db.close();
 
-// 2) フラグメントから dbId -> バウンディングボックス
+// 2) フラグメントから dbId -> バウンディングボックス、対象からの距離で候補を選ぶ
 const auth = new TwoLeggedAuthenticationProvider(env.APS_CLIENT_ID, env.APS_CLIENT_SECRET);
 const reader = await SVFReader.FromDerivativeService(URN, GUID, auth);
 const bbox = new Map();
@@ -58,45 +60,40 @@ for await (const frag of reader.enumerateFragments()) {
   if (!cur) bbox.set(frag.dbID, [...frag.bbox]);
   else for (let i = 0; i < 3; i++) { cur[i] = Math.min(cur[i], frag.bbox[i]); cur[i + 3] = Math.max(cur[i + 3], frag.bbox[i + 3]); }
 }
-function distToBox(b, t) {
-  const d = [0, 1, 2].map(i => Math.max(t[i] - b[i + 3], b[i] - t[i + 3], 0));
-  return Math.hypot(...d);
-}
-function neighborsOf(targetId) {
-  const t = bbox.get(targetId);
-  const exp = [t[0] - 10, t[1] - 10, t[2] - 6, t[3] + 10, t[4] + 10, t[5] + 6];
-  const cand = [];
-  for (const [id, b] of bbox) {
-    if (id === targetId) continue;
-    if (b[0] > exp[3] || b[3] < exp[0] || b[1] > exp[4] || b[4] < exp[1] || b[2] > exp[5] || b[5] < exp[2]) continue;
-    cand.push([distToBox(b, t), id]);
-  }
-  cand.sort((a, b) => a[0] - b[0]);
-  return cand.slice(0, 60).map(c => c[1]);
-}
+function distFt(b, t) { return Math.hypot(...[0, 1, 2].map(i => Math.max(t[i] - b[i + 3], b[i] - t[i + 3], 0))); }
 
-// 3) シーンを読んで Issue ごとに書き出す
+// 3) シーンを読んで Issue ごとにコンテキストGLBを書き出す
 const scene = await reader.read();
 const io = new NodeIO();
 const result = {};
 for (const [iid, e] of Object.entries(elements)) {
   const targetId = idmap.get(e.externalId);
   if (targetId === undefined) { console.log(iid, 'skip: externalId not in sdb'); continue; }
-  const neigh = neighborsOf(targetId);
-  result[iid] = { targetDbId: targetId, neighborDbIds: neigh };
-  for (const [label, ids] of [['target', [targetId]], ['neighbors', neigh]]) {
-    const set = new Set(ids);
-    const writer = new GLTFWriter({ filter: (dbid) => set.has(dbid), ignoreLineGeometry: true, ignorePointGeometry: true });
-    const tmp = path.join(here, `tmp-${iid}-${label}`);
-    await writer.write(scene, tmp);
-    const doc = await io.read(path.join(tmp, 'output.gltf'));
-    const glbPath = path.join(OUT, `${iid}-${label}.glb`);
-    fs.writeFileSync(glbPath, await io.writeBinary(doc));
-    result[iid][label + 'Glb'] = `assets/subsets/${iid}-${label}.glb`;
-    result[iid][label + 'Bytes'] = fs.statSync(glbPath).size;
-    fs.rmSync(tmp, { recursive: true, force: true });
-    console.log(iid, label, ids.length, 'elements ->', result[iid][label + 'Bytes'], 'bytes');
+  const t = bbox.get(targetId);
+  const cand = [];
+  for (const [id, b] of bbox) {
+    if (id === targetId) continue;
+    const d = distFt(b, t);
+    if (d <= MAX_DIST_FT) cand.push({ dbId: id, distM: +(d * FT2M).toFixed(2) });
   }
+  cand.sort((a, b) => a.distM - b.distM);
+  const picked = cand.slice(0, CAP);
+  const set = new Set([targetId, ...picked.map(c => c.dbId)]);
+  const writer = new GLTFWriter({ filter: (dbid) => set.has(dbid), ignoreLineGeometry: true, ignorePointGeometry: true, maxBufferSize: 1 << 28 });
+  const tmp = path.join(here, `tmp-${iid}`);
+  await writer.write(scene, tmp);
+  const doc = await io.read(path.join(tmp, 'output.gltf'));
+  const glbPath = path.join(OUT, `${iid}-context.glb`);
+  fs.writeFileSync(glbPath, await io.writeBinary(doc));
+  fs.rmSync(tmp, { recursive: true, force: true });
+  result[iid] = {
+    targetDbId: targetId,
+    contextGlb: `assets/subsets/${iid}-context.glb`,
+    contextBytes: fs.statSync(glbPath).size,
+    candidates: picked,
+    maxDistM: picked.length ? picked[picked.length - 1].distM : 0,
+  };
+  console.log(iid, 'candidates:', picked.length, '-> glb', result[iid].contextBytes, 'bytes');
 }
 fs.writeFileSync(path.join(OUT, 'subsets.json'), JSON.stringify(result, null, 1));
 console.log('written', path.join(OUT, 'subsets.json'));
