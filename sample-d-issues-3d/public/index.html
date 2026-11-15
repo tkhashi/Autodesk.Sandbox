@@ -36,7 +36,7 @@ table.issues tbody tr.na { cursor: default; opacity: .75; }
 .pager button:disabled { opacity: .45; cursor: default; }
 .view { position: relative; height: 560px; background: #e9eff4; border-radius: 8px; overflow: hidden; }
 .viewbox { position: relative; }
-.subset-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 60px; z-index: 4; display: none; background: #eef2f5; border-radius: 8px 8px 0 0; overflow: hidden; }
+.subset-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 60px; z-index: 4; display: none; background: transparent; overflow: hidden; }
 .legend { margin-top: 8px; font-size: 12px; color: #41586c; }
 .chip { display: inline-flex; align-items: center; gap: 5px; margin: 0 10px 4px 0; white-space: nowrap; }
 .sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; border: 1px solid rgba(0,0,0,.18); }
@@ -421,7 +421,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 const wrap = document.getElementById('subsetOverlay');
 const statS = document.getElementById('statS');
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setClearColor(0x000000, 0); // 背景は透明：Viewer の上に形状だけを重ねる
 wrap.appendChild(renderer.domElement);
 function fitRenderer() {
   const w = wrap.clientWidth, h = wrap.clientHeight;
@@ -431,7 +432,7 @@ function fitRenderer() {
   }
 }
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xeef2f5);
+
 const camera = new THREE.PerspectiveCamera(45, wrap.clientWidth / wrap.clientHeight, 0.1, 5000);
 const controls = new OrbitControls(camera, renderer.domElement);
 scene.add(new THREE.AmbientLight(0xffffff, 1.6));
