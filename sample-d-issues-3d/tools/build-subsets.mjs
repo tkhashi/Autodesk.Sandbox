@@ -19,6 +19,29 @@ const models = JSON.parse(fs.readFileSync(path.join(APP, 'data/models.json'), 'u
 for (const m of models) {
   m.ext2dbid = JSON.parse(fs.readFileSync(path.join(APP, 'data', m.key, 'ext2dbid.json'), 'utf8'));
   m.bboxIndex = JSON.parse(fs.readFileSync(path.join(APP, 'data', m.key, 'bbox-index.json'), 'utf8'));
+  m.categoryIndex = JSON.parse(fs.readFileSync(path.join(APP, 'data', m.key, 'category-index.json'), 'utf8'));
+}
+// 部材の種別（Revit カテゴリ）ごとの色分け。対象要素は常に橙。
+const CATS = [
+  [/Structural Columns/, 'columns', '構造柱', [0.31, 0.47, 0.65]],
+  [/Structural Framing/, 'framing', '構造梁', [0.35, 0.63, 0.31]],
+  [/Structural Foundations/, 'foundations', '基礎', [0.42, 0.36, 0.45]],
+  [/Structural Rebar/, 'rebar', '鉄筋', [0.64, 0.40, 0.41]],
+  [/Curtain Panels/, 'curtain-panels', 'カーテンパネル', [0.46, 0.72, 0.70]],
+  [/Curtain Wall Mullions/, 'mullions', '方立', [0.36, 0.56, 0.54]],
+  [/Walls/, 'walls', '壁', [0.73, 0.69, 0.67]],
+  [/Floors/, 'floors', '床・スラブ', [0.55, 0.55, 0.58]],
+  [/Roofs/, 'roofs', '屋根', [0.69, 0.48, 0.27]],
+  [/Windows/, 'windows', '窓', [0.64, 0.82, 1.0]],
+  [/Doors/, 'doors', '建具', [0.88, 0.34, 0.35]],
+  [/Ceilings/, 'ceilings', '天井', [0.84, 0.81, 0.68]],
+  [/Furniture/, 'furniture', '家具', [0.76, 0.61, 0.83]],
+  [/Stairs/, 'stairs', '階段', [0.89, 0.66, 0.34]],
+  [/Generic Models/, 'generic', '一般モデル', [0.61, 0.61, 0.61]],
+];
+function catOf(raw) {
+  for (const [re, key, label, color] of CATS) if (re.test(raw ?? '')) return { key, label, color };
+  return { key: 'other', label: 'その他', color: [0.66, 0.66, 0.66] };
 }
 const BASE = 'https://developer.api.autodesk.com';
 const basic = 'Basic ' + Buffer.from(env.APS_CLIENT_ID + ':' + env.APS_CLIENT_SECRET).toString('base64');
@@ -76,18 +99,27 @@ for (const m of models) {
       const doc = await io.read(gltfPath);
       await doc.transform(quantize());
       const targetMat = doc.createMaterial('target').setBaseColorFactor([1, 0.32, 0.05, 1]);
-      const ctxMat = doc.createMaterial('context').setBaseColorFactor([0.8, 0.83, 0.87, 1]);
+      const catMats = new Map();
+      const usedCats = new Map();
+      const matFor = (dbid) => {
+        const c = catOf(m.categoryIndex[String(dbid)]);
+        usedCats.set(c.key, c);
+        if (!catMats.has(c.key)) catMats.set(c.key, doc.createMaterial('cat:' + c.key).setBaseColorFactor([...c.color, 1]));
+        return catMats.get(c.key);
+      };
       for (const node of doc.getRoot().listNodes()) {
         const mesh = node.getMesh(); if (!mesh) continue;
         const mm = /^(\d+)/.exec(node.getName() ?? '');
-        const mat = mm && Number(mm[1]) === t.targetDbId ? targetMat : ctxMat;
+        const dbid = mm ? Number(mm[1]) : -1;
+        const mat = dbid === t.targetDbId ? targetMat : matFor(dbid);
         for (const prim of mesh.listPrimitives()) prim.setMaterial(mat);
       }
       await doc.transform(join());
       await doc.transform(draco());
       const bytes = await io.writeBinary(doc);
       fs.writeFileSync(path.join(outDir, t.issueId + '.glb'), bytes);
-      index[t.issueId] = { displayId: t.displayId, modelKey: m.key, bytes: bytes.length, elems: ids.length };
+      index[t.issueId] = { displayId: t.displayId, modelKey: m.key, bytes: bytes.length, elems: ids.length,
+        cats: [...usedCats.values()].map(c => ({ key: c.key, label: c.label, color: '#' + c.color.map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('') })) };
       console.log(`  #${t.displayId}: ${ids.length} elems -> ${(bytes.length / 1024).toFixed(0)}KB`);
     } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
   }

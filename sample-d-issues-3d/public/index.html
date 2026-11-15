@@ -29,6 +29,10 @@ table.issues tbody tr.na { cursor: default; opacity: .75; }
 .locator { position: absolute; top: 10px; right: 10px; z-index: 5; background: rgba(255,255,255,.93); border: 1px solid #c8d4de; border-radius: 8px; padding: 6px 8px 4px; display: none; }
 .locator .lt { font-size: 11px; font-weight: 700; color: #41586c; margin-bottom: 3px; }
 .locator canvas { display: block; }
+.subset-overlay { position: absolute; inset: 0; z-index: 4; display: none; background: #eef2f5; border-radius: 8px; overflow: hidden; }
+.legend { margin-top: 8px; font-size: 12px; color: #41586c; }
+.chip { display: inline-flex; align-items: center; gap: 5px; margin: 0 10px 4px 0; white-space: nowrap; }
+.sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; border: 1px solid rgba(0,0,0,.18); }
 .view .msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #68798a; font-size: 13px; text-align: center; padding: 12px; }
 .subsetview { position: relative; height: 380px; background: #eef2f5; border-radius: 8px; overflow: hidden; }
 .stat { margin-top: 10px; font-size: 12.5px; color: #33475c; line-height: 1.8; }
@@ -50,20 +54,16 @@ button.focus:hover { background: #e3f0fb; }
 <div class="selbar" id="selInfo">Issue を読み込んでいます…</div>
 
 <div class="panel">
-<h2>先行表示（軽量サブセット・three.js）</h2>
-<div class="desc">対象要素＋周辺（近い順に最大131要素）を事前に切り出して Draco 圧縮した GLB を読みます。対象は橙色、周辺は半透明。ドラッグで回転、ホイールで拡大できます。</div>
-<div class="subsetview" id="subsetWrap"></div>
-<div class="stat" id="statS">Issue を選択すると先行表示します。</div>
-</div>
-
-<div class="panel">
-<h2>本表示（APS Viewer・SVF 逐次配信） <button class="focus" id="btnFocus">対象にフォーカス</button><button class="focus" id="btnAll">全体を表示</button></h2>
-<div class="desc">モデルは Autodesk のクラウドから逐次配信で読み込まれます。フォーカス時は対象だけを消し込むのではなく、対象＋周辺（近い順に最大131要素）を残し、それ以外はゴースト（半透明）にして、全体の中での位置関係が分かるようにします。右上の平面図は全体での対象位置です。Issue のモデルが切り替わると Viewer も読み込み直します。</div>
+<h2>3D 表示（APS Viewer＋先行サブセット） <button class="focus" id="btnFocus">対象にフォーカス</button><button class="focus" id="btnAll">全体を表示</button></h2>
+<div class="desc">モデルは Autodesk のクラウドから逐次配信で読み込まれます。<b>読み込みが終わるまでの間は、Viewer の上に先行サブセット（対象＋周辺を切り出した軽量 GLB）を重ねて表示します</b>。周辺は部材の種別ごとに色分けされ、対象は橙色です。Viewer のフォーカス時は対象＋周辺を残し、それ以外はゴースト（半透明）にして位置関係が分かるようにします。右上の平面図は全体での対象位置です。</div>
 <div class="viewbox">
 <div class="view" id="viewerWrap"><div class="msg" id="viewerMsg">モデルを読み込んでいます…</div></div>
+<div class="subset-overlay" id="subsetOverlay"></div>
 <div class="locator" id="locatorBox"><div class="lt">全体での位置（平面図）</div><canvas id="locator" width="240" height="160"></canvas></div>
 </div>
 <div class="stat" id="statV">—</div>
+<div class="stat" id="statS">Issue を選択すると先行表示します。</div>
+<div class="legend" id="legend"></div>
 </div>
 
 <script src="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/viewer3D.min.js"></script>
@@ -83,6 +83,23 @@ function nameOf(e) { return /\[\d+\]\s*$/.test(e.name) ? e.name : `${e.name} [${
 function locOf(e) { return e?.['Column Location Mark'] ?? e?.['Mark'] ?? e?.['Type Mark'] ?? '—'; }
 function setStatV(t) { $('statV').innerHTML = t; }
 
+let SUBSET_INDEX = {};
+fetch('/subsets/index.json').then(r => r.json()).then(j => { SUBSET_INDEX = j; updateOverlay(); renderLegend(); }).catch(() => {});
+// 先行サブセットのオーバーレイは、選択中 Issue の Viewer 読み込みが終わるまで表示する
+function updateOverlay() {
+  const i = issue();
+  const has = !!(i && SUBSET_INDEX[i.id]);
+  const ready = !!(i && geoLoaded && viewerModelKey === i.modelKey);
+  $('subsetOverlay').style.display = has && !ready ? 'block' : 'none';
+}
+function renderLegend() {
+  const i = issue();
+  const meta = i && SUBSET_INDEX[i.id];
+  if (!meta) { $('legend').innerHTML = ''; return; }
+  const chip = (color, label) => `<span class="chip"><span class="sw" style="background:${color}"></span>${esc(label)}</span>`;
+  $('legend').innerHTML = chip('#ff520d', '対象要素') + (meta.cats ?? []).map(c => chip(c.color, c.label)).join('');
+}
+
 // 平面ロケーター：モデルの全要素の平面フットプリントを描き、対象を橙で示す
 const fpCache = {};
 async function drawLocator(i) {
@@ -100,8 +117,10 @@ async function drawLocator(i) {
   const ox = pad + (W - (maxx - minx) * s) / 2, oy = pad + (H - (maxy - miny) * s) / 2;
   const X = x => ox + (x - minx) * s, Y = y => cv.height - (oy + (y - miny) * s);
   ctx.clearRect(0, 0, cv.width, cv.height);
-  ctx.fillStyle = '#aebfd0';
+  ctx.fillStyle = '#c9d7e4';
   for (const r of fp.rects) ctx.fillRect(X(r[0]), Y(r[3]), Math.max(1, (r[2] - r[0]) * s), Math.max(1, (r[3] - r[1]) * s));
+  ctx.strokeStyle = '#7e97ad'; ctx.lineWidth = 1;
+  ctx.strokeRect(X(minx), Y(maxy), (maxx - minx) * s, (maxy - miny) * s);
   const b = i.targetBbox;
   ctx.fillStyle = '#f4511e';
   ctx.fillRect(X(b[0]) - 1, Y(b[4]) - 1, Math.max(3, (b[3] - b[0]) * s + 2), Math.max(3, (b[4] - b[1]) * s + 2));
@@ -143,6 +162,8 @@ function selectIssue(id) {
     ? `<b>#${i.displayId}：${esc(i.title)}</b> ／ 対象要素：${e ? `${esc(nameOf(e))}（${esc(e['Type Name'] ?? '')}） ／ 階：${esc(levelOf(e))} ／ 位置：${esc(locOf(e))}` : (i.pin ? '対象外モデルのピン（3D 対象外）' : 'ピンなし（3D 対象外）')}`
     : '—';
   document.dispatchEvent(new CustomEvent('issue-selected', { detail: i }));
+  renderLegend();
+  updateOverlay();
   drawLocator(i);
   if (i?.modelKey) ensureViewerModel(i.modelKey);
   applySelection();
@@ -203,6 +224,7 @@ function setupViewer(modelKey) {
   viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, () => {
     geoLoaded = true;
     applySelection();
+    updateOverlay(); // 読み込み完了：先行サブセットのオーバーレイを外して Viewer に引き継ぐ
     const i = issue();
     setStatV(`モデルの読み込みが完了しました。` + (i?.targetDbId && i.modelKey === viewerModelKey ? ` <b>#${i.displayId}</b> の対象要素を表示中（選択から ${((performance.now() - tSelect) / 1000).toFixed(1)} 秒）。` : ''));
   });
@@ -276,17 +298,25 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-const wrap = document.getElementById('subsetWrap');
+const wrap = document.getElementById('subsetOverlay');
 const statS = document.getElementById('statS');
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(wrap.clientWidth, wrap.clientHeight);
 wrap.appendChild(renderer.domElement);
+function fitRenderer() {
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  if (w > 0 && h > 0 && (renderer.domElement.width !== w || renderer.domElement.height !== h)) {
+    renderer.setSize(w, h);
+    camera.aspect = w / h; camera.updateProjectionMatrix();
+  }
+}
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xeef2f5);
 const camera = new THREE.PerspectiveCamera(45, wrap.clientWidth / wrap.clientHeight, 0.1, 5000);
 const controls = new OrbitControls(camera, renderer.domElement);
-scene.add(new THREE.AmbientLight(0xffffff, 1.1));
-const dl = new THREE.DirectionalLight(0xffffff, 1.8); dl.position.set(30, 50, 20); scene.add(dl);
+scene.add(new THREE.AmbientLight(0xffffff, 1.6));
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 0.8));
+const dl = new THREE.DirectionalLight(0xffffff, 2.0); dl.position.set(30, 50, 20); scene.add(dl);
+const dl2 = new THREE.DirectionalLight(0xffffff, 0.7); dl2.position.set(-25, 30, -30); scene.add(dl2);
 const draco = new DRACOLoader(); draco.setDecoderPath('./vendor/draco/');
 const loader = new GLTFLoader(); loader.setDRACOLoader(draco);
 const indexPromise = fetch('/subsets/index.json').then(r => r.json()).catch(() => ({}));
@@ -309,21 +339,32 @@ document.addEventListener('issue-selected', async (ev) => {
     const gltf = await loader.parseAsync(buf, '');
     if (my !== seq) return;
     gltf.scene.traverse(o => {
-      if (o.isMesh && o.material?.name === 'context') {
+      if (o.isMesh && o.material?.name === 'target') {
+        // 対象は周辺（半透明パス）に遮られても見えるよう、透明パス最後尾で深度テストなしに描く
         o.material = o.material.clone();
-        o.material.transparent = true; o.material.opacity = 0.45; o.material.depthWrite = false;
+        o.material.transparent = true;
+        o.material.opacity = 1;
+        o.material.depthTest = false;
+        o.material.depthWrite = false;
+        o.renderOrder = 999;
+      }
+      if (o.isMesh && o.material?.name?.startsWith('cat:')) {
+        o.material = o.material.clone();
+        o.material.color.multiplyScalar(1.18);
+        o.material.transparent = true; o.material.opacity = 0.9;
       }
     });
+    fitRenderer();
     current = gltf.scene;
     scene.add(current);
     current.updateWorldMatrix(true, true);
-    // フレーミングは対象メッシュ自身の bbox を中心にする（GLB は Y-up なので SVF 座標を直接使わない）
+    // フレーミングは対象メッシュを中心に、周辺が程よく入る距離にする
     let targetMesh = null;
     current.traverse(o => { if (o.isMesh && o.material?.name === 'target') targetMesh = o; });
     const box = new THREE.Box3().setFromObject(targetMesh ?? current);
     const c = box.getCenter(new THREE.Vector3());
     const diag = box.getSize(new THREE.Vector3()).length() || 3;
-    const dist = Math.max(diag * 1.75, 5);
+    const dist = Math.max(diag * 2.2, 7);
     camera.position.set(c.x + dist * 0.64, c.y + dist * 0.47, c.z + dist * 0.64);
     controls.target.copy(c);
     renderer.render(scene, camera);
