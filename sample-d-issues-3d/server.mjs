@@ -73,12 +73,19 @@ async function getModelVersion(m) {
 }
 
 // ---- Issue の要素情報付与（ピン先モデルに応じて索引を切り替える） ----
+const MAX_CONTEXT = 131;
+function distToBox(b, p) {
+  const dx = Math.max(b[0] - p[0], 0, p[0] - b[3]);
+  const dy = Math.max(b[1] - p[1], 0, p[1] - b[4]);
+  const dz = Math.max(b[2] - p[2], 0, p[2] - b[5]);
+  return Math.hypot(dx, dy, dz);
+}
 function enrich(issue) {
   const out = {
     id: issue.id, displayId: issue.displayId, title: issue.title, description: issue.description,
     status: issue.status, dueDate: issue.dueDate, assignedTo: issue.assignedTo, published: issue.published,
     createdAt: issue.createdAt, pin: null, element: null, targetDbId: null, targetBbox: null,
-    modelKey: null, modelName: null,
+    contextDbIds: null, modelKey: null, modelName: null,
   };
   const ld = (issue.linkedDocuments ?? [])[0];
   if (!ld) return out;
@@ -93,6 +100,14 @@ function enrich(issue) {
   out.targetDbId = dbId;
   out.element = m.propsIndex[d.externalId] ?? null;
   out.targetBbox = m.bboxIndex[String(dbId)] ?? null;
+  if (out.targetBbox) {
+    // 先行表示サブセットと同じ選び方で、対象＋周辺（近い順に最大131要素）を Viewer の表示範囲にも使う
+    const tb = out.targetBbox;
+    const c = [(tb[0] + tb[3]) / 2, (tb[1] + tb[4]) / 2, (tb[2] + tb[5]) / 2];
+    out.contextDbIds = Object.keys(m.bboxIndex).map(Number)
+      .map(id => ({ id, d: id === dbId ? -1 : distToBox(m.bboxIndex[String(id)], c) }))
+      .sort((a, b) => a.d - b.d).slice(0, MAX_CONTEXT).map(x => x.id);
+  }
   return out;
 }
 async function fetchIssues() {
@@ -119,6 +134,19 @@ const server = http.createServer(async (req, res) => {
       const ver = await getModelVersion(m);
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ key: m.key, name: m.name, short: m.short, lineage: m.lineage, version: ver.versionNumber, urn: m.derivativeUrn, guid: m.viewableGuid }));
+      return;
+    }
+    if (url.pathname === '/api/footprints') {
+      // 平面ロケーター用：全要素の平面フットプリント（SVF の x/y）と全体の外形
+      const m = models.find(x => x.key === url.searchParams.get('key')) ?? models[0];
+      const rects = [];
+      let minx = 1e9, miny = 1e9, maxx = -1e9, maxy = -1e9;
+      for (const b of Object.values(m.bboxIndex)) {
+        rects.push([+b[0].toFixed(1), +b[1].toFixed(1), +b[3].toFixed(1), +b[4].toFixed(1)]);
+        minx = Math.min(minx, b[0]); miny = Math.min(miny, b[1]); maxx = Math.max(maxx, b[3]); maxy = Math.max(maxy, b[4]);
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ key: m.key, bounds: [minx, miny, maxx, maxy], rects }));
       return;
     }
     if (url.pathname === '/api/issues') {
