@@ -256,7 +256,8 @@ function applySelection() {
 // モデル座標（Z-up）で斜め上から見る視点にする。ビューワブル既定の平面ビューを引き継がないため
 function setObliqueView(center, dist) {
   const V3 = Autodesk.Viewing.Private.THREE.Vector3;
-  const dir = new V3(1, 1, 0.55).normalize();
+  // モデル座標（Z-up、Front は -Y 側）で手前右上から。GLB 先行表示の視点とも一致させる
+  const dir = new V3(1, -1, 0.55).normalize();
   const pos = center.clone().add(dir.multiplyScalar(dist));
   viewer.navigation.setView(pos, center);
 }
@@ -303,6 +304,10 @@ function setupViewer(modelKey) {
     geoLoaded = true;
     applySelection();
     updateOverlay(); // 読み込み完了：先行サブセットを隠して Viewer に引き継ぐ
+    const idAtLoad = selected, keyAtLoad = viewerModelKey;
+    setTimeout(() => {
+      if (viewer && geoLoaded && selected === idAtLoad && viewerModelKey === keyAtLoad) applySelection();
+    }, 900);
     const i = issue();
     setStatV(`モデルの読み込みが完了しました。` + (i?.targetDbId && i.modelKey === viewerModelKey ? ` <b>#${i.displayId}</b> の対象要素を表示中（選択から ${((performance.now() - tSelect) / 1000).toFixed(1)} 秒）。` : ''));
   });
