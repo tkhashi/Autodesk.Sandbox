@@ -3,44 +3,37 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>指摘事項 拡張デモ②：実 Issue＋要素情報の自動付与＋キャッシュ方式の部分3D表示</title>
+<title>指摘事項 拡張デモ②：実 Issue＋要素情報の自動付与＋APS Viewer（SVF 逐次配信）</title>
 <link rel="stylesheet" href="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/style.min.css">
 <style>
-body { font-family: "Hiragino Sans", "Noto Sans JP", sans-serif; margin: 24px; color: #1c2733; background: #f4f6f8;}
-h1 { font-size: 20px; margin: 0 0 6px;}
-.sub { color: #5a6a78; font-size: 13px; margin-bottom: 14px; line-height: 1.7;}
-table.issues { width: 100%; border-collapse: collapse; background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(20,40,60,.08); font-size: 13px;}
-table.issues th { background: #22374a; color: #fff; text-align: left; padding: 9px 10px; font-weight: 600; white-space: nowrap;}
-table.issues td { padding: 9px 10px; border-top: 1px solid #e4eaef; vertical-align: top;}
-table.issues tbody tr { cursor: pointer;}
-table.issues tbody tr:hover { background: #f2f7fb;}
-table.issues tbody tr.sel { background: #e3f0fb; box-shadow: inset 3px 0 0 #2b7bbb;}
-table.issues tbody tr.na { cursor: default; opacity:.75;}
-.pill { display: inline-block; padding: 1px 8px; border-radius: 9px; font-size: 11px; font-weight: 700; white-space: nowrap;}
-.st-open { background: #fde3e3; color: #a02c2c;}.st-doing { background: #fdf0d5; color: #8a6d1a;}.st-wait { background: #dbeafe; color: #1d4ed8;}.st-done { background: #dcf2e3; color: #166534;}.st-draft { background: #e8eef4; color: #41586c;}
-.mono { font-variant-numeric: tabular-nums; white-space: nowrap;}
-.selbar { margin: 14px 0 4px; font-size: 13px;}
-.sliderrow { background: #fff; border-radius: 10px; padding: 12px 16px; box-shadow: 0 1px 3px rgba(20,40,60,.08); display: flex; align-items: center; gap: 14px; margin: 10px 0 16px;}
-.sliderrow label { font-weight: 700; font-size: 13px; white-space: nowrap;}
-.sliderrow input[type=range] { flex: 1;}
-.sliderrow.val { font-size: 13px; color: #33475c; white-space: nowrap;}
-.panels { display: grid; grid-template-columns: 1fr 1fr; gap: 16px;}
-.panel { background: #fff; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(20,40,60,.08);}
-.panel h2 { font-size: 15px; margin: 0 0 4px;}
-.panel.desc { font-size: 12px; color: #5a6a78; line-height: 1.6; margin-bottom: 8px;}
-.view { position: relative; height: 520px; background: #e9eff4; border-radius: 8px; overflow: hidden;}
-.view.msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #68798a; font-size: 13px; text-align: center; padding: 12px;}
-.stat { margin-top: 10px; font-size: 12.5px; color: #33475c; line-height: 1.8;}
-.stat b { color: #b3541e;}
-.compare { margin-top: 16px; background: #fff8ef; border: 1px solid #f0ddc2; border-radius: 10px; padding: 12px 16px; font-size: 13px; line-height: 1.8;}
-button.focus { font-size: 12px; padding: 3px 10px; border: 1px solid #b9c9d6; background: #f2f7fb; border-radius: 6px; cursor: pointer;}
-button.focus:hover { background: #e3f0fb;}
+body { font-family: "Hiragino Sans", "Noto Sans JP", sans-serif; margin: 24px; color: #1c2733; background: #f4f6f8; }
+h1 { font-size: 20px; margin: 0 0 6px; }
+.sub { color: #5a6a78; font-size: 13px; margin-bottom: 14px; line-height: 1.7; }
+table.issues { width: 100%; border-collapse: collapse; background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(20,40,60,.08); font-size: 13px; }
+table.issues th { background: #22374a; color: #fff; text-align: left; padding: 9px 10px; font-weight: 600; white-space: nowrap; }
+table.issues td { padding: 9px 10px; border-top: 1px solid #e4eaef; vertical-align: top; }
+table.issues tbody tr { cursor: pointer; }
+table.issues tbody tr:hover { background: #f2f7fb; }
+table.issues tbody tr.sel { background: #e3f0fb; box-shadow: inset 3px 0 0 #2b7bbb; }
+table.issues tbody tr.na { cursor: default; opacity: .75; }
+.pill { display: inline-block; padding: 1px 8px; border-radius: 9px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.st-open { background: #fde3e3; color: #a02c2c; } .st-doing { background: #fdf0d5; color: #8a6d1a; } .st-wait { background: #dbeafe; color: #1d4ed8; } .st-done { background: #dcf2e3; color: #166534; } .st-draft { background: #e8eef4; color: #41586c; }
+.mono { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.selbar { margin: 14px 0 10px; font-size: 13px; }
+.panel { background: #fff; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(20,40,60,.08); }
+.panel h2 { font-size: 15px; margin: 0 0 4px; }
+.panel .desc { font-size: 12px; color: #5a6a78; line-height: 1.6; margin-bottom: 8px; }
+.view { position: relative; height: 560px; background: #e9eff4; border-radius: 8px; overflow: hidden; }
+.view .msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #68798a; font-size: 13px; text-align: center; padding: 12px; }
+.stat { margin-top: 10px; font-size: 12.5px; color: #33475c; line-height: 1.8; }
+button.focus { font-size: 12px; padding: 3px 10px; border: 1px solid #b9c9d6; background: #f2f7fb; border-radius: 6px; cursor: pointer; margin-left: 8px; }
+button.focus:hover { background: #e3f0fb; }
 </style>
 </head>
 <body>
-<h1>指摘事項 拡張デモ②：実 Issue の取得 → 要素情報の自動付与 → 部分3D表示（キャッシュ方式）</h1>
+<h1>指摘事項 拡張デモ②：実 Issue の取得 → 要素情報の自動付与 → APS Viewer で表示（SVF 逐次配信）</h1>
 <div class="sub">対象モデル：<b>DACHsampleproject.rvt</b>（全 2,626 要素）／ Issue は <b>Forma の実 Issue を API で取得</b>し、ピン先の要素 ID からモデル側の情報（要素名・階・通り芯など）を自動で引いて表に付けています。<br>
-3D 表示はキャッシュ方式：モデルと変換済み GLB はモデルのバージョンをキーにサーバー側にキャッシュされ、バージョンが変わらなければ再ダウンロード・再変換しません。ブラウザ側にも GLB をキャッシュします。周辺の表示量は下のバー（％）で調整でき、0%＝ピンの要素のみ、100%＝モデル全要素。</div>
+3D 表示は APS Viewer 方式：変換データ（SVF）は Autodesk のクラウドに置かれ、Viewer がカメラに映る範囲から逐次配信で読み込みます。Issue を選ぶとカメラが対象要素へ向き、その箇所から見え始めます（分離表示＋色付け）。Issue の切り替えは再ダウンロードなしで即時です。</div>
 
 <table class="issues">
 <thead><tr><th>ID</th><th>タイトル</th><th>ステータス</th><th>期日</th><th>対象要素（自動付与）</th><th>階・位置（自動付与）</th><th>3D</th></tr></thead>
@@ -48,299 +41,132 @@ button.focus:hover { background: #e3f0fb;}
 </table>
 
 <div class="selbar" id="selInfo">Issue を読み込んでいます…</div>
-<div class="sliderrow">
-<label for="range">周辺の表示範囲</label>
-<input type="range" id="range" min="0" max="100" step="1" value="5">
-<span class="val" id="rangeLabel">—</span>
-</div>
 
-<div class="panels">
 <div class="panel">
-<h2>① APS Viewer 方式（モデル全体を配信して分離表示） <button class="focus" id="btnFocus">対象にフォーカス</button></h2>
-<div class="desc">変換データ（SVF）はクラウドから逐次配信。表示側で対象＋範囲内の要素だけを分離（isolate）し、対象要素は色付け（ハイライト）してカメラを寄せる（フォーカス）。バーを動かすと分離対象が付け替わる。</div>
-<div class="view" id="viewerWrap"><div class="msg" id="viewerMsg">Issue を選択するとモデルを読み込みます</div></div>
-<div class="stat" id="statA">—</div>
+<h2>APS Viewer（SVF 逐次配信） <button class="focus" id="btnFocus">対象にフォーカス</button><button class="focus" id="btnAll">全体を表示</button></h2>
+<div class="desc">モデルは開いた直後から読み込みが始まり、選択中の Issue の対象要素にカメラを向けた状態で表示します。対象は橙色に色付けされ、他は分離表示で隠れます。「全体を表示」で分離を解除できます。</div>
+<div class="view" id="viewerWrap"><div class="msg" id="viewerMsg">モデルを読み込んでいます…</div></div>
+<div class="stat" id="statV">—</div>
 </div>
-<div class="panel">
-<h2>③ 部分表示方式（キャッシュ済み GLB＋表示切替）</h2>
-<div class="desc">サーバーがキャッシュした GLB（モデル全要素）を受け取り、バーの範囲内だけを表示に切り替える。GLB はバージョンが変わらない限り再生成されず、ブラウザにもキャッシュされるため、2回目以降の表示は転送なしで即時。対象は橙色、周辺は半透明ゴースト。</div>
-<div class="view" id="threeWrap"><div class="msg" id="threeMsg">Issue を選択すると GLB を読み込みます</div></div>
-<div class="stat" id="statB">—</div>
-</div>
-</div>
-
-<div class="compare" id="compare">キャッシュの状態と表示速度の実測がここに出ます。</div>
 
 <script src="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/viewer3D.min.js"></script>
 <script>
-let DATA = null, selected = null, pct = 5;
+let DATA = null, selected = null;
+let viewer = null, rootLoaded = false, geoLoaded = false;
 const $ = id => document.getElementById(id);
-const fmtBytes = b => b >= 1048576? (b / 1048576).toFixed(2) + ' MB': Math.round(b / 1024) + ' KB';
-const fmtSec = ms => (ms / 1000).toFixed(1) + ' 秒';
-function esc(s) { return String(s?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));}
-function issue() { return DATA.issues.find(i => i.id === selected);}
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function issue() { return DATA?.issues.find(i => i.id === selected); }
 const STATUS = {
-draft: ['下書き', 'st-draft'], open: ['未対応', 'st-open'], pending: ['対応中', 'st-doing'],
-in_review: ['確認待ち', 'st-wait'], closed: ['完了', 'st-done'], void: ['無効', 'st-draft'],
+  draft: ['下書き', 'st-draft'], open: ['未対応', 'st-open'], pending: ['対応中', 'st-doing'],
+  in_review: ['確認待ち', 'st-wait'], closed: ['完了', 'st-done'], void: ['無効', 'st-draft'],
 };
-function levelOf(e) { return e?.['Level']?? e?.['Base Level']?? e?.['Reference Level']?? e?.['Host Level']?? '—';}
-function locOf(e) { return e?.['Column Location Mark']?? e?.['Mark']?? e?.['Type Mark']?? '—';}
-function shownCount() { const i = issue(); if (!i?.candidates) return 0; return pct === 0? 0: Math.max(1, Math.round(pct / 100 * i.candidates.length));}
-function includedIds() {
-const i = issue(); if (!i?.candidates) return [];
-if (pct === 0) return [i.targetDbId];
-return i.candidates.slice(0, shownCount());
-}
-function updateRangeLabel() {
-const i = issue(); if (!i?.candidates) { $('rangeLabel').textContent = '—'; return;}
-$('rangeLabel').textContent = pct === 0
-? '表示範囲 0% ・ ピンの要素のみ'
-: `表示範囲 ${pct}% ・ 周辺 ${(includedIds().length - 1).toLocaleString()} 件を表示中（全 ${i.candidates.length.toLocaleString()} 要素中）`;
-}
+function levelOf(e) { return e?.['Level'] ?? e?.['Base Level'] ?? e?.['Reference Level'] ?? e?.['Host Level'] ?? '—'; }
+function locOf(e) { return e?.['Column Location Mark'] ?? e?.['Mark'] ?? e?.['Type Mark'] ?? '—'; }
+function setStatV(t) { $('statV').innerHTML = t; }
+
 function buildTable() {
-$('issueRows').innerHTML = DATA.issues.map(i => {
-const [label, cls] = STATUS[i.status]?? [i.status, 'st-draft'];
-const e = i.element;
-const elemCell = e? `📌 ${esc(e.name)} [${esc(e.revitId)}]<br><span style="color:#68798a">${esc(e.Category?? '')} / ${esc(e['Type Name']?? '')}</span>`
-: (i.pin? '<span style="color:#68798a">別モデルのピン</span>': '<span style="color:#68798a">ピンなし</span>');
-const locCell = e? `${esc(levelOf(e))}<br><span style="color:#68798a">${esc(locOf(e))}</span>`: '—';
-return `
-<tr data-id="${i.id}" class="${i.id === selected? 'sel': ''} ${i.targetDbId? '': 'na'}">
+  $('issueRows').innerHTML = DATA.issues.map(i => {
+    const [label, cls] = STATUS[i.status] ?? [i.status, 'st-draft'];
+    const e = i.element;
+    const elemCell = e ? `📌 ${esc(e.name)} [${esc(e.revitId)}]<br><span style="color:#68798a">${esc(e.Category ?? '')} / ${esc(e['Type Name'] ?? '')}</span>`
+      : (i.pin ? '<span style="color:#68798a">別モデルのピン</span>' : '<span style="color:#68798a">ピンなし</span>');
+    const locCell = e ? `${esc(levelOf(e))}<br><span style="color:#68798a">${esc(locOf(e))}</span>` : '—';
+    return `<tr data-id="${i.id}" class="${i.id === selected ? 'sel' : ''} ${i.targetDbId ? '' : 'na'}">
 <td class="mono">${i.displayId}</td>
-<td><b>${esc(i.title)}</b>${i.description? `<br><span style="color:#68798a">${esc(i.description)}</span>`: ''}</td>
+<td><b>${esc(i.title)}</b>${i.description ? `<br><span style="color:#68798a">${esc(i.description)}</span>` : ''}</td>
 <td><span class="pill ${cls}">${label}</span></td>
-<td class="mono">${esc(i.dueDate?? '—')}</td>
+<td class="mono">${esc(i.dueDate ?? '—')}</td>
 <td>${elemCell}</td>
 <td>${locCell}</td>
-<td>${i.targetDbId? '可': '—'}</td>
+<td>${i.targetDbId ? '可' : '—'}</td>
 </tr>`;
-}).join('');
-for (const tr of $('issueRows').children) tr.addEventListener('click', () => selectIssue(tr.dataset.id));
+  }).join('');
+  for (const tr of $('issueRows').children) tr.addEventListener('click', () => selectIssue(tr.dataset.id));
 }
-async function selectIssue(id) {
-const i = DATA.issues.find(x => x.id === id);
-if (!i) return;
-selected = id;
-buildTable();
-if (!i.targetDbId) {
-$('selInfo').innerHTML = `<b>#${i.displayId}：${esc(i.title)}</b> ／ ${i.pin? 'このピンは対象モデル（DACH）以外のモデルに付いているため、3D 表示の対象外です': 'ピンがない Issue のため、3D 表示の対象外です'}`;
-$('rangeLabel').textContent = '—';
-return;
+
+function selectIssue(id) {
+  selected = id;
+  buildTable();
+  const i = issue();
+  const e = i?.element;
+  $('selInfo').innerHTML = i
+    ? `<b>#${i.displayId}：${esc(i.title)}</b> ／ 対象要素：${e ? `${esc(e.name)} [${esc(e.revitId)}]（${esc(e.Category ?? '')} / ${esc(e['Type Name'] ?? '')}） ／ 階：${esc(levelOf(e))} ／ 位置：${esc(locOf(e))}` : (i.pin ? '別モデルのピン（3D 対象外）' : 'ピンなし（3D 対象外）')}`
+    : '—';
+  applySelection();
 }
-const e = i.element;
-$('selInfo').innerHTML = `<b>#${i.displayId}：${esc(i.title)}</b> ／ 対象要素：${esc(e?.name)} [${esc(e?.revitId)}]（${esc(e?.Category?? '')} / ${esc(e?.['Type Name']?? '')}） ／ 階：${esc(levelOf(e))} ／ 位置：${esc(locOf(e))}`;
-updateRangeLabel();
-showInViewer();
-window.__showThree?.();
+
+// 選択中の Issue を Viewer に反映：分離＋色付け＋カメラを対象へ（読み込み中なら完了次第反映）
+function applySelection() {
+  const i = issue();
+  if (!viewer || !rootLoaded || !i) return;
+  if (!i.targetDbId) {
+    viewer.showAll();
+    viewer.clearThemingColors();
+    setStatV('この Issue は対象モデルへのピンがないため、モデル全体を表示しています。');
+    return;
+  }
+  viewer.isolate([i.targetDbId]);
+  viewer.clearThemingColors();
+  const V4 = window.THREE?.Vector4 ?? Autodesk.Viewing.Private.THREE.Vector4;
+  viewer.setThemingColor(i.targetDbId, new V4(1, 0.32, 0.05, 1));
+  viewer.fitToView([i.targetDbId]);
+  setStatV(`<b>#${i.displayId}</b> の対象要素を表示中（分離＋色付け＋フォーカス）。読み込みは裏で続いています。`);
 }
-$('range').addEventListener('input', () => {
-pct = Number($('range').value);
-updateRangeLabel();
-applyRangeViewer();
-window.__applyRangeThree?.();
+
+async function initViewer(urn) {
+  if (!window.Autodesk) {
+    $('viewerMsg').textContent = 'Viewer ライブラリを読み込めませんでした（この環境からは Autodesk の CDN に届きません）。通常のブラウザ環境で開いてください。';
+    setStatV('Viewer：未初期化（CDN に到達できませんでした）');
+    return;
+  }
+  const options = {
+    env: 'AutodeskProduction', api: 'derivativeV2',
+    getAccessToken: async (cb) => {
+      try { const t = await (await fetch('/api/token')).json(); cb(t.access_token, t.expires_in); }
+      catch (e) { setStatV('トークンの取得に失敗しました。'); }
+    },
+  };
+  Autodesk.Viewing.Initializer(options, () => {
+    viewer = new Autodesk.Viewing.GuiViewer3D($('viewerWrap'));
+    viewer.start();
+    viewer.addEventListener(Autodesk.Viewing.MODEL_ROOT_LOADED_EVENT, () => {
+      rootLoaded = true;
+      $('viewerMsg').style.display = 'none';
+      applySelection(); // カメラを対象へ向けて、その箇所の読み込みを優先させる
+    });
+    viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, () => {
+      geoLoaded = true;
+      applySelection(); // 初回のフォーカスを確実にする
+      setStatV('モデルの読み込みが完了しました。' + (issue()?.targetDbId ? ` <b>#${issue().displayId}</b> の対象要素を表示中。` : ''));
+    });
+    Autodesk.Viewing.Document.load('urn:' + urn, (doc) => {
+      viewer.loadDocumentNode(doc, doc.getRoot().getDefaultGeometry());
+      setStatV('モデルを読み込んでいます（逐次配信）…');
+    }, (code, msg) => setStatV('モデルの読み込みに失敗しました：' + code + ' ' + esc(msg ?? '')));
+  });
+}
+
+$('btnFocus').addEventListener('click', () => applySelection());
+$('btnAll').addEventListener('click', () => {
+  if (!viewer || !rootLoaded) return;
+  viewer.showAll();
+  viewer.clearThemingColors();
+  viewer.fitToView();
+  setStatV('モデル全体を表示しています。');
 });
-fetch('/api/issues').then(r => r.json()).then(d => {
-DATA = d;
-buildTable();
-const first = DATA.issues.find(i => i.targetDbId);
-if (first) selectIssue(first.id);
-else $('selInfo').textContent = '対象モデルにピンされた Issue がありません';
-refreshCompare();
-}).catch(() => { $('selInfo').textContent = 'データの読み込みに失敗しました（サーバー経由で開いてください）';});
-async function refreshCompare(extra) {
-try {
-const s = await (await fetch('/api/glb/status')).json();
-$('compare').innerHTML =
-`モデル：${esc(DATA.model.name)} ／ バージョン：<b>v${s.version}</b> ／ GLB：<b>${s.phase === 'ready'? '生成済み（' + fmtBytes(s.glbBytes) + '）': s.phase === 'generating'? '生成中…': s.phase}</b>` +
-(s.timings? `（生成の内訳：読込 ${fmtSec(s.timings.readMs)} ＋ 書出 ${fmtSec(s.timings.writeMs)} ＋ GLB化 ${fmtSec(s.timings.packMs)}）`: '') +
-(extra? `<br>${extra}`: '') +
-`<br>バージョンが変わらなければ、サーバーは SVF の再ダウンロードも GLB の再変換も行いません。ブラウザ側のキャッシュも効くため、2回目以降の表示は転送なしです。`;
-} catch {}
-}
-</script>
 
-<script>
-/* ===== ① APS Viewer ===== */
-let viewer = null, viewerModel = null, viewerReady = false, viewerLoading = false;
-function setStatA(html) { $('statA').innerHTML = html;}
-async function ensureViewer() {
-if (viewerReady || viewerLoading) return;
-viewerLoading = true;
-if (!window.Autodesk) { setStatA('Viewer ライブラリ（Autodesk CDN）を読み込めませんでした。ネットワーク環境によっては CDN への接続が必要です。'); return;}
-const tk = await (await fetch('/api/token')).json();
-if (!tk.access_token) { setStatA('トークンの取得に失敗しました'); return;}
-await new Promise(resolve => Autodesk.Viewing.Initializer({ accessToken: tk.access_token, env: 'AutodeskProduction2', api: 'streamingV2'}, resolve));
-viewer = new Autodesk.Viewing.GuiViewer3D($('viewerWrap'));
-viewer.start();
-const doc = await Autodesk.Viewing.Document.loadPromise('urn:' + DATA.model.urn, { accessToken: tk.access_token});
-let node = null;
-try { node = doc.getRoot().findByGuid(DATA.model.guid);} catch {}
-if (!node) node = doc.getRoot().getDefaultGeometry();
-viewerModel = await viewer.loadDocumentNode(doc, node);
-viewerReady = true;
-$('viewerMsg')?.remove();
-showInViewer();
-}
-function applyRangeViewer() {
-if (!viewerReady ||!selected) return;
-clearTimeout(window.__isoT);
-window.__isoT = setTimeout(() => {
-viewer.isolate(includedIds(), viewerModel);
-highlightTarget();
-}, 180);
-}
-function highlightTarget() {
-if (!viewerReady ||!selected) return;
-const i = issue();
-const V4 = window.THREE?.Vector4?? window.Autodesk?.Viewing?.Private?.THREE?.Vector4;
-viewer.clearThemingColors(viewerModel);
-if (V4) viewer.setThemingColor(i.targetDbId, new V4(1, 0.32, 0.05, 1), viewerModel, true);
-}
-function focusTarget() {
-if (!viewerReady ||!selected) return;
-viewer.fitToView([issue().targetDbId], viewerModel);
-}
-$('btnFocus').addEventListener('click', focusTarget);
-async function showInViewer() {
-if (!viewerReady) { ensureViewer(); return;}
-viewer.isolate(includedIds(), viewerModel);
-highlightTarget();
-focusTarget();
-setStatA(`分離表示：<b>${includedIds().length.toLocaleString()} 件</b> ／ 対象要素を<b>橙色にハイライト</b>し、カメラを対象へフォーカス済み`);
-}
-</script>
-
-<script type="importmap">
-{ "imports": {
-"three": "./vendor/three.module.js",
-"three/addons/": "./vendor/addons/"
-}}
-</script>
-<script type="module">
-import * as THREE from 'three';
-import { GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
-import { OrbitControls} from 'three/addons/controls/OrbitControls.js';
-
-let renderer, scene, camera, controls, model3d = null, loadPromise = null, shownIssueId = null, clickT0 = 0;
-const targetMat = new THREE.MeshStandardMaterial({ color: 0xff5a1f, emissive: 0x903000, roughness: 0.55});
-const ghostMat = new THREE.MeshStandardMaterial({ color: 0x9db4c6, transparent: true, opacity: 0.45, roughness: 0.9, depthWrite: false});
-function initThree() {
-const wrap = document.getElementById('threeWrap');
-renderer = new THREE.WebGLRenderer({ antialias: true});
-renderer.setSize(wrap.clientWidth, wrap.clientHeight);
-wrap.appendChild(renderer.domElement);
-scene = new THREE.Scene();
-scene.background = new THREE.Color(0xe9eff4);
-camera = new THREE.PerspectiveCamera(45, wrap.clientWidth / wrap.clientHeight, 0.1, 5000);
-controls = new OrbitControls(camera, renderer.domElement);
-scene.add(new THREE.HemisphereLight(0xffffff, 0x8fa3b8, 1.1));
-const dir = new THREE.DirectionalLight(0xffffff, 1.6);
-dir.position.set(60, 120, 80);
-scene.add(dir);
-renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera);});
-}
-window.__threeState = function () {
-if (!model3d) return { ready: false};
-let vis = 0;
-for (const el of model3d.elems) if (el.obj.visible) vis++;
-return { ready: true, elems: model3d.elems.length, visibleElems: vis, source: model3d.source};
-};
-async function fetchGlb() {
-// L3: ブラウザ Cache API（バージョン付きキー）
-const version = DATA.model.version;
-const key = '/glb-v' + version;
-try {
-const cache = await caches.open('sample-d-glb');
-const hit = await cache.match(key);
-if (hit) return { buf: await hit.arrayBuffer(), source: 'ブラウザキャッシュ'};
-} catch {}
-// L2: サーバーキャッシュ（生成中なら待つ）
-const statEl = document.getElementById('statB');
-for (;;) {
-const res = await fetch('/api/glb');
-if (res.status === 202) {
-statEl.innerHTML = `サーバーが GLB を生成中… 経過 <b>${((performance.now() - clickT0) / 1000).toFixed(1)} 秒</b>（初回のみ。SVF のダウンロードと変換をしています）`;
-await new Promise(r => setTimeout(r, 2500));
-continue;
-}
-if (!res.ok) throw new Error('glb API ' + res.status);
-const buf = await res.arrayBuffer();
-try {
-const cache = await caches.open('sample-d-glb');
-await cache.put(key, new Response(buf.slice(0), { headers: { 'Content-Type': 'model/gltf-binary'}}));
-} catch {}
-return { buf, source: 'サーバーキャッシュ'};
-}
-}
-async function ensureModel() {
-if (model3d) return model3d;
-if (!loadPromise) {
-loadPromise = (async () => {
-if (!renderer) initThree();
-const { buf, source} = await fetchGlb();
-const tParse = performance.now();
-const gltf = await new GLTFLoader().parseAsync(buf, '');
-const parseMs = performance.now() - tParse;
-const elems = [];
-gltf.scene.traverse(o => {
-// three.js の GLTFLoader は同名ノードに接尾辞を付けて一意化するため、先頭の数字列を dbId として読む
-const nm = /^(\d+)/.exec(o.name?? '');
-const dbId = nm? Number(nm[1]): NaN;
-if (Number.isInteger(dbId) && dbId > 0) {
-const meshes = [];
-o.traverse(m => { if (m.isMesh) { m.material = ghostMat; meshes.push(m);}});
-elems.push({ dbId, obj: o, meshes});
-}
-});
-scene.add(gltf.scene);
-gltf.scene.updateWorldMatrix(true, true);
-model3d = { group: gltf.scene, elems, source, bytes: buf.byteLength, parseMs};
-return model3d;
+(async () => {
+  try {
+    DATA = await (await fetch('/api/issues')).json();
+    const first = DATA.issues.find(i => i.targetDbId);
+    selected = first?.id ?? DATA.issues[0]?.id;
+    buildTable();
+    if (selected) selectIssue(selected);
+    initViewer(DATA.model.urn);
+  } catch (e) {
+    $('selInfo').textContent = 'Issue の取得に失敗しました：' + e.message;
+  }
 })();
-}
-return loadPromise;
-}
-window.__applyRangeThree = function () {
-if (!model3d ||!selected) return;
-const visible = new Set(includedIds());
-for (const el of model3d.elems) el.obj.visible = visible.has(el.dbId);
-};
-window.__showThree = async function () {
-const i = issue(); if (!i?.targetDbId) return;
-clickT0 = performance.now();
-document.getElementById('threeMsg')?.remove();
-const statEl = document.getElementById('statB');
-try {
-const m = await ensureModel();
-// 対象要素のマテリアル付け替え（前回の対象はゴーストに戻す）
-for (const el of m.elems) {
-const want = el.dbId === i.targetDbId? targetMat: ghostMat;
-for (const mesh of el.meshes) if (mesh.material!== want) mesh.material = want;
-}
-window.__applyRangeThree();
-const box = new THREE.Box3();
-for (const el of m.elems) if (el.dbId === i.targetDbId) box.expandByObject(el.obj);
-if (!box.isEmpty()) {
-box.expandByVector(new THREE.Vector3(8, 8, 3));
-const center = box.getCenter(new THREE.Vector3());
-const size = box.getSize(new THREE.Vector3()).length();
-const d = Math.max(size * 0.75, 10);
-camera.position.set(center.x + d * 0.75, center.y + d * 0.55, center.z + d * 0.75);
-controls.target.copy(center);
-camera.near = Math.max(size / 100, 0.05); camera.far = size * 60 + 2000;
-camera.updateProjectionMatrix();
-controls.update();
-}
-shownIssueId = i.id;
-const totalMs = performance.now() - clickT0;
-statEl.innerHTML =
-`GLB：<b>${fmtBytes(m.bytes)}</b>（モデル全要素）／ 取得元：<b>${m.source}</b> ／ 描画まで ${Math.round(m.parseMs)} ms<br>` +
-`クリックから表示まで <b>${fmtSec(totalMs)}</b> ／ 表示中：<b>${includedIds().length.toLocaleString()} 件</b>`;
-refreshCompare(`③ の実測：クリックから表示まで <b>${fmtSec(totalMs)}</b>（取得元：${m.source}）。Issue を切り替えた場合は GLB の再取得なしで即時に切り替わります。`);
-} catch (e) {
-statEl.textContent = 'GLB の読み込みに失敗しました：' + String(e?.message?? e);
-}
-};
 </script>
 </body>
 </html>
