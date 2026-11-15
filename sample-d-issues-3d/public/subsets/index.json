@@ -1,0 +1,62 @@
+{
+ "0f6166ed-5e03-4f4b-a338-699fb6631d0f": {
+  "displayId": 5,
+  "modelKey": "dach",
+  "bytes": 2016636,
+  "elems": 131
+ },
+ "0a07e6fb-bb39-470e-8105-2f8b925850c6": {
+  "displayId": 6,
+  "modelKey": "dach",
+  "bytes": 2016636,
+  "elems": 131
+ },
+ "04cf2d71-c329-4bc5-892e-152541303e8b": {
+  "displayId": 7,
+  "modelKey": "dach",
+  "bytes": 233668,
+  "elems": 131
+ },
+ "8e2255fe-e82c-4ea6-a47a-9697d57dfe6a": {
+  "displayId": 8,
+  "modelKey": "dach",
+  "bytes": 654728,
+  "elems": 131
+ },
+ "014e1fb5-0f9d-44c7-96e2-6e1cadc24124": {
+  "displayId": 9,
+  "modelKey": "dach",
+  "bytes": 678264,
+  "elems": 131
+ },
+ "23c63f80-eecb-4bb9-be45-e639da563a82": {
+  "displayId": 10,
+  "modelKey": "dach",
+  "bytes": 2663588,
+  "elems": 131
+ },
+ "c3587df5-c8ab-43ae-b764-adee6b2a05c5": {
+  "displayId": 11,
+  "modelKey": "dach",
+  "bytes": 528048,
+  "elems": 131
+ },
+ "35922116-5aaf-442a-acde-64a42711aff7": {
+  "displayId": 12,
+  "modelKey": "snowdon",
+  "bytes": 466444,
+  "elems": 131
+ },
+ "06318b8e-7bdb-48d3-8f39-2ac77fda5692": {
+  "displayId": 13,
+  "modelKey": "snowdon",
+  "bytes": 439344,
+  "elems": 131
+ },
+ "4845100e-5786-4a44-ad71-c1ab3b013ae1": {
+  "displayId": 14,
+  "modelKey": "snowdon",
+  "bytes": 476912,
+  "elems": 131
+ }
+}

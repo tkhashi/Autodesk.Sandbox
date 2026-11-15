@@ -1,45 +1,50 @@
-# sample-d: 指摘事項の拡張デモ②（実 Issue＋要素情報の自動付与＋APS Viewer 表示）
+# sample-d：指摘事項 拡張デモ②（実 Issue＋要素情報の自動付与＋ハイブリッド 3D 表示）
 
-Forma（ACC）の実 Issue を起点に、モデルを開かずに指摘箇所を把握し、クリックで対象箇所を 3D 表示するデモ。
-対象モデルはサンプルプロジェクト内の実モデル **DACHsampleproject.rvt**（132MB、全 2,626 要素）。
+Forma の実 Issue を API で取得し、ピン先の要素情報を自動で付与して一覧表示します。3D 表示は2段構えです。
 
-## 操作フロー（実 API で配線済み）
+- **先行表示（軽量サブセット）**：対象要素＋周辺（近い順に最大131要素）だけを事前に切り出して Draco 圧縮した GLB を、three.js で即時表示します。対象は橙色、周辺は半透明ゴースト。
+- **本表示（APS Viewer）**：モデル全体を SVF の逐次配信で読み込みます。読み込み開始時点で選択中 Issue の対象へカメラを向け、対象箇所の読み込みを優先させます。対象は分離＋橙色＋フォーカスで表示します。
 
-1. Forma Issue で指摘登録（画面でも API でも可。ピン付き Issue は API からも作成できることを実測で確認済み）
-2. 本アプリが Issues API で実 Issue を取得し、ピン先の要素 ID（externalId）からモデルのプロパティを引いて、要素名・階・通り芯などを Issue 一覧に自動付与する
-3. Issue をクリックすると APS Viewer が対象要素を分離表示＋色付けし、カメラを寄せる
+両パネルのステータス行に「表示までにかかった時間」を出すので、方式とモデル規模による速度差を比べられます。
 
-対象モデル以外にピンされた Issue やピンなし Issue は、一覧には出るが 3D 表示の対象外として扱う。
+## 対象モデル（2モデル対応）
 
-## 3D 表示：APS Viewer（SVF 逐次配信）に寄せた（v5）
+Issue のピン先モデルに応じて、付与と表示を自動で切り替えます。
 
-- 変換データ（SVF）は Autodesk のクラウドに置かれ、Viewer がカメラに映る範囲から優先して逐次配信で読み込む。配信は Autodesk 側の CDN が担う
-- ページを開くとモデルの読み込みが始まり、選択中の Issue の対象要素へカメラを向けた状態で表示する（MODEL_ROOT_LOADED の時点で分離＋色付け＋フォーカスを適用し、対象箇所の読み込みを優先させる）
-- Issue の切り替えは、読み込み済みモデルへの分離・色付け・カメラ移動だけなので再ダウンロードなしで即時。まだ読み込まれていない箇所でも、カメラを向けるとその範囲が優先的に流れ込む
-- サーバー側に変換・キャッシュは持たない。サーバーの役割は Viewer 用トークンの配布と Issues API 連携のみ
+| モデル | 規模 | SVF |
+|---|---|---|
+| DACHsampleproject.rvt（建築モデル） | RVT 132MB | 66MB / 109 ファイル |
+| Snowdon Towers Sample Structural.rvt（構造モデル） | RVT 約32MB | 22MB / 46 ファイル |
 
-### 前方式（GLB キャッシュ方式、v4）との比較
+速度比較用に、軽量な構造モデル側にも Issue を3件起票してあります（#12 柱主筋のかぶり確認、#13 梁側面のジャンカ確認、#14 杭頭の偏心と定着確認）。
 
-v4 は「モデル全体を GLB に変換してキャッシュし、ブラウザ側で表示切替」する方式だった。実測では全体 GLB 84.5MB の転送が残り（下り 50Mbps で表示まで約14秒）、部分 GLB＋Draco 圧縮（975KB、約0.5秒）まで詰めたが、起票時の変換・保持の仕組みが必要になる。逐次配信なら「目的の箇所から見え始める」UX が変換なしで得られるため、v5 で Viewer 方式に一本化した。v4 の実装は Git 履歴（commit baf8d61b）に残っている。
-
-## 動かし方
-
-前提: APS アプリの認証情報（sample-a と同じ）と、3-legged トークン（Issues API はユーザー文脈が必須）。依存パッケージはない。
+## 実行方法
 
 ```bash
-cp /path/to/sample-a/.env .env            # APS_CLIENT_ID / APS_CLIENT_SECRET
-cp /path/to/sample-a/.token.json .token.json  # 3-legged（refresh token 含む。サーバーが自動更新する）
 node server.mjs   # http://localhost:3000
 ```
 
-## 構成
+依存パッケージはありません（`npm install` 不要）。`.env`（APS_CLIENT_ID / APS_CLIENT_SECRET）と `.token.json`（3-legged トークン）がこのフォルダに必要です。
 
-- `server.mjs` — 静的配信＋API（`/api/token` Viewer 用 2-legged、`/api/issues` 実 Issue 取得と要素情報付与、`/api/model` 対象モデル情報）
-- `public/index.html` — Issue 一覧（Forma Issues 風テーブル）＋ APS Viewer パネル
-- `data/` — モデル由来の静的データ（`model.json` 対象モデル、`props-index.json` 要素プロパティ、`ext2dbid.json` 要素 ID の橋渡し、`bbox-index.json` 要素の bbox）。モデルを差し替えたら再生成が必要
+## 仕組み
+
+- サーバーは `/api/issues`（実 Issue の取得＋要素情報の付与）、`/api/model`、`/api/token`（Viewer 用 2-legged トークン）だけを提供します。変換やキャッシュは持ちません。
+- 要素情報の付与：Issue のピン（linkedDocuments）の externalId を、変換データ同梱のプロパティ DB（model.sdb）の対応表で Viewer の dbId に読み替え、`data/{モデル}/` の索引（props-index / ext2dbid / bbox-index）から要素名・階・通り芯・対象の bbox を引きます。Model Derivative の objectid と Viewer の dbId は一致しないため、この読み替えが要ります。
+- Issue のモデルが切り替わると、Viewer はそのモデルを読み込み直します。
+
+## 先行表示サブセットの再生成
+
+モデルのバージョンが変わったら、サブセットを作り直します（`public/subsets/` に同梱済みのものが使われます）。
+
+```bash
+cd tools
+npm install
+node build-subsets.mjs
+```
+
+実測（このデモの検証環境）：サブセットは1件 0.2〜2.6MB、先行表示は選択から 0.3〜1.1 秒。Viewer の全体読み込みはモデル規模と回線に依存します（DACH の SVF は 66MB）。
 
 ## 注意
 
-- APS Viewer は Autodesk CDN への接続が必要（開発 VM からは CDN に届かず描画未確認。通常のブラウザ環境では動作する想定）
-- Issue のピンが持つ objectId はビュー側の要素 ID、externalId は Revit の一意識別子。Viewer 側の dbId とは別体系のため、`data/ext2dbid.json`（変換データ同梱のプロパティ DB から生成）で橋渡ししている
-- 逐次配信は裏で読み込みが続くため、長く開いていると総転送量はモデル全体に寄る
+- この検証 VM 内のブラウザからは Autodesk の CDN に到達できないため、Viewer の実描画は通常のブラウザ環境での確認を前提としています（先行表示はローカル完結で確認できます）。
+- Issue の削除は API にないため、不要なテスト Issue は Forma の画面から削除してください。

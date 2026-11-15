@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>指摘事項 拡張デモ②：実 Issue＋要素情報の自動付与＋APS Viewer（SVF 逐次配信）</title>
+<title>指摘事項 拡張デモ②：実 Issue＋要素情報の自動付与＋ハイブリッド 3D 表示</title>
+<link rel="icon" href="data:,">
 <link rel="stylesheet" href="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/style.min.css">
 <style>
 body { font-family: "Hiragino Sans", "Noto Sans JP", sans-serif; margin: 24px; color: #1c2733; background: #f4f6f8; }
@@ -20,31 +21,40 @@ table.issues tbody tr.na { cursor: default; opacity: .75; }
 .st-open { background: #fde3e3; color: #a02c2c; } .st-doing { background: #fdf0d5; color: #8a6d1a; } .st-wait { background: #dbeafe; color: #1d4ed8; } .st-done { background: #dcf2e3; color: #166534; } .st-draft { background: #e8eef4; color: #41586c; }
 .mono { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .selbar { margin: 14px 0 10px; font-size: 13px; }
-.panel { background: #fff; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(20,40,60,.08); }
+.panel { background: #fff; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(20,40,60,.08); margin-bottom: 16px; }
 .panel h2 { font-size: 15px; margin: 0 0 4px; }
 .panel .desc { font-size: 12px; color: #5a6a78; line-height: 1.6; margin-bottom: 8px; }
 .view { position: relative; height: 560px; background: #e9eff4; border-radius: 8px; overflow: hidden; }
 .view .msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #68798a; font-size: 13px; text-align: center; padding: 12px; }
+.subsetview { position: relative; height: 380px; background: #eef2f5; border-radius: 8px; overflow: hidden; }
 .stat { margin-top: 10px; font-size: 12.5px; color: #33475c; line-height: 1.8; }
+.stat b { color: #b3541e; }
 button.focus { font-size: 12px; padding: 3px 10px; border: 1px solid #b9c9d6; background: #f2f7fb; border-radius: 6px; cursor: pointer; margin-left: 8px; }
 button.focus:hover { background: #e3f0fb; }
 </style>
 </head>
 <body>
-<h1>指摘事項 拡張デモ②：実 Issue の取得 → 要素情報の自動付与 → APS Viewer で表示（SVF 逐次配信）</h1>
-<div class="sub">対象モデル：<b>DACHsampleproject.rvt</b>（全 2,626 要素）／ Issue は <b>Forma の実 Issue を API で取得</b>し、ピン先の要素 ID からモデル側の情報（要素名・階・通り芯など）を自動で引いて表に付けています。<br>
-3D 表示は APS Viewer 方式：変換データ（SVF）は Autodesk のクラウドに置かれ、Viewer がカメラに映る範囲から逐次配信で読み込みます。Issue を選ぶとカメラが対象要素へ向き、その箇所から見え始めます（分離表示＋色付け）。Issue の切り替えは再ダウンロードなしで即時です。</div>
+<h1>指摘事項 拡張デモ②：実 Issue の取得 → 要素情報の自動付与 → ハイブリッド 3D 表示</h1>
+<div class="sub">Issue は <b>Forma の実 Issue を API で取得</b>し、ピン先の要素 ID からモデル側の情報（要素名・階・通り芯など）を自動で引いて表に付けています。対象は2モデル：<b>DACHsampleproject.rvt</b>（建築・132MB、SVF 66MB）と <b>Snowdon Towers Sample Structural.rvt</b>（構造・軽量、SVF 22MB）。<br>
+3D は2段構えです。<b>先行表示</b>は、対象＋周辺だけを切り出した軽量 GLB（Draco 圧縮）を即時表示します。<b>本表示（APS Viewer）</b>は SVF の逐次配信が読み込まれ次第、全体の中での確認に使えます。両パネルのステータス行に表示までの時間を出すので、モデル規模による速度差を比べられます。</div>
 
 <table class="issues">
-<thead><tr><th>ID</th><th>タイトル</th><th>ステータス</th><th>期日</th><th>対象要素（自動付与）</th><th>階・位置（自動付与）</th><th>3D</th></tr></thead>
+<thead><tr><th>ID</th><th>タイトル</th><th>ステータス</th><th>期日</th><th>モデル</th><th>対象要素（自動付与）</th><th>階・位置（自動付与）</th></tr></thead>
 <tbody id="issueRows"></tbody>
 </table>
 
 <div class="selbar" id="selInfo">Issue を読み込んでいます…</div>
 
 <div class="panel">
-<h2>APS Viewer（SVF 逐次配信） <button class="focus" id="btnFocus">対象にフォーカス</button><button class="focus" id="btnAll">全体を表示</button></h2>
-<div class="desc">モデルは開いた直後から読み込みが始まり、選択中の Issue の対象要素にカメラを向けた状態で表示します。対象は橙色に色付けされ、他は分離表示で隠れます。「全体を表示」で分離を解除できます。</div>
+<h2>先行表示（軽量サブセット・three.js）</h2>
+<div class="desc">対象要素＋周辺（近い順に最大131要素）を事前に切り出して Draco 圧縮した GLB を読みます。対象は橙色、周辺は半透明。ドラッグで回転、ホイールで拡大できます。</div>
+<div class="subsetview" id="subsetWrap"></div>
+<div class="stat" id="statS">Issue を選択すると先行表示します。</div>
+</div>
+
+<div class="panel">
+<h2>本表示（APS Viewer・SVF 逐次配信） <button class="focus" id="btnFocus">対象にフォーカス</button><button class="focus" id="btnAll">全体を表示</button></h2>
+<div class="desc">モデルは Autodesk のクラウドから逐次配信で読み込まれます。選択中の Issue の対象要素にカメラを向けた状態で表示し、対象は橙色に色付けされます。Issue のモデルが切り替わると Viewer も読み込み直します。</div>
 <div class="view" id="viewerWrap"><div class="msg" id="viewerMsg">モデルを読み込んでいます…</div></div>
 <div class="stat" id="statV">—</div>
 </div>
@@ -52,7 +62,7 @@ button.focus:hover { background: #e3f0fb; }
 <script src="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/viewer3D.min.js"></script>
 <script>
 let DATA = null, selected = null;
-let viewer = null, rootLoaded = false, geoLoaded = false;
+let viewer = null, viewerModelKey = null, rootLoaded = false, geoLoaded = false, tSelect = 0;
 const $ = id => document.getElementById(id);
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 function issue() { return DATA?.issues.find(i => i.id === selected); }
@@ -61,6 +71,7 @@ const STATUS = {
   in_review: ['確認待ち', 'st-wait'], closed: ['完了', 'st-done'], void: ['無効', 'st-draft'],
 };
 function levelOf(e) { return e?.['Level'] ?? e?.['Base Level'] ?? e?.['Reference Level'] ?? e?.['Host Level'] ?? '—'; }
+function nameOf(e) { return /\[\d+\]\s*$/.test(e.name) ? e.name : `${e.name} [${e.revitId}]`; }
 function locOf(e) { return e?.['Column Location Mark'] ?? e?.['Mark'] ?? e?.['Type Mark'] ?? '—'; }
 function setStatV(t) { $('statV').innerHTML = t; }
 
@@ -68,17 +79,17 @@ function buildTable() {
   $('issueRows').innerHTML = DATA.issues.map(i => {
     const [label, cls] = STATUS[i.status] ?? [i.status, 'st-draft'];
     const e = i.element;
-    const elemCell = e ? `📌 ${esc(e.name)} [${esc(e.revitId)}]<br><span style="color:#68798a">${esc(e.Category ?? '')} / ${esc(e['Type Name'] ?? '')}</span>`
-      : (i.pin ? '<span style="color:#68798a">別モデルのピン</span>' : '<span style="color:#68798a">ピンなし</span>');
+    const elemCell = e ? `📌 ${esc(nameOf(e))}<br><span style="color:#68798a">${esc(e['Type Name'] ?? '')}</span>`
+      : (i.pin ? '<span style="color:#68798a">対象外モデルのピン</span>' : '<span style="color:#68798a">ピンなし</span>');
     const locCell = e ? `${esc(levelOf(e))}<br><span style="color:#68798a">${esc(locOf(e))}</span>` : '—';
     return `<tr data-id="${i.id}" class="${i.id === selected ? 'sel' : ''} ${i.targetDbId ? '' : 'na'}">
 <td class="mono">${i.displayId}</td>
 <td><b>${esc(i.title)}</b>${i.description ? `<br><span style="color:#68798a">${esc(i.description)}</span>` : ''}</td>
 <td><span class="pill ${cls}">${label}</span></td>
 <td class="mono">${esc(i.dueDate ?? '—')}</td>
+<td>${esc(i.modelName ?? '—')}</td>
 <td>${elemCell}</td>
 <td>${locCell}</td>
-<td>${i.targetDbId ? '可' : '—'}</td>
 </tr>`;
   }).join('');
   for (const tr of $('issueRows').children) tr.addEventListener('click', () => selectIssue(tr.dataset.id));
@@ -86,12 +97,15 @@ function buildTable() {
 
 function selectIssue(id) {
   selected = id;
+  tSelect = performance.now();
   buildTable();
   const i = issue();
   const e = i?.element;
   $('selInfo').innerHTML = i
-    ? `<b>#${i.displayId}：${esc(i.title)}</b> ／ 対象要素：${e ? `${esc(e.name)} [${esc(e.revitId)}]（${esc(e.Category ?? '')} / ${esc(e['Type Name'] ?? '')}） ／ 階：${esc(levelOf(e))} ／ 位置：${esc(locOf(e))}` : (i.pin ? '別モデルのピン（3D 対象外）' : 'ピンなし（3D 対象外）')}`
+    ? `<b>#${i.displayId}：${esc(i.title)}</b> ／ 対象要素：${e ? `${esc(nameOf(e))}（${esc(e['Type Name'] ?? '')}） ／ 階：${esc(levelOf(e))} ／ 位置：${esc(locOf(e))}` : (i.pin ? '対象外モデルのピン（3D 対象外）' : 'ピンなし（3D 対象外）')}`
     : '—';
+  document.dispatchEvent(new CustomEvent('issue-selected', { detail: i }));
+  if (i?.modelKey) ensureViewerModel(i.modelKey);
   applySelection();
 }
 
@@ -99,10 +113,8 @@ function selectIssue(id) {
 function applySelection() {
   const i = issue();
   if (!viewer || !rootLoaded || !i) return;
-  if (!i.targetDbId) {
-    viewer.showAll();
-    viewer.clearThemingColors();
-    setStatV('この Issue は対象モデルへのピンがないため、モデル全体を表示しています。');
+  if (!i.targetDbId || i.modelKey !== viewerModelKey) {
+    if (!i.targetDbId) { viewer.showAll(); viewer.clearThemingColors(); setStatV('この Issue は対象モデルへのピンがないため、モデル全体を表示しています。'); }
     return;
   }
   viewer.isolate([i.targetDbId]);
@@ -110,13 +122,13 @@ function applySelection() {
   const V4 = window.THREE?.Vector4 ?? Autodesk.Viewing.Private.THREE.Vector4;
   viewer.setThemingColor(i.targetDbId, new V4(1, 0.32, 0.05, 1));
   viewer.fitToView([i.targetDbId]);
-  setStatV(`<b>#${i.displayId}</b> の対象要素を表示中（分離＋色付け＋フォーカス）。読み込みは裏で続いています。`);
+  if (geoLoaded) setStatV(`<b>#${i.displayId}</b> の対象要素を表示中（読み込み済みのため即時）。`);
 }
 
 // 選択中 Issue の対象 bbox からカメラ位置を先に決め、読み込みの優先順位を対象箇所に寄せる
 function aimCameraAtTarget() {
   const i = issue();
-  if (!viewer || !i?.targetBbox) return false;
+  if (!viewer || !i?.targetBbox || i.modelKey !== viewerModelKey) return false;
   try {
     const V3 = Autodesk.Viewing.Private.THREE.Vector3;
     const b = i.targetBbox;
@@ -129,15 +141,47 @@ function aimCameraAtTarget() {
   } catch (e) { return false; }
 }
 
+function setupViewer(modelKey) {
+  const m = DATA?.models.find(x => x.key === modelKey);
+  if (!m || !window.Autodesk) return;
+  if (viewer) { try { viewer.finish(); } catch (e) {} viewer = null; }
+  $('viewerWrap').innerHTML = '';
+  viewerModelKey = modelKey; rootLoaded = false; geoLoaded = false;
+  viewer = new Autodesk.Viewing.GuiViewer3D($('viewerWrap'));
+  viewer.start();
+  const aimed = aimCameraAtTarget();
+  viewer.addEventListener(Autodesk.Viewing.MODEL_ROOT_LOADED_EVENT, () => {
+    rootLoaded = true;
+    applySelection();
+    setStatV(`モデル（${esc(m.short)}）の読み込み中… 骨格は表示可能になりました（選択から ${((performance.now() - tSelect) / 1000).toFixed(1)} 秒）。`);
+  });
+  viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, () => {
+    geoLoaded = true;
+    applySelection();
+    const i = issue();
+    setStatV(`モデルの読み込みが完了しました。` + (i?.targetDbId && i.modelKey === viewerModelKey ? ` <b>#${i.displayId}</b> の対象要素を表示中（選択から ${((performance.now() - tSelect) / 1000).toFixed(1)} 秒）。` : ''));
+  });
+  viewer.addEventListener(Autodesk.Viewing.PROGRESS_UPDATE_EVENT, (e) => {
+    if (!geoLoaded && typeof e.percent === 'number') setStatV(`モデル（${esc(m.short)}）を読み込んでいます（逐次配信）… ${Math.round(e.percent)}%`);
+  });
+  Autodesk.Viewing.Document.load('urn:' + m.urn, (doc) => {
+    viewer.loadDocumentNode(doc, doc.getRoot().getDefaultGeometry(), aimed ? { preserveView: true } : undefined);
+    setStatV(`モデル（${esc(m.short)}）を読み込んでいます（逐次配信）…`);
+  }, (code, msg) => setStatV('モデルの読み込みに失敗しました：' + code + ' ' + esc(msg ?? '')));
+}
+
+function ensureViewerModel(modelKey) {
+  if (!window.Autodesk || !DATA) return;
+  if (viewer && viewerModelKey === modelKey) return;
+  if (viewer || viewerModelKey === null) setupViewer(modelKey);
+}
+
 async function initViewer() {
   if (!window.Autodesk) {
     $('viewerMsg').textContent = 'Viewer ライブラリを読み込めませんでした（この環境からは Autodesk の CDN に届きません）。通常のブラウザ環境で開いてください。';
     setStatV('Viewer：未初期化（CDN に到達できませんでした）');
     return;
   }
-  let urn;
-  try { urn = (await (await fetch('/api/model')).json()).urn; }
-  catch (e) { setStatV('モデル情報の取得に失敗しました。'); return; }
   const options = {
     env: 'AutodeskProduction', api: 'derivativeV2',
     getAccessToken: async (cb) => {
@@ -146,26 +190,8 @@ async function initViewer() {
     },
   };
   Autodesk.Viewing.Initializer(options, () => {
-    viewer = new Autodesk.Viewing.GuiViewer3D($('viewerWrap'));
-    viewer.start();
-    const aimed = aimCameraAtTarget(); // Issue が先に届いていれば、最初から対象へカメラを向けて読み込む
-    viewer.addEventListener(Autodesk.Viewing.MODEL_ROOT_LOADED_EVENT, () => {
-      rootLoaded = true;
-      $('viewerMsg').style.display = 'none';
-      applySelection(); // 分離＋色付け＋フォーカスを早い段階で適用する
-    });
-    viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, () => {
-      geoLoaded = true;
-      applySelection(); // 初回のフォーカスを確実にする
-      setStatV('モデルの読み込みが完了しました。' + (issue()?.targetDbId ? ` <b>#${issue().displayId}</b> の対象要素を表示中。` : ''));
-    });
-    viewer.addEventListener(Autodesk.Viewing.PROGRESS_UPDATE_EVENT, (e) => {
-      if (!geoLoaded && typeof e.percent === 'number') setStatV(`モデルを読み込んでいます（逐次配信）… ${Math.round(e.percent)}%`);
-    });
-    Autodesk.Viewing.Document.load('urn:' + urn, (doc) => {
-      viewer.loadDocumentNode(doc, doc.getRoot().getDefaultGeometry(), aimed ? { preserveView: true } : undefined);
-      setStatV('モデルを読み込んでいます（逐次配信）…');
-    }, (code, msg) => setStatV('モデルの読み込みに失敗しました：' + code + ' ' + esc(msg ?? '')));
+    const key = issue()?.modelKey ?? DATA?.models[0]?.key ?? 'dach';
+    setupViewer(key);
   });
 }
 
@@ -178,8 +204,6 @@ $('btnAll').addEventListener('click', () => {
   setStatV('モデル全体を表示しています。');
 });
 
-// Issue 取得と Viewer 初期化は並行して始める（モデルの読み込み開始を Issue 取得で待たせない）
-initViewer();
 (async () => {
   try {
     DATA = await (await fetch('/api/issues')).json();
@@ -187,10 +211,82 @@ initViewer();
     selected = first?.id ?? DATA.issues[0]?.id;
     buildTable();
     if (selected) selectIssue(selected);
+    initViewer();
   } catch (e) {
     $('selInfo').textContent = 'Issue の取得に失敗しました：' + e.message;
   }
 })();
+</script>
+
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three.module.js",
+  "three/addons/": "./vendor/addons/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const wrap = document.getElementById('subsetWrap');
+const statS = document.getElementById('statS');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(wrap.clientWidth, wrap.clientHeight);
+wrap.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xeef2f5);
+const camera = new THREE.PerspectiveCamera(45, wrap.clientWidth / wrap.clientHeight, 0.1, 5000);
+const controls = new OrbitControls(camera, renderer.domElement);
+scene.add(new THREE.AmbientLight(0xffffff, 1.1));
+const dl = new THREE.DirectionalLight(0xffffff, 1.8); dl.position.set(30, 50, 20); scene.add(dl);
+const draco = new DRACOLoader(); draco.setDecoderPath('./vendor/draco/');
+const loader = new GLTFLoader(); loader.setDRACOLoader(draco);
+const indexPromise = fetch('/subsets/index.json').then(r => r.json()).catch(() => ({}));
+let current = null, seq = 0;
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+window.__subset = { renderer, scene, camera, controls, THREE };
+
+document.addEventListener('issue-selected', async (ev) => {
+  const issue = ev.detail;
+  const my = ++seq;
+  if (current) { scene.remove(current); current = null; }
+  if (!issue?.id) { statS.textContent = 'Issue を選択すると先行表示します。'; return; }
+  const index = await indexPromise;
+  const meta = index[issue.id];
+  if (!meta) { statS.textContent = 'この Issue の先行表示はありません（対象モデル外のピン、またはピンなし）。'; return; }
+  statS.textContent = '先行表示を読み込んでいます…';
+  const t0 = performance.now();
+  try {
+    const buf = await (await fetch('/subsets/' + issue.id + '.glb')).arrayBuffer();
+    const gltf = await loader.parseAsync(buf, '');
+    if (my !== seq) return;
+    gltf.scene.traverse(o => {
+      if (o.isMesh && o.material?.name === 'context') {
+        o.material = o.material.clone();
+        o.material.transparent = true; o.material.opacity = 0.45; o.material.depthWrite = false;
+      }
+    });
+    current = gltf.scene;
+    scene.add(current);
+    current.updateWorldMatrix(true, true);
+    // フレーミングは対象メッシュ自身の bbox を中心にする（GLB は Y-up なので SVF 座標を直接使わない）
+    let targetMesh = null;
+    current.traverse(o => { if (o.isMesh && o.material?.name === 'target') targetMesh = o; });
+    const box = new THREE.Box3().setFromObject(targetMesh ?? current);
+    const c = box.getCenter(new THREE.Vector3());
+    const diag = box.getSize(new THREE.Vector3()).length() || 3;
+    const dist = Math.max(diag * 1.75, 5);
+    camera.position.set(c.x + dist * 0.64, c.y + dist * 0.47, c.z + dist * 0.64);
+    controls.target.copy(c);
+    renderer.render(scene, camera);
+    const ms = Math.round(performance.now() - t0);
+    statS.innerHTML = `先行表示：<b>${ms} ms</b> で表示（${(meta.bytes / 1024).toFixed(0)} KB、対象＋周辺 ${meta.elems} 要素、モデル：${meta.modelKey}）`;
+  } catch (e) {
+    if (my === seq) statS.textContent = '先行表示の読み込みに失敗しました：' + e.message;
+  }
+});
 </script>
 </body>
 </html>

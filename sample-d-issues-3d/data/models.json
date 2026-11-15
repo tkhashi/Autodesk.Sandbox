@@ -1,0 +1,20 @@
+[
+ {
+  "key": "dach",
+  "name": "DACHsampleproject.rvt",
+  "short": "DACH（建築 132MB）",
+  "lineage": "urn:adsk.wipprod:dm.lineage:3wTWeoMNQTOsNv7j3pVf-w",
+  "derivativeUrn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjN3VFdlb01OUVRPc052N2ozcFZmLXc_dmVyc2lvbj0x",
+  "viewableGuid": "f0cb2e5f-1cbd-0c96-c0ee-69fff8577543",
+  "projectId": "b.031a6e68-ccdf-4a29-b8a5-50a2a3ecac25"
+ },
+ {
+  "key": "snowdon",
+  "name": "Snowdon Towers Sample Structural.rvt",
+  "short": "Snowdon 構造（軽量）",
+  "lineage": "urn:adsk.wipprod:dm.lineage:ZRF1ijarXRS7X3mi7BYiFg",
+  "derivativeUrn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLlpSRjFpamFyWFJTN1gzbWk3QllpRmc_dmVyc2lvbj0x",
+  "viewableGuid": "0caacd2f-a9c4-7da9-8b99-d5762178b1de",
+  "projectId": "b.031a6e68-ccdf-4a29-b8a5-50a2a3ecac25"
+ }
+]
