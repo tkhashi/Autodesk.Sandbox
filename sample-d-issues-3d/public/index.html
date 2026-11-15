@@ -65,6 +65,12 @@ table.issues tbody tr.sel { background: #e8f2fa; }
 .stat { margin-top: 8px; font-size: 12.5px; color: #33475c; line-height: 1.7; }
 .stat b { color: #b3541e; }
 .tb-focus-btn .adsk-button-icon { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='6' fill='none' stroke='%23e8eef4' stroke-width='2'/%3E%3Cpath d='M12 2v4M12 18v4M2 12h4M18 12h4' stroke='%23e8eef4' stroke-width='2'/%3E%3Ccircle cx='12' cy='12' r='1.8' fill='%23e8eef4'/%3E%3C/svg%3E") !important; background-size: 20px 20px; background-position: center; background-repeat: no-repeat; }
+.tb-overview-btn .adsk-button-icon { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 21s-6-5.2-6-10a6 6 0 1 1 12 0c0 4.8-6 10-6 10z' fill='none' stroke='%23e8eef4' stroke-width='1.8'/%3E%3Ccircle cx='12' cy='11' r='2.2' fill='%23e8eef4'/%3E%3C/svg%3E") !important; background-size: 20px 20px; background-position: center; background-repeat: no-repeat; }
+/* ---- 一覧モードの title ラベル（IconMarkupExtension サンプルの方式：HTML ラベルを 3D 位置へ投影） ---- */
+#markers { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 6; }
+.issue-label { position: absolute; background: #fff; border: 1px solid #b9c9d6; border-left: 4px solid #999; border-radius: 6px; padding: 2px 8px; font-size: 11.5px; line-height: 1.5; color: #1c2733; white-space: nowrap; max-width: 190px; overflow: hidden; text-overflow: ellipsis; cursor: pointer; pointer-events: auto; box-shadow: 0 1px 4px rgba(20,40,60,.25); }
+.issue-label:hover { z-index: 7; }
+.issue-label.sel { border-color: #e03131; font-weight: 700; }
 </style>
 </head>
 <body>
@@ -114,6 +120,7 @@ table.issues tbody tr.sel { background: #e8f2fa; }
 <h2>3D 表示（APS Viewer）</h2>
 <div class="view" id="viewerOuter">
 <div id="viewerWrap"></div>
+<div id="markers"></div>
 <div class="msg" id="viewerMsg">モデルを読み込んでいます…</div>
 </div>
 <div class="stat" id="statV">—</div>
@@ -368,6 +375,10 @@ function selectIssue(id) {
     .map(([k, v]) => `<dt>${esc(PROP_LABELS[k] ?? k)}</dt><dd>${esc(v)}</dd>`).join('')
     : '<dd style="color:#68798a">対象要素なし（ピンなし、または対象外モデル）</dd>';
   $('dtShow3d').disabled = !i.targetDbId;
+  if (overviewOn) { // 一覧モード中は選択の赤とラベルの強調を追随させる
+    colorIssueElements();
+    for (const it of markerItems) it.el.classList.toggle('sel', it.id === selected);
+  }
 }
 $('dtClose').addEventListener('click', () => { $('detailPanel').hidden = true; });
 $('dtShow3d').addEventListener('click', () => { if (selected) showInViewer(selected); });
@@ -437,6 +448,7 @@ function maybePollIndexes() {
 
 // ---- ビューア表示（専用ボタンから） ----
 function showInViewer(id) {
+  exitOverview(false); // フォーカス表示に移るので一覧モードは解除
   selected = id;
   focusedId = id;
   tSelect = performance.now();
@@ -481,8 +493,118 @@ function scheduleCapture(i) {
   }, 900);
 }
 
+// ---- 指摘事項一覧をモデルに表示（一覧モード。Autodesk 公式 IconMarkupExtension サンプルの方式） ----
+// 該当要素を status 色でハイライトし、要素位置に title の HTML ラベルを重ねる。ラベルの位置は
+// カメラ変更などのイベントで worldToClient により更新する。ラベルをクリックすると詳細に表示する。
+let overviewOn = false;
+const STATUS3D = { // 3D ハイライト色（表のステータス色に合わせる。pending だけ区別のため紫）
+  draft: [0.54, 0.60, 0.66], open: [0.91, 0.64, 0.24], pending: [0.55, 0.36, 0.96],
+  in_review: [0.23, 0.51, 0.77], closed: [0.30, 0.69, 0.49], void: [0.54, 0.60, 0.66],
+};
+let markerItems = [];
+function v4(r, g, b, a = 1) { const V = window.THREE?.Vector4 ?? Autodesk.Viewing.Private.THREE.Vector4; return new V(r, g, b, a); }
+function syncOverviewBtn() { window.dispatchEvent(new CustomEvent('demo-overview-state', { detail: overviewOn })); }
+// 要素のワールド中心（サンプルと同じくインスタンスのワールド境界を合成。未ロードなら null）
+function nodeWorldCenter(dbId) {
+  try {
+    const tree = viewer.model.getInstanceTree?.();
+    const instances = viewer.model.getInstances?.();
+    if (tree?.enumNodeInstances && instances) {
+      const nodeBox = new Autodesk.Viewing.Math.Box3(), instBox = new Autodesk.Viewing.Math.Box3();
+      let found = false;
+      tree.enumNodeInstances(dbId, (iid) => {
+        if (instances.getGeometry(iid)) { instances.getWorldBounds(iid, instBox); nodeBox.union(instBox); found = true; }
+      }, true);
+      if (found) { const c = nodeBox.getCenter(new Autodesk.Viewing.Math.Vector3()); return { x: c.x, y: c.y, z: c.z }; }
+    }
+  } catch (e) {}
+  try {
+    const tree = viewer.model.getInstanceTree();
+    const box = new Autodesk.Viewing.Private.THREE.Box3();
+    tree.getNodeBox(dbId, box);
+    if (box && !(box.isEmpty && box.isEmpty())) return { x: (box.min.x + box.max.x) / 2, y: (box.min.y + box.max.y) / 2, z: (box.min.z + box.max.z) / 2 };
+  } catch (e) {}
+  return null;
+}
+function colorIssueElements() {
+  if (!viewer) return;
+  for (const i of DATA.issues.filter(x => x.modelKey === viewerModelKey && x.targetDbId)) {
+    const c = STATUS3D[i.status] ?? [0.6, 0.6, 0.6];
+    try { viewer.setThemingColor(i.targetDbId, v4(c[0], c[1], c[2], 1)); } catch (e) {}
+  }
+  const sel = issue(); // 表で選択中の Issue は赤
+  if (sel && sel.modelKey === viewerModelKey && sel.targetDbId) {
+    try { viewer.setThemingColor(sel.targetDbId, v4(1, 0.08, 0.08, 1)); } catch (e) {}
+  }
+}
+function clearMarkers() { markerItems = []; const l = $('markers'); if (l) l.innerHTML = ''; }
+function buildMarkers() {
+  clearMarkers();
+  const layer = $('markers');
+  const seen = new Map();
+  for (const i of DATA.issues.filter(x => x.modelKey === viewerModelKey && x.targetDbId)) {
+    const pos = i.pin?.position ?? nodeWorldCenter(i.targetDbId);
+    if (!pos) continue;
+    const key = `${Math.round(pos.x)},${Math.round(pos.y)},${Math.round(pos.z)}`;
+    const stack = seen.get(key) ?? 0; seen.set(key, stack + 1);
+    const el = document.createElement('div');
+    el.className = 'issue-label' + (i.id === selected ? ' sel' : '');
+    el.style.borderLeftColor = FSTATUS[i.status]?.[1] ?? '#999';
+    el.textContent = i.title;
+    el.title = `#${i.displayId} ${i.title}`;
+    el.addEventListener('click', () => {
+      selectIssue(i.id);
+      if (overviewOn) { colorIssueElements(); for (const it of markerItems) it.el.classList.toggle('sel', it.id === selected); }
+    });
+    layer.appendChild(el);
+    markerItems.push({ el, pos, stack, id: i.id, dbId: i.targetDbId });
+  }
+  updateMarkers();
+}
+function updateMarkers() {
+  if (!viewer || !markerItems.length) return;
+  for (const it of markerItems) {
+    try {
+      const v = viewer.worldToClient(new Autodesk.Viewing.Math.Vector3(it.pos.x, it.pos.y, it.pos.z));
+      const visible = typeof viewer.isNodeVisible === 'function' ? viewer.isNodeVisible(it.dbId) : true;
+      it.el.style.display = visible ? '' : 'none';
+      if (visible) {
+        it.el.style.left = Math.floor(v.x - it.el.offsetWidth / 2) + 'px';
+        it.el.style.top = Math.floor(v.y - it.el.offsetHeight / 2) - 16 - it.stack * 26 + 'px';
+      }
+    } catch (e) { it.el.style.display = 'none'; }
+  }
+}
+function enterOverview() {
+  if (!viewer || !geoLoaded) return;
+  stopBlink();
+  try { viewer.showAll(); } catch (e) {}
+  viewer.clearThemingColors();
+  colorIssueElements();
+  buildMarkers();
+  const n = DATA.issues.filter(i => i.modelKey === viewerModelKey && i.targetDbId).length;
+  setStatV(`指摘事項一覧を表示中（このモデルの Issue ${n} 件）。色はステータス別、選択中は赤。ラベルをクリックすると詳細が開きます。`);
+  syncOverviewBtn();
+}
+function exitOverview(restore = true) {
+  overviewOn = false;
+  clearMarkers();
+  if (viewer) viewer.clearThemingColors();
+  syncOverviewBtn();
+  if (restore) { if (selected) focusedId = selected; applySelection(); }
+}
+function toggleOverview() {
+  if (overviewOn) { exitOverview(true); return; }
+  overviewOn = true;
+  syncOverviewBtn();
+  if (viewer && geoLoaded) enterOverview();
+  else setStatV('モデルの読み込みが終わったら、指摘事項一覧を表示します。');
+}
+window.addEventListener('resize', () => { if (overviewOn) updateMarkers(); });
+
 // フォーカス中の Issue を Viewer に反映
 function applySelection() {
+  if (overviewOn) return;
   const i = focusedIssue();
   if (!viewer || !rootLoaded || !i) return;
   if (!i.targetDbId || i.modelKey !== viewerModelKey) {
@@ -507,13 +629,18 @@ function setupViewer(modelKey) {
   const m = DATA?.models.find(x => x.key === modelKey);
   if (!m || !window.Autodesk) return;
   if (viewer && viewerModelKey === modelKey) return;
-  if (viewer) { stopBlink(); try { viewer.finish(); } catch (e) {} viewer = null; }
+  if (viewer) { stopBlink(); clearMarkers(); try { viewer.finish(); } catch (e) {} viewer = null; }
   $('viewerWrap').innerHTML = '';
   const msg = $('viewerMsg'); if (msg) msg.remove();
   viewerModelKey = modelKey; rootLoaded = false; geoLoaded = false;
   viewer = new Autodesk.Viewing.GuiViewer3D($('viewerWrap'));
   viewer.start();
   viewer.loadExtension('DemoToolbarExtension').catch(() => {});
+  const updMarkers = () => { if (overviewOn) updateMarkers(); };
+  viewer.addEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, updMarkers);
+  viewer.addEventListener(Autodesk.Viewing.ISOLATE_EVENT, updMarkers);
+  viewer.addEventListener(Autodesk.Viewing.HIDE_EVENT, updMarkers);
+  viewer.addEventListener(Autodesk.Viewing.SHOW_EVENT, updMarkers);
   viewer.addEventListener(Autodesk.Viewing.MODEL_ROOT_LOADED_EVENT, () => {
     rootLoaded = true;
     applySelection();
@@ -521,6 +648,7 @@ function setupViewer(modelKey) {
   });
   viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, () => {
     geoLoaded = true;
+    if (overviewOn) { enterOverview(); return; }
     applySelection();
     const i = focusedIssue();
     setStatV(`モデルの読み込みが完了しました。` + (i?.targetDbId && i.modelKey === viewerModelKey ? ` <b>#${i.displayId}</b> の対象要素を表示中（選択から ${((performance.now() - tSelect) / 1000).toFixed(1)} 秒）。` : ''));
@@ -551,8 +679,14 @@ if (window.Autodesk?.Viewing?.Extension) {
         this.btnFocus.setToolTip('対象要素にフォーカス');
         this.btnFocus.addClass('tb-focus-btn');
         this.btnFocus.onClick = () => window.dispatchEvent(new CustomEvent('demo-focus-target'));
+        this.btnOverview = new Autodesk.Viewing.UI.Button('demo-toggle-overview');
+        this.btnOverview.setToolTip('指摘事項一覧をモデルに表示');
+        this.btnOverview.addClass('tb-overview-btn');
+        this.btnOverview.onClick = () => window.dispatchEvent(new CustomEvent('demo-toggle-overview'));
+        window.addEventListener('demo-overview-state', (e) => { try { this.btnOverview.setState(e.detail ? 0 : 1); } catch (err) {} });
         this.group = new Autodesk.Viewing.UI.ControlGroup('demo-toolbar-group');
         this.group.addControl(this.btnFocus);
+        this.group.addControl(this.btnOverview);
         viewer.toolbar.addControl(this.group);
       };
       if (viewer.toolbar) add();
@@ -567,7 +701,8 @@ if (window.Autodesk?.Viewing?.Extension) {
   }
   Autodesk.Viewing.theExtensionManager.registerExtension('DemoToolbarExtension', DemoToolbarExtension);
 }
-window.addEventListener('demo-focus-target', () => applySelection());
+window.addEventListener('demo-focus-target', () => { exitOverview(false); applySelection(); });
+window.addEventListener('demo-toggle-overview', () => toggleOverview());
 
 async function initViewer() {
   if (!window.Autodesk) {
