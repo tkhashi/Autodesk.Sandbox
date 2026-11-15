@@ -1,22 +1,21 @@
-# sample-d：指摘事項 拡張デモ②（実 Issue＋要素情報の自動付与＋ハイブリッド 3D 表示）
+# sample-d：指摘事項 拡張デモ②（実 Issue＋要素情報の自動付与＋詳細・編集＋3D 表示）
 
-Forma の実 Issue を API で取得し、ピン先の要素情報を自動で付与して一覧表示します。3D 表示は2段構えです。
+Forma（ACC）の実 Issue を Issues API で取得し、ピン先の要素情報をモデルから自動付与して表示するデモです。
 
-- **先行表示（軽量サブセット）**：対象要素＋周辺（近い順に最大131要素）だけを事前に切り出して Draco 圧縮した GLB を、three.js で即時表示します。**Viewer の読み込みが終わるまでの間、Viewer の上に重ねて表示**し、完了したら Viewer に引き継ぎます。周辺は部材の種別（Revit カテゴリ）ごとに色分けされ、対象は橙色で、周辺に遮られても見えるよう最前面に描きます。種別の凡例はパネル下に表示されます。
-- **本表示（APS Viewer）**：モデル全体を SVF の逐次配信で読み込みます。読み込み開始時点で選択中 Issue の対象へカメラを向け、対象箇所の読み込みを優先させます。対象は分離＋橙色＋フォーカスで表示します。
+- **Issue 一覧**：列はユーザー側で設定可能（「列の設定」）。Forma の Issue 項目（ID／タイトル／ステータス／期日／作成日／担当者／公開／コメント／添付）に加え、**モデルから読んだ要素プロパティが自動で列として追加**されます（階・位置・タイプ名・材質など、モデルごとに実在するキーを集計）。表示件数はデフォルト10件、最大100件まで同時表示できます。検索・ステータス絞り込み・並び替え対応。
+- **Issue 詳細**：行クリックで詳細パネルが開きます。Forma のスナップショット画像（Issue の `snapshotUrn` から署名付き S3 URL 経由で取得。無い場合はモデルのサムネイルで代替）、自動付与された要素情報の一覧、ピン先ビューなどを表示します。
+- **編集**：詳細パネルからタイトル／ステータス／期日／説明を編集し、Issues API（PATCH）で実 Issue に保存できます。ステータスの選択肢は Issue ごとの `permittedStatuses`（許可された遷移）に従います。
+- **3D 表示**：ビューアへの表示は専用ボタン（行の「3D」ボタン／詳細の「ビューアで表示」）から行います。APS Viewer がモデルを SVF 逐次配信で読み込み、対象要素だけを残して他をゴースト表示にし、対象を赤く点滅させ、ピン位置に青いピンを立てます（壁の向こうや地中の対象でも見えます）。Issue のピン先に応じてモデルは自動で切り替わります。
 
-両パネルのステータス行に「表示までにかかった時間」を出すので、方式とモデル規模による速度差を比べられます。
+## 対象モデル（5モデル対応）
 
-## 対象モデル（2モデル対応）
-
-Issue のピン先モデルに応じて、付与と表示を自動で切り替えます。
-
-| モデル | 規模 | SVF |
+| モデル | 規模 | 備考 |
 |---|---|---|
-| DACHsampleproject.rvt（建築モデル） | RVT 132MB | 66MB / 109 ファイル |
-| Snowdon Towers Sample Structural.rvt（構造モデル） | RVT 約32MB | 22MB / 46 ファイル |
-
-速度比較用に、軽量な構造モデル側にも Issue を3件起票してあります（#12 柱主筋のかぶり確認、#13 梁側面のジャンカ確認、#14 杭頭の偏心と定着確認）。
+| DACHsampleproject.rvt | RVT 132MB | 建築（木造・鉄骨・RC 混在） |
+| Snowdon Towers Sample Structural.rvt | RVT 約32MB | 構造（軽量） |
+| Snowdon Towers Sample Architectural.rvt | RVT 約95MB | 建築 |
+| Snowdon Towers Sample Facades.rvt | RVT 約53MB | ファサード |
+| sample_architecture.rvt | RVT 約63MB | 建築（日本語モデル）。変換ジョブは API から投入済み |
 
 ## 実行方法
 
@@ -26,25 +25,21 @@ node server.mjs   # http://localhost:3000
 
 依存パッケージはありません（`npm install` 不要）。`.env`（APS_CLIENT_ID / APS_CLIENT_SECRET）と `.token.json`（3-legged トークン）がこのフォルダに必要です。
 
+⚠️ `.token.json` の refresh token はローテーション式（使うたびに新しいものへ差し替わる）です。**更新したら必ずファイルへ書き戻す**こと。書き戻さずに再利用するとチェーン全体が失効し、再ログイン（sample-a の login-manual）が必要になります。サーバーは起動時に読み込むため、外部でトークンを更新したらサーバーも再起動してください。
+
 ## 仕組み
 
-- サーバーは `/api/issues`（実 Issue の取得＋要素情報の付与）、`/api/model`、`/api/token`（Viewer 用 2-legged トークン）だけを提供します。変換やキャッシュは持ちません。
+- サーバーの API：`/api/issues`（実 Issue の取得＋要素情報の付与）、`/api/token`（Viewer 用 2-legged トークン）、`/api/thumbnail`（モデルのサムネイル）、`/api/snapshot`（Issue のスナップショット画像）、`/api/issues/update`（実 Issue の PATCH 中継）。
 - 要素情報の付与：Issue のピン（linkedDocuments）の externalId を、変換データ同梱のプロパティ DB（model.sdb）の対応表で Viewer の dbId に読み替え、`data/{モデル}/` の索引（props-index / ext2dbid / bbox-index）から要素名・階・通り芯・対象の bbox を引きます。Model Derivative の objectid と Viewer の dbId は一致しないため、この読み替えが要ります。
-- Issue のモデルが切り替わると、Viewer はそのモデルを読み込み直します。
+- スナップショットの取得：旧 OSS 直 GET は廃止（403 "Legacy endpoint is deprecated"）のため、`signeds3download` で署名付き S3 URL を得てから取得します。なお署名 URL の有効期限は約2分と短い点に注意。
 
-## 先行表示サブセットの再生成
-
-モデルのバージョンが変わったら、サブセットを作り直します（`public/subsets/` に同梱済みのものが使われます）。
+## モデルの追加方法
 
 ```bash
 cd tools
-npm install
-node build-subsets.mjs
+node extract-model.mjs <derivativeUrn> <key>   # 索引一式を data/{key}/ に生成
 ```
 
-実測（このデモの検証環境）：サブセットは1件 0.2〜3.4MB、先行表示は選択から 0.3〜1.1 秒。Viewer の全体読み込みはモデル規模と回線に依存します（DACH の SVF は 66MB）。種別（カテゴリ）はモデルのプロパティ DB（model.sdb の __category__ 属性）から引いて `data/{モデル}/category-index.json` にしてあります。モデルのバージョンが変わったら、この索引も作り直してください。
+生成された viewableGuid を見て `data/models.json` に1件追加し、サーバーを再起動します。
 
-## 注意
-
-- この検証 VM 内のブラウザからは Autodesk の CDN に到達できないため、Viewer の実描画は通常のブラウザ環境での確認を前提としています（先行表示はローカル完結で確認できます）。
-- Issue の削除は API にないため、不要なテスト Issue は Forma の画面から削除してください。
+変換ジョブの投入が必要なファイルでは、エンドポイントに注意してください。正しくは **`POST /modelderivative/v2/designdata/job`**（URN はボディに入れる）。`POST /modelderivative/v2/designdata/{urn}/job` は存在せず 404 になります。ACC ハブのファイルでは `x-ads-derivative-scopes` ヘッダ（`b360project.*`、`O2tenant.*`。値はバージョンの derivatives リンクから取得）が必要な場合があります。

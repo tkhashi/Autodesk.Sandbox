@@ -34,5 +34,14 @@
   "derivativeUrn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLktvaUZ1ZVVpVFQyMEY1S1BPSGtSRGc_dmVyc2lvbj0x",
   "viewableGuid": "ee468dd8-59ee-b79b-2203-df43b89fb561",
   "projectId": "b.031a6e68-ccdf-4a29-b8a5-50a2a3ecac25"
+ },
+ {
+  "key": "samplearch",
+  "name": "sample_architecture.rvt",
+  "short": "sample_architecture（建築 63MB）",
+  "lineage": "urn:adsk.wipprod:dm.lineage:dJ4loKRmSkWYXzqIFMWCHg",
+  "derivativeUrn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLmRKNGxvS1JtU2tXWVh6cUlGTVdDSGc_dmVyc2lvbj0x",
+  "viewableGuid": "cbd02212-3eea-66c0-c1c6-bf3ea2db6449",
+  "projectId": "b.031a6e68-ccdf-4a29-b8a5-50a2a3ecac25"
  }
 ]

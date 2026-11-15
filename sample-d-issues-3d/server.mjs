@@ -62,6 +62,8 @@ async function getToken3() {
 
 // ---- モデルの tip バージョン（表示用、モデルごと） ----
 const versionCache = new Map();
+const thumbCache = new Map();
+const snapCache = new Map();
 async function getModelVersion(m) {
   const c = versionCache.get(m.key);
   if (c && Date.now() - c.at < 60000) return c.value;
@@ -87,7 +89,11 @@ function enrich(issue) {
   const out = {
     id: issue.id, displayId: issue.displayId, title: issue.title, description: issue.description,
     status: issue.status, dueDate: issue.dueDate, assignedTo: issue.assignedTo, published: issue.published,
-    createdAt: issue.createdAt, pin: null, element: null, targetDbId: null, targetBbox: null,
+    createdAt: issue.createdAt, openedBy: issue.openedBy, openedAt: issue.openedAt, createdBy: issue.createdBy,
+    snapshotUrn: issue.snapshotUrn ?? null, snapshotHasMarkups: issue.snapshotHasMarkups ?? false,
+    permittedStatuses: issue.permittedStatuses ?? null, customAttributes: issue.customAttributes ?? [],
+    attachmentCount: issue.attachmentCount ?? 0, commentCount: issue.commentCount ?? 0,
+    pin: null, element: null, targetDbId: null, targetBbox: null,
     contextDbIds: null, modelKey: null, modelName: null,
   };
   const ld = (issue.linkedDocuments ?? [])[0];
@@ -150,6 +156,62 @@ const server = http.createServer(async (req, res) => {
       }
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ key: m.key, bounds: [minx, miny, maxx, maxy], rects }));
+      return;
+    }
+    if (url.pathname === '/api/thumbnail') {
+      // モデルのサムネイル（Model Derivative、2-legged）。メモリにキャッシュする
+      const m = models.find(x => x.key === url.searchParams.get('model')) ?? models[0];
+      if (!thumbCache.has(m.key)) {
+        const t = (await getToken2()).access_token;
+        const r = await fetch(`${BASE}/modelderivative/v2/designdata/${m.derivativeUrn}/thumbnail`, { headers: { Authorization: 'Bearer ' + t } });
+        if (!r.ok) throw new Error('thumbnail failed: ' + r.status);
+        thumbCache.set(m.key, Buffer.from(await r.arrayBuffer()));
+      }
+      res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'max-age=3600' });
+      res.end(thumbCache.get(m.key));
+      return;
+    }
+    if (url.pathname === '/api/snapshot') {
+      // Issue のスナップショット画像：snapshotUrn（OSS オブジェクト）→ 署名付き S3 URL 経由で取得（旧 OSS 直 GET は廃止済み）
+      const urn = url.searchParams.get('urn') ?? '';
+      const prefix = 'urn:adsk.objects:os.object:';
+      if (!urn.startsWith(prefix)) { res.writeHead(404); res.end('no snapshot'); return; }
+      if (!snapCache.has(urn)) {
+        const rest = urn.slice(prefix.length);
+        const slash = rest.indexOf('/');
+        const bucket = rest.slice(0, slash), object = rest.slice(slash + 1);
+        const t = await getToken3();
+        const sr = await fetch(`${BASE}/oss/v2/buckets/${bucket}/objects/${encodeURIComponent(object)}/signeds3download`, { headers: { Authorization: 'Bearer ' + t } });
+        if (!sr.ok) throw new Error('snapshot sign failed: ' + sr.status);
+        const signed = (await sr.json()).url;
+        const r = await fetch(signed);
+        if (!r.ok) throw new Error('snapshot download failed: ' + r.status);
+        const s3type = r.headers.get('content-type') ?? '';
+        const type = s3type.startsWith('image/') ? s3type : (object.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg');
+        snapCache.set(urn, { buf: Buffer.from(await r.arrayBuffer()), type });
+      }
+      const c = snapCache.get(urn);
+      res.writeHead(200, { 'Content-Type': c.type, 'Cache-Control': 'max-age=3600' });
+      res.end(c.buf);
+      return;
+    }
+    if (url.pathname === '/api/issues/update' && req.method === 'POST') {
+      // 実 Issue の編集（Issues API へ PATCH を中継する）
+      const body = JSON.parse(await new Promise((resolve, reject) => {
+        let d = ''; req.on('data', c => { d += c; }); req.on('end', () => resolve(d)); req.on('error', reject);
+      }));
+      const allow = ['title', 'description', 'status', 'dueDate'];
+      const patch = {};
+      for (const k of allow) if (body.patch && k in body.patch) patch[k] = body.patch[k];
+      if (!body.id || !Object.keys(patch).length) { res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ error: 'id and patch required' })); return; }
+      const t = await getToken3();
+      const pid = models[0].projectId.replace(/^b\./, '');
+      const r = await fetch(`${BASE}/construction/issues/v1/projects/${pid}/issues/${body.id}`, {
+        method: 'PATCH', headers: { Authorization: 'Bearer ' + t, 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
+      });
+      const j = await r.json().catch(() => null);
+      res.writeHead(r.status, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(j ?? { error: 'empty response' }));
       return;
     }
     if (url.pathname === '/api/issues') {
