@@ -357,7 +357,7 @@ let markerItems = [];
 function v4(r, g, b, a = 1) { const V = window.THREE?.Vector4 ?? Autodesk.Viewing.Private.THREE.Vector4; return new V(r, g, b, a); }
 function syncOverviewBtn() { window.dispatchEvent(new CustomEvent('demo-overview-state', { detail: overviewOn })); }
 // 要素のワールド中心（サンプルと同じくインスタンスのワールド境界を合成。未ロードなら null）
-function nodeWorldCenter(dbId) {
+function nodeWorldBox(dbId) {
   try {
     const tree = viewer.model.getInstanceTree?.();
     const instances = viewer.model.getInstances?.();
@@ -367,16 +367,29 @@ function nodeWorldCenter(dbId) {
       tree.enumNodeInstances(dbId, (iid) => {
         if (instances.getGeometry(iid)) { instances.getWorldBounds(iid, instBox); nodeBox.union(instBox); found = true; }
       }, true);
-      if (found) { const c = nodeBox.getCenter(new Autodesk.Viewing.Math.Vector3()); return { x: c.x, y: c.y, z: c.z }; }
+      if (found) return { min: { x: nodeBox.min.x, y: nodeBox.min.y, z: nodeBox.min.z }, max: { x: nodeBox.max.x, y: nodeBox.max.y, z: nodeBox.max.z } };
     }
   } catch (e) {}
   try {
     const tree = viewer.model.getInstanceTree();
     const box = new Autodesk.Viewing.Private.THREE.Box3();
     tree.getNodeBox(dbId, box);
-    if (box && !(box.isEmpty && box.isEmpty())) return { x: (box.min.x + box.max.x) / 2, y: (box.min.y + box.max.y) / 2, z: (box.min.z + box.max.z) / 2 };
+    if (box && !(box.isEmpty && box.isEmpty())) return { min: { x: box.min.x, y: box.min.y, z: box.min.z }, max: { x: box.max.x, y: box.max.y, z: box.max.z } };
   } catch (e) {}
   return null;
+}
+function nodeWorldCenter(dbId) {
+  const b = nodeWorldBox(dbId);
+  return b ? { x: (b.min.x + b.max.x) / 2, y: (b.min.y + b.max.y) / 2, z: (b.min.z + b.max.z) / 2 } : null;
+}
+// 引き出し線の先端は、ハイライトされる部材の上の点にする（ピンの位置を部材の範囲内に寄せた点。ピンが無ければ部材の中心）
+function anchorFor(issue) {
+  const box = nodeWorldBox(issue.targetDbId);
+  if (!box) return issue.pin?.position ?? null;
+  const p = issue.pin?.position;
+  if (!p) return { x: (box.min.x + box.max.x) / 2, y: (box.min.y + box.max.y) / 2, z: (box.min.z + box.max.z) / 2 };
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  return { x: clamp(p.x, box.min.x, box.max.x), y: clamp(p.y, box.min.y, box.max.y), z: clamp(p.z, box.min.z, box.max.z) };
 }
 function colorIssueElements() {
   if (!viewer) return;
@@ -407,7 +420,7 @@ function buildMarkers() {
   const svg = $('leaders');
   const seen = new Map();
   for (const i of issuesOnCurrentModel()) {
-    const pos = i.pin?.position ?? nodeWorldCenter(i.targetDbId);
+    const pos = anchorFor(i);
     if (!pos) continue;
     const key = `${Math.round(pos.x)},${Math.round(pos.y)},${Math.round(pos.z)}`;
     const stack = seen.get(key) ?? 0; seen.set(key, stack + 1);
@@ -496,7 +509,11 @@ function toggleOverview() {
 window.addEventListener('resize', () => { if (overviewOn) updateMarkers(); });
 
 // ---- ゴースト透明度（ゴースト表示に使うフェード用マテリアルの不透明度を調整する） ----
-let ghostTransparency = Math.min(97, Math.max(40, Number(localStorage.getItem(LS_GHOST) ?? 90) || 90));
+let ghostTransparency = (() => {
+  const raw = localStorage.getItem(LS_GHOST);
+  const n = raw === null ? NaN : Number(raw);
+  return Number.isFinite(n) ? Math.min(97, Math.max(0, n)) : 90;
+})();
 function applyGhostOpacity() {
   if (!viewer) return;
   const opacity = 1 - ghostTransparency / 100;
@@ -504,10 +521,12 @@ function applyGhostOpacity() {
     const impl = viewer.impl;
     const mat = impl.fadeMaterial ?? impl.renderer?.()?.fadeMaterial ?? impl._renderer?.fadeMaterial ?? impl.glrenderer?.()?.fadeMaterial ?? null;
     if (!mat) return;
+    const solid = opacity >= 0.99; // 透明度0%はゴーストオフ相当：元のモデルと同じ見え方にする
     mat.opacity = opacity;
-    mat.transparent = true;
+    mat.transparent = !solid;
+    mat.depthWrite = solid;
     mat.needsUpdate = true;
-    mat.variants?.forEach(v => { v.opacity = opacity; v.needsUpdate = true; });
+    mat.variants?.forEach(v => { v.opacity = opacity; v.transparent = !solid; v.depthWrite = solid; v.needsUpdate = true; });
     impl.invalidate?.(true);
   } catch (e) {}
 }
