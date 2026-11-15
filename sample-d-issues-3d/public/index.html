@@ -113,12 +113,31 @@ function applySelection() {
   setStatV(`<b>#${i.displayId}</b> の対象要素を表示中（分離＋色付け＋フォーカス）。読み込みは裏で続いています。`);
 }
 
-async function initViewer(urn) {
+// 選択中 Issue の対象 bbox からカメラ位置を先に決め、読み込みの優先順位を対象箇所に寄せる
+function aimCameraAtTarget() {
+  const i = issue();
+  if (!viewer || !i?.targetBbox) return false;
+  try {
+    const V3 = Autodesk.Viewing.Private.THREE.Vector3;
+    const b = i.targetBbox;
+    const c = new V3((b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2);
+    const diag = Math.hypot(b[3] - b[0], b[4] - b[1], b[5] - b[2]) || 10;
+    const dir = new V3(0.95, 0.75, 0.95).normalize();
+    const pos = c.clone().add(dir.multiplyScalar(diag * 1.6 + 6));
+    viewer.navigation.setView(pos, c);
+    return true;
+  } catch (e) { return false; }
+}
+
+async function initViewer() {
   if (!window.Autodesk) {
     $('viewerMsg').textContent = 'Viewer ライブラリを読み込めませんでした（この環境からは Autodesk の CDN に届きません）。通常のブラウザ環境で開いてください。';
     setStatV('Viewer：未初期化（CDN に到達できませんでした）');
     return;
   }
+  let urn;
+  try { urn = (await (await fetch('/api/model')).json()).urn; }
+  catch (e) { setStatV('モデル情報の取得に失敗しました。'); return; }
   const options = {
     env: 'AutodeskProduction', api: 'derivativeV2',
     getAccessToken: async (cb) => {
@@ -129,18 +148,22 @@ async function initViewer(urn) {
   Autodesk.Viewing.Initializer(options, () => {
     viewer = new Autodesk.Viewing.GuiViewer3D($('viewerWrap'));
     viewer.start();
+    const aimed = aimCameraAtTarget(); // Issue が先に届いていれば、最初から対象へカメラを向けて読み込む
     viewer.addEventListener(Autodesk.Viewing.MODEL_ROOT_LOADED_EVENT, () => {
       rootLoaded = true;
       $('viewerMsg').style.display = 'none';
-      applySelection(); // カメラを対象へ向けて、その箇所の読み込みを優先させる
+      applySelection(); // 分離＋色付け＋フォーカスを早い段階で適用する
     });
     viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, () => {
       geoLoaded = true;
       applySelection(); // 初回のフォーカスを確実にする
       setStatV('モデルの読み込みが完了しました。' + (issue()?.targetDbId ? ` <b>#${issue().displayId}</b> の対象要素を表示中。` : ''));
     });
+    viewer.addEventListener(Autodesk.Viewing.PROGRESS_UPDATE_EVENT, (e) => {
+      if (!geoLoaded && typeof e.percent === 'number') setStatV(`モデルを読み込んでいます（逐次配信）… ${Math.round(e.percent)}%`);
+    });
     Autodesk.Viewing.Document.load('urn:' + urn, (doc) => {
-      viewer.loadDocumentNode(doc, doc.getRoot().getDefaultGeometry());
+      viewer.loadDocumentNode(doc, doc.getRoot().getDefaultGeometry(), aimed ? { preserveView: true } : undefined);
       setStatV('モデルを読み込んでいます（逐次配信）…');
     }, (code, msg) => setStatV('モデルの読み込みに失敗しました：' + code + ' ' + esc(msg ?? '')));
   });
@@ -155,6 +178,8 @@ $('btnAll').addEventListener('click', () => {
   setStatV('モデル全体を表示しています。');
 });
 
+// Issue 取得と Viewer 初期化は並行して始める（モデルの読み込み開始を Issue 取得で待たせない）
+initViewer();
 (async () => {
   try {
     DATA = await (await fetch('/api/issues')).json();
@@ -162,7 +187,6 @@ $('btnAll').addEventListener('click', () => {
     selected = first?.id ?? DATA.issues[0]?.id;
     buildTable();
     if (selected) selectIssue(selected);
-    initViewer(DATA.model.urn);
   } catch (e) {
     $('selInfo').textContent = 'Issue の取得に失敗しました：' + e.message;
   }
