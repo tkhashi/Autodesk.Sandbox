@@ -10,60 +10,91 @@
 body { font-family: "Hiragino Sans", "Noto Sans JP", sans-serif; margin: 24px; color: #1c2733; background: #f4f6f8; }
 h1 { font-size: 20px; margin: 0 0 6px; }
 .sub { color: #5a6a78; font-size: 13px; margin-bottom: 14px; line-height: 1.7; }
-table.issues { width: 100%; border-collapse: collapse; background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(20,40,60,.08); font-size: 13px; }
-table.issues th { background: #22374a; color: #fff; text-align: left; padding: 9px 10px; font-weight: 600; white-space: nowrap; }
-table.issues td { padding: 9px 10px; border-top: 1px solid #e4eaef; vertical-align: top; }
+.split { display: flex; gap: 14px; align-items: flex-start; }
+.col-model { flex: 6 1 0; min-width: 0; }
+.col-issues { flex: 4 1 0; min-width: 0; }
+.panel { background: #fff; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(20,40,60,.08); }
+.panel h2 { font-size: 15px; margin: 0 0 4px; }
+.panel .desc { font-size: 12px; color: #5a6a78; line-height: 1.6; margin-bottom: 8px; }
+table.issues { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.issues th { background: #22374a; color: #fff; text-align: left; padding: 7px 8px; font-weight: 600; white-space: nowrap; }
+table.issues td { padding: 7px 8px; border-top: 1px solid #e4eaef; vertical-align: top; }
 table.issues tbody tr { cursor: pointer; }
 table.issues tbody tr:hover { background: #f2f7fb; }
 table.issues tbody tr.sel { background: #e3f0fb; box-shadow: inset 3px 0 0 #2b7bbb; }
 table.issues tbody tr.na { cursor: default; opacity: .75; }
+.sub2 { color: #68798a; font-size: 11.5px; }
 .pill { display: inline-block; padding: 1px 8px; border-radius: 9px; font-size: 11px; font-weight: 700; white-space: nowrap; }
 .st-open { background: #fde3e3; color: #a02c2c; } .st-doing { background: #fdf0d5; color: #8a6d1a; } .st-wait { background: #dbeafe; color: #1d4ed8; } .st-done { background: #dcf2e3; color: #166534; } .st-draft { background: #e8eef4; color: #41586c; }
 .mono { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.selbar { margin: 14px 0 10px; font-size: 13px; }
-.panel { background: #fff; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(20,40,60,.08); margin-bottom: 16px; }
-.panel h2 { font-size: 15px; margin: 0 0 4px; }
-.panel .desc { font-size: 12px; color: #5a6a78; line-height: 1.6; margin-bottom: 8px; }
+.selbar { margin: 0 0 10px; font-size: 13px; }
+.filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.filters input[type="text"] { flex: 1 1 120px; min-width: 100px; padding: 5px 8px; border: 1px solid #b9c9d6; border-radius: 6px; font-size: 12.5px; }
+.filters select { padding: 5px 6px; border: 1px solid #b9c9d6; border-radius: 6px; font-size: 12.5px; background: #fff; }
+.pager { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 12.5px; color: #41586c; }
+.pager button { padding: 4px 12px; border: 1px solid #b9c9d6; background: #f2f7fb; border-radius: 6px; cursor: pointer; font-size: 12.5px; }
+.pager button:disabled { opacity: .45; cursor: default; }
 .view { position: relative; height: 560px; background: #e9eff4; border-radius: 8px; overflow: hidden; }
 .viewbox { position: relative; }
-.locator { position: absolute; top: 10px; right: 10px; z-index: 5; background: rgba(255,255,255,.93); border: 1px solid #c8d4de; border-radius: 8px; padding: 6px 8px 4px; display: none; }
-.locator .lt { font-size: 11px; font-weight: 700; color: #41586c; margin-bottom: 3px; }
-.locator canvas { display: block; }
 .subset-overlay { position: absolute; inset: 0; z-index: 4; display: none; background: #eef2f5; border-radius: 8px; overflow: hidden; }
 .legend { margin-top: 8px; font-size: 12px; color: #41586c; }
 .chip { display: inline-flex; align-items: center; gap: 5px; margin: 0 10px 4px 0; white-space: nowrap; }
 .sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; border: 1px solid rgba(0,0,0,.18); }
 .view .msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #68798a; font-size: 13px; text-align: center; padding: 12px; }
-.subsetview { position: relative; height: 380px; background: #eef2f5; border-radius: 8px; overflow: hidden; }
 .stat { margin-top: 10px; font-size: 12.5px; color: #33475c; line-height: 1.8; }
 .stat b { color: #b3541e; }
-button.focus { font-size: 12px; padding: 3px 10px; border: 1px solid #b9c9d6; background: #f2f7fb; border-radius: 6px; cursor: pointer; margin-left: 8px; }
-button.focus:hover { background: #e3f0fb; }
+/* Viewer ツールバー拡張のボタンアイコン */
+.tb-glb-btn .adsk-button-icon { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='3' y='5' width='18' height='14' rx='2' fill='none' stroke='%23e8eef4' stroke-width='2'/%3E%3Ccircle cx='9' cy='10' r='1.6' fill='%23e8eef4'/%3E%3Cpath d='M5 17 L11 12 L14 15 L17 12 L20 16' stroke='%23e8eef4' stroke-width='2' fill='none'/%3E%3C/svg%3E") !important; background-size: 20px 20px; background-position: center; background-repeat: no-repeat; }
+.tb-focus-btn .adsk-button-icon { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='6' fill='none' stroke='%23e8eef4' stroke-width='2'/%3E%3Cpath d='M12 2v4M12 18v4M2 12h4M18 12h4' stroke='%23e8eef4' stroke-width='2'/%3E%3Ccircle cx='12' cy='12' r='1.8' fill='%23e8eef4'/%3E%3C/svg%3E") !important; background-size: 20px 20px; background-position: center; background-repeat: no-repeat; }
 </style>
 </head>
 <body>
 <h1>指摘事項 拡張デモ②：実 Issue の取得 → 要素情報の自動付与 → ハイブリッド 3D 表示</h1>
-<div class="sub">Issue は <b>Forma の実 Issue を API で取得</b>し、ピン先の要素 ID からモデル側の情報（要素名・階・通り芯など）を自動で引いて表に付けています。対象は2モデル：<b>DACHsampleproject.rvt</b>（建築・132MB、SVF 66MB）と <b>Snowdon Towers Sample Structural.rvt</b>（構造・軽量、SVF 22MB）。<br>
-3D は2段構えです。<b>先行表示</b>は、対象＋周辺だけを切り出した軽量 GLB（Draco 圧縮）を即時表示します。<b>本表示（APS Viewer）</b>は SVF の逐次配信が読み込まれ次第、全体の中での確認に使えます。両パネルのステータス行に表示までの時間を出すので、モデル規模による速度差を比べられます。</div>
-
-<table class="issues">
-<thead><tr><th>ID</th><th>タイトル</th><th>ステータス</th><th>期日</th><th>モデル</th><th>対象要素（自動付与）</th><th>階・位置（自動付与）</th></tr></thead>
-<tbody id="issueRows"></tbody>
-</table>
+<div class="sub">Issue とモデルはどちらも <b>Forma（ACC）の実データ</b>です。Issue は Issues API で、モデルは Forma のドキュメント管理に置かれた RVT を Model Derivative で変換した SVF を Viewer が逐次配信で読みます。対象は2モデル：<b>DACHsampleproject.rvt</b>（建築・132MB、SVF 66MB）と <b>Snowdon Towers Sample Structural.rvt</b>（構造・軽量、SVF 22MB）。<br>
+3D は2段構えです。SVF の読み込みが終わるまでの間は、対象＋周辺だけを切り出した軽量 GLB（先行サブセット）を Viewer の上に重ねて表示し、完了したら自動で隠れて Viewer に引き継がれます。GLB は Viewer 下部のツールバーボタンからいつでも表示・非表示を切り替えられます。</div>
 
 <div class="selbar" id="selInfo">Issue を読み込んでいます…</div>
 
+<div class="split">
+<div class="col-model">
 <div class="panel">
-<h2>3D 表示（APS Viewer＋先行サブセット） <button class="focus" id="btnFocus">対象にフォーカス</button><button class="focus" id="btnAll">全体を表示</button></h2>
-<div class="desc">モデルは Autodesk のクラウドから逐次配信で読み込まれます。<b>読み込みが終わるまでの間は、Viewer の上に先行サブセット（対象＋周辺を切り出した軽量 GLB）を重ねて表示します</b>。周辺は部材の種別ごとに色分けされ、対象は橙色です。Viewer のフォーカス時は対象＋周辺を残し、それ以外はゴースト（半透明）にして位置関係が分かるようにします。右上の平面図は全体での対象位置です。</div>
+<h2>3D 表示（APS Viewer＋先行サブセット）</h2>
+<div class="desc">Issue をクリックすると対象にフォーカスします（対象＋周辺を残し、それ以外はゴースト表示）。対象要素は<b>赤く点滅</b>します。読み込み完了でカメラが全体ビューへ勝手に切り替わることはありません。Viewer 下部のツールバーに、GLB 先行表示のトグルと再フォーカスのボタンを拡張機能で追加しています。</div>
 <div class="viewbox">
 <div class="view" id="viewerWrap"><div class="msg" id="viewerMsg">モデルを読み込んでいます…</div></div>
 <div class="subset-overlay" id="subsetOverlay"></div>
-<div class="locator" id="locatorBox"><div class="lt">全体での位置（平面図）</div><canvas id="locator" width="240" height="160"></canvas></div>
 </div>
 <div class="stat" id="statV">—</div>
 <div class="stat" id="statS">Issue を選択すると先行表示します。</div>
 <div class="legend" id="legend"></div>
+</div>
+</div>
+
+<div class="col-issues">
+<div class="panel">
+<h2>Issue 一覧（Forma の実 Issue）</h2>
+<div class="filters">
+<input type="text" id="fltQ" placeholder="タイトル・要素名で検索">
+<select id="fltStatus"><option value="all">ステータス：すべて</option></select>
+<select id="fltSort">
+<option value="id">並び順：番号 ↑</option>
+<option value="id-desc">番号 ↓</option>
+<option value="due">期日 ↑</option>
+<option value="due-desc">期日 ↓</option>
+<option value="title">タイトル順</option>
+</select>
+</div>
+<table class="issues">
+<thead><tr><th>ID</th><th>タイトル／対象要素</th><th>状態</th><th>期日</th></tr></thead>
+<tbody id="issueRows"></tbody>
+</table>
+<div class="pager">
+<button id="btnPrev">前へ</button>
+<span id="pagerInfo">—</span>
+<button id="btnNext">次へ</button>
+</div>
+</div>
+</div>
 </div>
 
 <script src="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/viewer3D.min.js"></script>
@@ -71,6 +102,8 @@ button.focus:hover { background: #e3f0fb; }
 let DATA = null, selected = null;
 let viewer = null, viewerModelKey = null, rootLoaded = false, geoLoaded = false, tSelect = 0;
 let viewerReady = false, desiredModelKey = null;
+let subsetManual = null; // null=自動（読込完了まで表示） / true=表示 / false=非表示
+let blinkTimer = null, blinkOn = false;
 const $ = id => document.getElementById(id);
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 function issue() { return DATA?.issues.find(i => i.id === selected); }
@@ -85,12 +118,15 @@ function setStatV(t) { $('statV').innerHTML = t; }
 
 let SUBSET_INDEX = {};
 fetch('/subsets/index.json').then(r => r.json()).then(j => { SUBSET_INDEX = j; updateOverlay(); renderLegend(); }).catch(() => {});
-// 先行サブセットのオーバーレイは、選択中 Issue の Viewer 読み込みが終わるまで表示する
+// 先行サブセット：自動では Viewer の読み込み完了まで表示。ツールバーのトグルで手動切替もできる
+function overlayVisible() { return $('subsetOverlay').style.display === 'block'; }
 function updateOverlay() {
   const i = issue();
   const has = !!(i && SUBSET_INDEX[i.id]);
   const ready = !!(i && geoLoaded && viewerModelKey === i.modelKey);
-  $('subsetOverlay').style.display = has && !ready ? 'block' : 'none';
+  const visible = has && (subsetManual !== null ? subsetManual : !ready);
+  $('subsetOverlay').style.display = visible ? 'block' : 'none';
+  window.dispatchEvent(new CustomEvent('demo-subset-state', { detail: { visible } }));
 }
 function renderLegend() {
   const i = issue();
@@ -100,62 +136,65 @@ function renderLegend() {
   $('legend').innerHTML = chip('#ff520d', '対象要素') + (meta.cats ?? []).map(c => chip(c.color, c.label)).join('');
 }
 
-// 平面ロケーター：モデルの全要素の平面フットプリントを描き、対象を橙で示す
-const fpCache = {};
-async function drawLocator(i) {
-  const box = $('locatorBox');
-  if (!i?.targetBbox || !i.modelKey) { box.style.display = 'none'; return; }
-  box.style.display = 'block';
-  const myId = i.id;
-  if (!fpCache[i.modelKey]) fpCache[i.modelKey] = await (await fetch('/api/footprints?key=' + i.modelKey)).json();
-  if (issue()?.id !== myId) return;
-  const fp = fpCache[i.modelKey];
-  const cv = $('locator'), ctx = cv.getContext('2d');
-  const [minx, miny, maxx, maxy] = fp.bounds;
-  const pad = 6, W = cv.width - pad * 2, H = cv.height - pad * 2;
-  const s = Math.min(W / (maxx - minx), H / (maxy - miny));
-  const ox = pad + (W - (maxx - minx) * s) / 2, oy = pad + (H - (maxy - miny) * s) / 2;
-  const X = x => ox + (x - minx) * s, Y = y => cv.height - (oy + (y - miny) * s);
-  ctx.clearRect(0, 0, cv.width, cv.height);
-  ctx.fillStyle = '#c9d7e4';
-  for (const r of fp.rects) ctx.fillRect(X(r[0]), Y(r[3]), Math.max(1, (r[2] - r[0]) * s), Math.max(1, (r[3] - r[1]) * s));
-  ctx.strokeStyle = '#7e97ad'; ctx.lineWidth = 1;
-  ctx.strokeRect(X(minx), Y(maxy), (maxx - minx) * s, (maxy - miny) * s);
-  const b = i.targetBbox;
-  ctx.fillStyle = '#f4511e';
-  ctx.fillRect(X(b[0]) - 1, Y(b[4]) - 1, Math.max(3, (b[3] - b[0]) * s + 2), Math.max(3, (b[4] - b[1]) * s + 2));
-  ctx.strokeStyle = '#8f2f0e'; ctx.lineWidth = 1.5;
-  ctx.strokeRect(X(b[0]) - 3, Y(b[4]) - 3, Math.max(3, (b[3] - b[0]) * s + 2) + 4, Math.max(3, (b[4] - b[1]) * s + 2) + 4);
-  ctx.beginPath();
-  ctx.arc(X((b[0] + b[3]) / 2), Y((b[1] + b[4]) / 2), 4, 0, Math.PI * 2);
-  ctx.fillStyle = '#f4511e'; ctx.fill();
-  ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+// ---- Issue 一覧：フィルター／ソート／ページネーション ----
+const PAGE_SIZE = 6;
+let page = 1;
+const flt = { q: '', status: 'all', sort: 'id' };
+function visibleIssues() {
+  const q = flt.q.trim().toLowerCase();
+  const list = DATA.issues.filter(i => {
+    if (flt.status !== 'all' && i.status !== flt.status) return false;
+    if (q) {
+      const hay = `${i.title} ${i.description ?? ''} ${i.element?.name ?? ''} ${i.modelName ?? ''}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  const by = {
+    'id': (a, b) => a.displayId - b.displayId,
+    'id-desc': (a, b) => b.displayId - a.displayId,
+    'due': (a, b) => String(a.dueDate ?? '9999').localeCompare(String(b.dueDate ?? '9999')),
+    'due-desc': (a, b) => String(b.dueDate ?? '').localeCompare(String(a.dueDate ?? '')),
+    'title': (a, b) => a.title.localeCompare(b.title, 'ja'),
+  };
+  return list.sort(by[flt.sort] ?? by.id);
 }
-
 function buildTable() {
-  $('issueRows').innerHTML = DATA.issues.map(i => {
+  const list = visibleIssues();
+  const pages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+  page = Math.min(Math.max(1, page), pages);
+  const slice = list.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  $('issueRows').innerHTML = slice.map(i => {
     const [label, cls] = STATUS[i.status] ?? [i.status, 'st-draft'];
     const e = i.element;
-    const elemCell = e ? `📌 ${esc(nameOf(e))}<br><span style="color:#68798a">${esc(e['Type Name'] ?? '')}</span>`
-      : (i.pin ? '<span style="color:#68798a">対象外モデルのピン</span>' : '<span style="color:#68798a">ピンなし</span>');
-    const locCell = e ? `${esc(levelOf(e))}<br><span style="color:#68798a">${esc(locOf(e))}</span>` : '—';
+    const sub = e ? `📌 ${esc(nameOf(e))}（${esc(levelOf(e))}）`
+      : (i.pin ? '対象外モデルのピン' : 'ピンなし');
     return `<tr data-id="${i.id}" class="${i.id === selected ? 'sel' : ''} ${i.targetDbId ? '' : 'na'}">
 <td class="mono">${i.displayId}</td>
-<td><b>${esc(i.title)}</b>${i.description ? `<br><span style="color:#68798a">${esc(i.description)}</span>` : ''}</td>
+<td><b>${esc(i.title)}</b><br><span class="sub2">${sub} ／ ${esc(i.modelName ?? '—')}</span></td>
 <td><span class="pill ${cls}">${label}</span></td>
 <td class="mono">${esc(i.dueDate ?? '—')}</td>
-<td>${esc(i.modelName ?? '—')}</td>
-<td>${elemCell}</td>
-<td>${locCell}</td>
 </tr>`;
-  }).join('');
-  for (const tr of $('issueRows').children) tr.addEventListener('click', () => selectIssue(tr.dataset.id));
+  }).join('') || '<tr><td colspan="4" style="color:#68798a">条件に合う Issue はありません。</td></tr>';
+  for (const tr of $('issueRows').children) if (tr.dataset.id) tr.addEventListener('click', () => selectIssue(tr.dataset.id));
+  $('pagerInfo').textContent = `${page} / ${pages} ページ（全 ${list.length} 件）`;
+  $('btnPrev').disabled = page <= 1;
+  $('btnNext').disabled = page >= pages;
 }
+function markSelectedRow() {
+  for (const tr of $('issueRows').children) tr.classList.toggle('sel', tr.dataset.id === selected);
+}
+$('fltQ').addEventListener('input', () => { flt.q = $('fltQ').value; page = 1; buildTable(); });
+$('fltStatus').addEventListener('change', () => { flt.status = $('fltStatus').value; page = 1; buildTable(); });
+$('fltSort').addEventListener('change', () => { flt.sort = $('fltSort').value; page = 1; buildTable(); });
+$('btnPrev').addEventListener('click', () => { page--; buildTable(); });
+$('btnNext').addEventListener('click', () => { page++; buildTable(); });
 
 function selectIssue(id) {
   selected = id;
   tSelect = performance.now();
-  buildTable();
+  subsetManual = null; // 新しい選択では GLB 表示は自動に戻す
+  markSelectedRow();
   const i = issue();
   const e = i?.element;
   $('selInfo').innerHTML = i
@@ -164,17 +203,37 @@ function selectIssue(id) {
   document.dispatchEvent(new CustomEvent('issue-selected', { detail: i }));
   renderLegend();
   updateOverlay();
-  drawLocator(i);
   if (i?.modelKey) ensureViewerModel(i.modelKey);
   applySelection();
 }
 
-// 選択中の Issue を Viewer に反映：分離＋色付け＋カメラを対象へ（読み込み中なら完了次第反映）
+// ---- Viewer の対象ハイライト：赤く点滅 ----
+function stopBlink() {
+  if (blinkTimer) { clearInterval(blinkTimer); blinkTimer = null; }
+  blinkOn = false;
+}
+function startBlink(dbId) {
+  stopBlink();
+  if (!viewer) return;
+  const V4 = window.THREE?.Vector4 ?? Autodesk.Viewing.Private.THREE.Vector4;
+  const paint = () => { try { viewer.setThemingColor(dbId, new V4(1, 0.05, 0.05, 1)); } catch (e) {} };
+  paint(); blinkOn = true;
+  blinkTimer = setInterval(() => {
+    if (!viewer) { stopBlink(); return; }
+    blinkOn = !blinkOn;
+    try {
+      if (blinkOn) paint();
+      else viewer.clearThemingColors();
+    } catch (e) {}
+  }, 550);
+}
+
+// 選択中の Issue を Viewer に反映：対象＋周辺を残してゴースト表示にし、対象を赤点滅＋カメラを寄せる
 function applySelection() {
   const i = issue();
   if (!viewer || !rootLoaded || !i) return;
   if (!i.targetDbId || i.modelKey !== viewerModelKey) {
-    if (!i.targetDbId) { viewer.showAll(); viewer.clearThemingColors(); setStatV('この Issue は対象モデルへのピンがないため、モデル全体を表示しています。'); }
+    if (!i.targetDbId) { stopBlink(); viewer.showAll(); viewer.clearThemingColors(); setStatV('この Issue は対象モデルへのピンがないため、モデル全体を表示しています。'); }
     return;
   }
   if (!viewer.model?.getFragmentList?.()) return; // フラグメント表が用意できていない間は触らない
@@ -183,14 +242,13 @@ function applySelection() {
     if (typeof viewer.setGhosting === 'function') viewer.setGhosting(true); // 範囲外は消さずゴーストにして位置関係を残す
     viewer.isolate(range);
     viewer.clearThemingColors();
-    const V4 = window.THREE?.Vector4 ?? Autodesk.Viewing.Private.THREE.Vector4;
-    viewer.setThemingColor(i.targetDbId, new V4(1, 0.32, 0.05, 1));
     viewer.fitToView(range);
   } catch (e) { return; }
+  startBlink(i.targetDbId);
   if (geoLoaded) setStatV(`<b>#${i.displayId}</b> の対象要素＋周辺を表示中（読み込み済みのため即時）。`);
 }
 
-// 選択中 Issue の対象 bbox からカメラ位置を先に決め、読み込みの優先順位を対象箇所に寄せる
+// 選択中 Issue の対象 bbox からカメラ位置を読み込み前に決め、完了時にカメラが動かないようにする
 function aimCameraAtTarget() {
   const i = issue();
   if (!viewer || !i?.targetBbox || i.modelKey !== viewerModelKey) return false;
@@ -210,12 +268,13 @@ function setupViewer(modelKey) {
   const m = DATA?.models.find(x => x.key === modelKey);
   if (!m || !window.Autodesk) return;
   if (viewer && viewerModelKey === modelKey) return;
-  if (viewer) { try { viewer.finish(); } catch (e) {} viewer = null; }
+  if (viewer) { stopBlink(); try { viewer.finish(); } catch (e) {} viewer = null; }
   $('viewerWrap').innerHTML = '';
   viewerModelKey = modelKey; rootLoaded = false; geoLoaded = false;
   viewer = new Autodesk.Viewing.GuiViewer3D($('viewerWrap'));
   viewer.start();
-  const aimed = aimCameraAtTarget();
+  viewer.loadExtension('DemoToolbarExtension').catch(() => {});
+  aimCameraAtTarget();
   viewer.addEventListener(Autodesk.Viewing.MODEL_ROOT_LOADED_EVENT, () => {
     rootLoaded = true;
     applySelection();
@@ -224,7 +283,7 @@ function setupViewer(modelKey) {
   viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, () => {
     geoLoaded = true;
     applySelection();
-    updateOverlay(); // 読み込み完了：先行サブセットのオーバーレイを外して Viewer に引き継ぐ
+    updateOverlay(); // 読み込み完了：先行サブセットを隠して Viewer に引き継ぐ
     const i = issue();
     setStatV(`モデルの読み込みが完了しました。` + (i?.targetDbId && i.modelKey === viewerModelKey ? ` <b>#${i.displayId}</b> の対象要素を表示中（選択から ${((performance.now() - tSelect) / 1000).toFixed(1)} 秒）。` : ''));
   });
@@ -232,7 +291,8 @@ function setupViewer(modelKey) {
     if (!geoLoaded && typeof e.percent === 'number') setStatV(`モデル（${esc(m.short)}）を読み込んでいます（逐次配信）… ${Math.round(e.percent)}%`);
   });
   Autodesk.Viewing.Document.load('urn:' + m.urn, (doc) => {
-    viewer.loadDocumentNode(doc, doc.getRoot().getDefaultGeometry(), aimed ? { preserveView: true } : undefined);
+    // preserveView: 読み込み完了時にカメラを全体ビューへ自動で切り替えない
+    viewer.loadDocumentNode(doc, doc.getRoot().getDefaultGeometry(), { preserveView: true });
     setStatV(`モデル（${esc(m.short)}）を読み込んでいます（逐次配信）…`);
   }, (code, msg) => setStatV('モデルの読み込みに失敗しました：' + code + ' ' + esc(msg ?? '')));
 }
@@ -242,6 +302,46 @@ function ensureViewerModel(modelKey) {
   if (!viewerReady) return; // 初期化が終わるまでは作らない（Initializer 完了時に desiredModelKey で作る）
   if (viewerModelKey !== modelKey) setupViewer(modelKey);
 }
+
+// ---- Viewer ツールバー拡張（aps-extensions の Thumbnail 拡張と同方式：Extension＋ControlGroup＋Button） ----
+if (window.Autodesk?.Viewing?.Extension) {
+  class DemoToolbarExtension extends Autodesk.Viewing.Extension {
+    load() {
+      const viewer = this.viewer;
+      const add = () => {
+        if (this.group || !viewer.toolbar) return;
+        this.btnGlb = new Autodesk.Viewing.UI.Button('demo-glb-toggle');
+        this.btnGlb.setToolTip('GLB 先行表示の表示・非表示');
+        this.btnGlb.addClass('tb-glb-btn');
+        this.btnGlb.onClick = () => window.dispatchEvent(new CustomEvent('demo-toggle-subset'));
+        this.btnFocus = new Autodesk.Viewing.UI.Button('demo-focus-target');
+        this.btnFocus.setToolTip('対象要素にフォーカス');
+        this.btnFocus.addClass('tb-focus-btn');
+        this.btnFocus.onClick = () => window.dispatchEvent(new CustomEvent('demo-focus-target'));
+        this.group = new Autodesk.Viewing.UI.ControlGroup('demo-toolbar-group');
+        this.group.addControl(this.btnGlb);
+        this.group.addControl(this.btnFocus);
+        viewer.toolbar.addControl(this.group);
+      };
+      if (viewer.toolbar) add();
+      else viewer.addEventListener(Autodesk.Viewing.TOOLBAR_CREATED_EVENT, add);
+      this._onState = (e) => {
+        try { this.btnGlb?.setState(e.detail.visible ? Autodesk.Viewing.UI.Button.State.ACTIVE : Autodesk.Viewing.UI.Button.State.INACTIVE); } catch (err) {}
+      };
+      window.addEventListener('demo-subset-state', this._onState);
+      return true;
+    }
+    unload() {
+      window.removeEventListener('demo-subset-state', this._onState);
+      if (this.group && this.viewer.toolbar) this.viewer.toolbar.removeControl(this.group);
+      this.group = null;
+      return true;
+    }
+  }
+  Autodesk.Viewing.theExtensionManager.registerExtension('DemoToolbarExtension', DemoToolbarExtension);
+}
+window.addEventListener('demo-toggle-subset', () => { subsetManual = !overlayVisible(); updateOverlay(); });
+window.addEventListener('demo-focus-target', () => applySelection());
 
 async function initViewer() {
   if (!window.Autodesk) {
@@ -262,24 +362,21 @@ async function initViewer() {
   });
 }
 
-$('btnFocus').addEventListener('click', () => applySelection());
-$('btnAll').addEventListener('click', () => {
-  if (!viewer || !rootLoaded) return;
-  viewer.showAll();
-  viewer.clearThemingColors();
-  viewer.fitToView();
-  setStatV('モデル全体を表示しています。');
-});
-
 // Viewer の初期化は Issue 取得と並行に始める（初期化完了までは Viewer を作らない）
 initViewer();
 (async () => {
   try {
     DATA = await (await fetch('/api/issues')).json();
-    const first = DATA.issues.find(i => i.targetDbId);
-    selected = first?.id ?? DATA.issues[0]?.id;
+    const statusSel = $('fltStatus');
+    for (const st of [...new Set(DATA.issues.map(i => i.status))]) {
+      const o = document.createElement('option');
+      o.value = st; o.textContent = 'ステータス：' + (STATUS[st]?.[0] ?? st);
+      statusSel.appendChild(o);
+    }
     buildTable();
-    if (selected) selectIssue(selected);
+    const first = DATA.issues.find(i => i.targetDbId);
+    if (first) selectIssue(first.id);
+    else if (DATA.issues[0]) selectIssue(DATA.issues[0].id);
   } catch (e) {
     $('selInfo').textContent = 'Issue の取得に失敗しました：' + e.message;
   }

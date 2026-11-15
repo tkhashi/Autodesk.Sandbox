@@ -8,37 +8,37 @@
    {
     "key": "floors",
     "label": "床・スラブ",
-    "color": "#8c8c94"
+    "color": "#63b5f5"
    },
    {
     "key": "generic",
     "label": "一般モデル",
-    "color": "#9c9c9c"
+    "color": "#ba69c7"
    },
    {
     "key": "walls",
     "label": "壁",
-    "color": "#bab0ab"
+    "color": "#e8ba3d"
    },
    {
     "key": "foundations",
     "label": "基礎",
-    "color": "#6b5c73"
+    "color": "#8f45ad"
    },
    {
     "key": "ceilings",
     "label": "天井",
-    "color": "#d6cfad"
+    "color": "#dbe875"
    },
    {
     "key": "furniture",
     "label": "家具",
-    "color": "#c29cd4"
+    "color": "#a18780"
    },
    {
     "key": "windows",
     "label": "窓",
-    "color": "#a3d1ff"
+    "color": "#4dd1e0"
    },
    {
     "key": "roofs",
@@ -53,32 +53,32 @@
    {
     "key": "doors",
     "label": "建具",
-    "color": "#e05759"
+    "color": "#f0544f"
    },
    {
     "key": "framing",
     "label": "構造梁",
-    "color": "#59a14f"
+    "color": "#36a14f"
    },
    {
     "key": "columns",
     "label": "構造柱",
-    "color": "#4f78a6"
+    "color": "#2e70d1"
    },
    {
     "key": "curtain-panels",
     "label": "カーテンパネル",
-    "color": "#75b8b3"
+    "color": "#26a699"
    },
    {
     "key": "rebar",
     "label": "鉄筋",
-    "color": "#a36669"
+    "color": "#b03030"
    },
    {
     "key": "mullions",
     "label": "方立",
-    "color": "#5c8f8a"
+    "color": "#00828f"
    }
   ]
  },
@@ -91,37 +91,37 @@
    {
     "key": "floors",
     "label": "床・スラブ",
-    "color": "#8c8c94"
+    "color": "#63b5f5"
    },
    {
     "key": "generic",
     "label": "一般モデル",
-    "color": "#9c9c9c"
+    "color": "#ba69c7"
    },
    {
     "key": "walls",
     "label": "壁",
-    "color": "#bab0ab"
+    "color": "#e8ba3d"
    },
    {
     "key": "foundations",
     "label": "基礎",
-    "color": "#6b5c73"
+    "color": "#8f45ad"
    },
    {
     "key": "ceilings",
     "label": "天井",
-    "color": "#d6cfad"
+    "color": "#dbe875"
    },
    {
     "key": "furniture",
     "label": "家具",
-    "color": "#c29cd4"
+    "color": "#a18780"
    },
    {
     "key": "windows",
     "label": "窓",
-    "color": "#a3d1ff"
+    "color": "#4dd1e0"
    },
    {
     "key": "roofs",
@@ -136,32 +136,32 @@
    {
     "key": "doors",
     "label": "建具",
-    "color": "#e05759"
+    "color": "#f0544f"
    },
    {
     "key": "framing",
     "label": "構造梁",
-    "color": "#59a14f"
+    "color": "#36a14f"
    },
    {
     "key": "columns",
     "label": "構造柱",
-    "color": "#4f78a6"
+    "color": "#2e70d1"
    },
    {
     "key": "curtain-panels",
     "label": "カーテンパネル",
-    "color": "#75b8b3"
+    "color": "#26a699"
    },
    {
     "key": "rebar",
     "label": "鉄筋",
-    "color": "#a36669"
+    "color": "#b03030"
    },
    {
     "key": "mullions",
     "label": "方立",
-    "color": "#5c8f8a"
+    "color": "#00828f"
    }
   ]
  },
@@ -174,7 +174,7 @@
    {
     "key": "generic",
     "label": "一般モデル",
-    "color": "#9c9c9c"
+    "color": "#ba69c7"
    },
    {
     "key": "roofs",
@@ -184,17 +184,17 @@
    {
     "key": "floors",
     "label": "床・スラブ",
-    "color": "#8c8c94"
+    "color": "#63b5f5"
    },
    {
     "key": "ceilings",
     "label": "天井",
-    "color": "#d6cfad"
+    "color": "#dbe875"
    },
    {
     "key": "walls",
     "label": "壁",
-    "color": "#bab0ab"
+    "color": "#e8ba3d"
    },
    {
     "key": "other",
@@ -204,80 +204,80 @@
    {
     "key": "furniture",
     "label": "家具",
-    "color": "#c29cd4"
+    "color": "#a18780"
    },
    {
     "key": "windows",
     "label": "窓",
-    "color": "#a3d1ff"
+    "color": "#4dd1e0"
    },
    {
     "key": "doors",
     "label": "建具",
-    "color": "#e05759"
+    "color": "#f0544f"
    },
    {
     "key": "curtain-panels",
     "label": "カーテンパネル",
-    "color": "#75b8b3"
+    "color": "#26a699"
    },
    {
     "key": "stairs",
     "label": "階段",
-    "color": "#e3a857"
+    "color": "#f06191"
    },
    {
     "key": "framing",
     "label": "構造梁",
-    "color": "#59a14f"
+    "color": "#36a14f"
    },
    {
     "key": "columns",
     "label": "構造柱",
-    "color": "#4f78a6"
+    "color": "#2e70d1"
    },
    {
     "key": "mullions",
     "label": "方立",
-    "color": "#5c8f8a"
+    "color": "#00828f"
    }
   ]
  },
  "8e2255fe-e82c-4ea6-a47a-9697d57dfe6a": {
   "displayId": 8,
   "modelKey": "dach",
-  "bytes": 990368,
+  "bytes": 990364,
   "elems": 131,
   "cats": [
    {
     "key": "floors",
     "label": "床・スラブ",
-    "color": "#8c8c94"
+    "color": "#63b5f5"
    },
    {
     "key": "generic",
     "label": "一般モデル",
-    "color": "#9c9c9c"
+    "color": "#ba69c7"
    },
    {
     "key": "walls",
     "label": "壁",
-    "color": "#bab0ab"
+    "color": "#e8ba3d"
    },
    {
     "key": "foundations",
     "label": "基礎",
-    "color": "#6b5c73"
+    "color": "#8f45ad"
    },
    {
     "key": "ceilings",
     "label": "天井",
-    "color": "#d6cfad"
+    "color": "#dbe875"
    },
    {
     "key": "furniture",
     "label": "家具",
-    "color": "#c29cd4"
+    "color": "#a18780"
    },
    {
     "key": "other",
@@ -292,32 +292,32 @@
    {
     "key": "columns",
     "label": "構造柱",
-    "color": "#4f78a6"
+    "color": "#2e70d1"
    },
    {
     "key": "rebar",
     "label": "鉄筋",
-    "color": "#a36669"
+    "color": "#b03030"
    },
    {
     "key": "curtain-panels",
     "label": "カーテンパネル",
-    "color": "#75b8b3"
+    "color": "#26a699"
    },
    {
     "key": "framing",
     "label": "構造梁",
-    "color": "#59a14f"
+    "color": "#36a14f"
    },
    {
     "key": "doors",
     "label": "建具",
-    "color": "#e05759"
+    "color": "#f0544f"
    },
    {
     "key": "mullions",
     "label": "方立",
-    "color": "#5c8f8a"
+    "color": "#00828f"
    }
   ]
  },
@@ -330,32 +330,32 @@
    {
     "key": "floors",
     "label": "床・スラブ",
-    "color": "#8c8c94"
+    "color": "#63b5f5"
    },
    {
     "key": "generic",
     "label": "一般モデル",
-    "color": "#9c9c9c"
+    "color": "#ba69c7"
    },
    {
     "key": "walls",
     "label": "壁",
-    "color": "#bab0ab"
+    "color": "#e8ba3d"
    },
    {
     "key": "foundations",
     "label": "基礎",
-    "color": "#6b5c73"
+    "color": "#8f45ad"
    },
    {
     "key": "ceilings",
     "label": "天井",
-    "color": "#d6cfad"
+    "color": "#dbe875"
    },
    {
     "key": "furniture",
     "label": "家具",
-    "color": "#c29cd4"
+    "color": "#a18780"
    },
    {
     "key": "other",
@@ -370,27 +370,27 @@
    {
     "key": "doors",
     "label": "建具",
-    "color": "#e05759"
+    "color": "#f0544f"
    },
    {
     "key": "columns",
     "label": "構造柱",
-    "color": "#4f78a6"
+    "color": "#2e70d1"
    },
    {
     "key": "rebar",
     "label": "鉄筋",
-    "color": "#a36669"
+    "color": "#b03030"
    },
    {
     "key": "curtain-panels",
     "label": "カーテンパネル",
-    "color": "#75b8b3"
+    "color": "#26a699"
    },
    {
     "key": "mullions",
     "label": "方立",
-    "color": "#5c8f8a"
+    "color": "#00828f"
    }
   ]
  },
@@ -403,7 +403,7 @@
    {
     "key": "generic",
     "label": "一般モデル",
-    "color": "#9c9c9c"
+    "color": "#ba69c7"
    },
    {
     "key": "roofs",
@@ -413,12 +413,12 @@
    {
     "key": "floors",
     "label": "床・スラブ",
-    "color": "#8c8c94"
+    "color": "#63b5f5"
    },
    {
     "key": "walls",
     "label": "壁",
-    "color": "#bab0ab"
+    "color": "#e8ba3d"
    },
    {
     "key": "other",
@@ -428,37 +428,37 @@
    {
     "key": "stairs",
     "label": "階段",
-    "color": "#e3a857"
+    "color": "#f06191"
    },
    {
     "key": "doors",
     "label": "建具",
-    "color": "#e05759"
+    "color": "#f0544f"
    },
    {
     "key": "framing",
     "label": "構造梁",
-    "color": "#59a14f"
+    "color": "#36a14f"
    },
    {
     "key": "furniture",
     "label": "家具",
-    "color": "#c29cd4"
+    "color": "#a18780"
    },
    {
     "key": "columns",
     "label": "構造柱",
-    "color": "#4f78a6"
+    "color": "#2e70d1"
    },
    {
     "key": "windows",
     "label": "窓",
-    "color": "#a3d1ff"
+    "color": "#4dd1e0"
    },
    {
     "key": "curtain-panels",
     "label": "カーテンパネル",
-    "color": "#75b8b3"
+    "color": "#26a699"
    }
   ]
  },
@@ -471,32 +471,32 @@
    {
     "key": "floors",
     "label": "床・スラブ",
-    "color": "#8c8c94"
+    "color": "#63b5f5"
    },
    {
     "key": "generic",
     "label": "一般モデル",
-    "color": "#9c9c9c"
+    "color": "#ba69c7"
    },
    {
     "key": "walls",
     "label": "壁",
-    "color": "#bab0ab"
+    "color": "#e8ba3d"
    },
    {
     "key": "ceilings",
     "label": "天井",
-    "color": "#d6cfad"
+    "color": "#dbe875"
    },
    {
     "key": "foundations",
     "label": "基礎",
-    "color": "#6b5c73"
+    "color": "#8f45ad"
    },
    {
     "key": "furniture",
     "label": "家具",
-    "color": "#c29cd4"
+    "color": "#a18780"
    },
    {
     "key": "other",
@@ -506,7 +506,7 @@
    {
     "key": "windows",
     "label": "窓",
-    "color": "#a3d1ff"
+    "color": "#4dd1e0"
    },
    {
     "key": "roofs",
@@ -516,32 +516,32 @@
    {
     "key": "doors",
     "label": "建具",
-    "color": "#e05759"
+    "color": "#f0544f"
    },
    {
     "key": "framing",
     "label": "構造梁",
-    "color": "#59a14f"
+    "color": "#36a14f"
    },
    {
     "key": "columns",
     "label": "構造柱",
-    "color": "#4f78a6"
+    "color": "#2e70d1"
    },
    {
     "key": "rebar",
     "label": "鉄筋",
-    "color": "#a36669"
+    "color": "#b03030"
    },
    {
     "key": "curtain-panels",
     "label": "カーテンパネル",
-    "color": "#75b8b3"
+    "color": "#26a699"
    },
    {
     "key": "mullions",
     "label": "方立",
-    "color": "#5c8f8a"
+    "color": "#00828f"
    }
   ]
  },
@@ -554,17 +554,17 @@
    {
     "key": "walls",
     "label": "壁",
-    "color": "#bab0ab"
+    "color": "#e8ba3d"
    },
    {
     "key": "columns",
     "label": "構造柱",
-    "color": "#4f78a6"
+    "color": "#2e70d1"
    },
    {
     "key": "framing",
     "label": "構造梁",
-    "color": "#59a14f"
+    "color": "#36a14f"
    },
    {
     "key": "other",
@@ -574,12 +574,12 @@
    {
     "key": "floors",
     "label": "床・スラブ",
-    "color": "#8c8c94"
+    "color": "#63b5f5"
    },
    {
     "key": "foundations",
     "label": "基礎",
-    "color": "#6b5c73"
+    "color": "#8f45ad"
    }
   ]
  },
@@ -592,17 +592,17 @@
    {
     "key": "walls",
     "label": "壁",
-    "color": "#bab0ab"
+    "color": "#e8ba3d"
    },
    {
     "key": "framing",
     "label": "構造梁",
-    "color": "#59a14f"
+    "color": "#36a14f"
    },
    {
     "key": "columns",
     "label": "構造柱",
-    "color": "#4f78a6"
+    "color": "#2e70d1"
    },
    {
     "key": "other",
@@ -612,12 +612,12 @@
    {
     "key": "floors",
     "label": "床・スラブ",
-    "color": "#8c8c94"
+    "color": "#63b5f5"
    },
    {
     "key": "foundations",
     "label": "基礎",
-    "color": "#6b5c73"
+    "color": "#8f45ad"
    }
   ]
  },
@@ -630,17 +630,17 @@
    {
     "key": "walls",
     "label": "壁",
-    "color": "#bab0ab"
+    "color": "#e8ba3d"
    },
    {
     "key": "framing",
     "label": "構造梁",
-    "color": "#59a14f"
+    "color": "#36a14f"
    },
    {
     "key": "columns",
     "label": "構造柱",
-    "color": "#4f78a6"
+    "color": "#2e70d1"
    },
    {
     "key": "other",
@@ -650,12 +650,12 @@
    {
     "key": "floors",
     "label": "床・スラブ",
-    "color": "#8c8c94"
+    "color": "#63b5f5"
    },
    {
     "key": "foundations",
     "label": "基礎",
-    "color": "#6b5c73"
+    "color": "#8f45ad"
    }
   ]
  }

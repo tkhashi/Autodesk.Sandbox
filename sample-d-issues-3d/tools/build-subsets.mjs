@@ -23,21 +23,21 @@ for (const m of models) {
 }
 // 部材の種別（Revit カテゴリ）ごとの色分け。対象要素は常に橙。
 const CATS = [
-  [/Structural Columns/, 'columns', '構造柱', [0.31, 0.47, 0.65]],
-  [/Structural Framing/, 'framing', '構造梁', [0.35, 0.63, 0.31]],
-  [/Structural Foundations/, 'foundations', '基礎', [0.42, 0.36, 0.45]],
-  [/Structural Rebar/, 'rebar', '鉄筋', [0.64, 0.40, 0.41]],
-  [/Curtain Panels/, 'curtain-panels', 'カーテンパネル', [0.46, 0.72, 0.70]],
-  [/Curtain Wall Mullions/, 'mullions', '方立', [0.36, 0.56, 0.54]],
-  [/Walls/, 'walls', '壁', [0.73, 0.69, 0.67]],
-  [/Floors/, 'floors', '床・スラブ', [0.55, 0.55, 0.58]],
+  [/Structural Columns/, 'columns', '構造柱', [0.18, 0.44, 0.82]],
+  [/Structural Framing/, 'framing', '構造梁', [0.21, 0.63, 0.31]],
+  [/Structural Foundations/, 'foundations', '基礎', [0.56, 0.27, 0.68]],
+  [/Structural Rebar/, 'rebar', '鉄筋', [0.69, 0.19, 0.19]],
+  [/Curtain Panels/, 'curtain-panels', 'カーテンパネル', [0.15, 0.65, 0.60]],
+  [/Curtain Wall Mullions/, 'mullions', '方立', [0.00, 0.51, 0.56]],
+  [/Walls/, 'walls', '壁', [0.91, 0.73, 0.24]],
+  [/Floors/, 'floors', '床・スラブ', [0.39, 0.71, 0.96]],
   [/Roofs/, 'roofs', '屋根', [0.69, 0.48, 0.27]],
-  [/Windows/, 'windows', '窓', [0.64, 0.82, 1.0]],
-  [/Doors/, 'doors', '建具', [0.88, 0.34, 0.35]],
-  [/Ceilings/, 'ceilings', '天井', [0.84, 0.81, 0.68]],
-  [/Furniture/, 'furniture', '家具', [0.76, 0.61, 0.83]],
-  [/Stairs/, 'stairs', '階段', [0.89, 0.66, 0.34]],
-  [/Generic Models/, 'generic', '一般モデル', [0.61, 0.61, 0.61]],
+  [/Windows/, 'windows', '窓', [0.30, 0.82, 0.88]],
+  [/Doors/, 'doors', '建具', [0.94, 0.33, 0.31]],
+  [/Ceilings/, 'ceilings', '天井', [0.86, 0.91, 0.46]],
+  [/Furniture/, 'furniture', '家具', [0.63, 0.53, 0.50]],
+  [/Stairs/, 'stairs', '階段', [0.94, 0.38, 0.57]],
+  [/Generic Models/, 'generic', '一般モデル', [0.73, 0.41, 0.78]],
 ];
 function catOf(raw) {
   for (const [re, key, label, color] of CATS) if (re.test(raw ?? '')) return { key, label, color };
