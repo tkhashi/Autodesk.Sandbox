@@ -87,6 +87,7 @@ table.issues tbody tr.sel { background: #e8f2fa; }
 <span class="colmenu" id="colMenu" hidden></span>
 </span>
 </div>
+<div id="idxStat" hidden style="font-size:12.5px;color:#8a5a13;background:#fdf6e0;border:1px solid #ecd9a0;border-radius:6px;padding:6px 10px;margin-bottom:8px"></div>
 <table class="issues">
 <thead id="issueHead"></thead>
 <tbody id="issueRows"></tbody>
@@ -403,6 +404,37 @@ async function reloadIssues() {
   if (keep) selectIssue(keep);
 }
 
+// 索引（モデル情報）がサーバー側で非同期に構築される間は、状態表示と自動リフレッシュを行う
+let idxPolls = 0;
+async function reloadIssuesSoft() {
+  const keep = selected, keepPage = page;
+  const j = await (await fetch('/api/issues')).json();
+  if (!Array.isArray(j.issues)) return;
+  DATA = j;
+  buildColumns();
+  page = keepPage;
+  buildTable();
+  const editing = $('detailPanel').contains(document.activeElement);
+  if (keep && !editing) selectIssue(keep);
+}
+function maybePollIndexes() {
+  const ms = DATA?.models ?? [];
+  const pending = ms.filter(m => m.indexStatus === 'building' || m.indexStatus === 'idle');
+  const failed = ms.filter(m => m.indexStatus === 'error');
+  const el = $('idxStat');
+  if (pending.length) {
+    el.hidden = false;
+    el.textContent = `モデル情報を API から構築中…（${pending.map(m => m.short).join('、')}）`;
+    if (idxPolls++ < 45) setTimeout(async () => { try { await reloadIssuesSoft(); } catch (e) {} maybePollIndexes(); }, 4000);
+    else el.textContent = 'モデル情報の構築に時間がかかっています。ページを再読み込みすると状態が更新されます。';
+  } else if (failed.length) {
+    el.hidden = false;
+    el.textContent = '一部のモデル情報の構築に失敗しました（そのモデルの Issue は要素情報なしで表示しています）。';
+  } else {
+    el.hidden = true;
+  }
+}
+
 // ---- ビューア表示（専用ボタンから） ----
 function showInViewer(id) {
   selected = id;
@@ -572,6 +604,7 @@ initViewer();
     buildTable();
     const first = DATA.issues.find(i => i.targetDbId) ?? DATA.issues[0];
     if (first) selectIssue(first.id); // 詳細だけ開く。ビューア表示は専用ボタンから
+    maybePollIndexes();
   } catch (e) {
     setStatV('Issue の取得に失敗しました：' + e.message);
   }

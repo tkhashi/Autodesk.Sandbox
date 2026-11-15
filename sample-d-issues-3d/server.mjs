@@ -1,11 +1,9 @@
-// server.mjs — sample-d v6: 実 Issue（APS Issues API）+ 要素情報の自動付与 + ハイブリッド 3D 表示
+// server.mjs — sample-d: 実 Issue（APS Issues API）+ 要素情報の自動付与 + Forma 風 UI + APS Viewer 表示
 // 起動: node server.mjs（.env に APS_CLIENT_ID / APS_CLIENT_SECRET、.token.json に 3-legged トークンが必要）
 //
-// 対象は2モデル（data/models.json）: DACHsampleproject.rvt（建築・132MB）と
-// Snowdon Towers Sample Structural.rvt（構造・軽量）。Issue のピン先モデルに応じて付与と表示を切り替える。
-// 3D 表示は2段構え: (1) 先行表示 = 起票対象＋周辺だけの軽量 GLB（Draco 圧縮、public/subsets/ に同梱）を
-// three.js で即時表示、(2) 本表示 = APS Viewer（SVF 逐次配信）が読み込み完了後に使える。
-// サーバーの役割はトークン配布と Issues API 連携のみ（変換・キャッシュは持たない）。
+// 対象モデルは data/models.json の登録簿（5モデル）。要素情報の索引（プロパティ／externalId→dbId 対応）は
+// 事前生成せず、起動後に Model Derivative API から非同期に構築する（cache/ に派生キャッシュを残し、
+// モデルのバージョンが変わったら作り直す）。サーバーは索引の完成を待たずに即座に起動する。
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,14 +17,18 @@ for (const line of fs.readFileSync(path.join(root, '.env'), 'utf8').split('\n'))
   if (m) env[m[1]] = m[2].trim();
 }
 const models = JSON.parse(fs.readFileSync(path.join(root, 'data', 'models.json'), 'utf8'));
+const indexCacheDir = path.join(root, 'cache');
+fs.mkdirSync(indexCacheDir, { recursive: true });
 for (const m of models) {
-  const dir = path.join(root, 'data', m.key);
-  m.propsIndex = JSON.parse(fs.readFileSync(path.join(dir, 'props-index.json'), 'utf8'));
-  m.ext2dbid = JSON.parse(fs.readFileSync(path.join(dir, 'ext2dbid.json'), 'utf8'));
-  m.bboxIndex = JSON.parse(fs.readFileSync(path.join(dir, 'bbox-index.json'), 'utf8'));
-  const u = [1e9, 1e9, 1e9, -1e9, -1e9, -1e9];
-  for (const b of Object.values(m.bboxIndex)) for (let k = 0; k < 3; k++) { u[k] = Math.min(u[k], b[k]); u[k + 3] = Math.max(u[k + 3], b[k + 3]); }
-  m.bounds = u;
+  m.propsIndex = null; m.ext2dbid = null; m.indexStatus = 'idle'; m.indexError = null; m.indexVersionId = null;
+  // 派生キャッシュ（前回 API から構築した索引）があれば即座に使う。無ければ起動後に非同期で構築する
+  try {
+    const c = JSON.parse(fs.readFileSync(path.join(indexCacheDir, 'index-' + m.key + '.json'), 'utf8'));
+    if (c?.propsIndex && c?.ext2dbid) {
+      m.propsIndex = c.propsIndex; m.ext2dbid = c.ext2dbid;
+      m.indexVersionId = c.versionId ?? null; m.indexStatus = 'ready';
+    }
+  } catch (e) {}
 }
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.glb': 'model/gltf-binary', '.wasm': 'application/wasm' };
 const BASE = 'https://developer.api.autodesk.com';
@@ -77,13 +79,70 @@ async function getModelVersion(m) {
   return value;
 }
 
-// ---- Issue の要素情報付与（ピン先モデルに応じて索引を切り替える） ----
-const MAX_CONTEXT = 131;
-function distToBox(b, p) {
-  const dx = Math.max(b[0] - p[0], 0, p[0] - b[3]);
-  const dy = Math.max(b[1] - p[1], 0, p[1] - b[4]);
-  const dz = Math.max(b[2] - p[2], 0, p[2] - b[5]);
-  return Math.hypot(dx, dy, dz);
+// ---- 要素索引の動的構築（Model Derivative API から非同期に作る。事前の JSON 生成は不要） ----
+let DatabaseSync = null;
+try { ({ DatabaseSync } = await import('node:sqlite')); } catch (e) {}
+async function getPoll2(url, token, label) {
+  const H = { Authorization: 'Bearer ' + token };
+  for (let i = 0; i < 120; i++) {
+    const r = await fetch(url, { headers: H });
+    if (r.status === 200) return r.json();
+    if (r.status !== 202) throw new Error(label + ' status ' + r.status);
+    await new Promise(s => setTimeout(s, 3000));
+  }
+  throw new Error(label + ' timeout');
+}
+async function buildIndex(m) {
+  if (m.indexStatus === 'building') return;
+  m.indexStatus = 'building'; m.indexError = null;
+  const t0 = Date.now();
+  try {
+    if (!DatabaseSync) throw new Error('node:sqlite が使えません（Node 22.5+ が必要です）');
+    const token = (await getToken2()).access_token;
+    const H = { Authorization: 'Bearer ' + token };
+    // プロパティ一式 → externalId → プロパティ（平坦化）
+    const props = await getPoll2(`${BASE}/modelderivative/v2/designdata/${m.derivativeUrn}/metadata/${m.viewableGuid}/properties?forceget=true`, token, 'properties');
+    const propsIndex = {};
+    for (const o of props.data?.collection ?? []) {
+      if (!o.externalId) continue;
+      const entry = { name: o.name, revitId: o.name?.match(/\[(\d+)\]\s*$/)?.[1] ?? null, objectid: o.objectid };
+      for (const g of Object.values(o.properties ?? {})) for (const [k, v] of Object.entries(g)) {
+        if (!k.startsWith('_') && entry[k] === undefined) entry[k] = v;
+      }
+      propsIndex[o.externalId] = entry;
+    }
+    // model.sdb（変換データ同梱のプロパティ DB）→ externalId → Viewer の dbId
+    const sdbUrn = `urn:adsk.viewing:fs.file:${m.derivativeUrn}/output/Resource/model.sdb`;
+    const sr = await fetch(`${BASE}/modelderivative/v2/designdata/${m.derivativeUrn}/manifest/${encodeURIComponent(sdbUrn)}`, { headers: H });
+    if (!sr.ok) throw new Error('sdb status ' + sr.status);
+    const sdbPath = path.join(indexCacheDir, 'tmp-' + m.key + '.sdb');
+    fs.writeFileSync(sdbPath, Buffer.from(await sr.arrayBuffer()));
+    const db = new DatabaseSync(sdbPath);
+    const ext2dbid = {};
+    for (const row of db.prepare('SELECT id, external_id FROM _objects_id').all()) ext2dbid[row.external_id] = row.id;
+    db.close();
+    fs.rmSync(sdbPath, { force: true });
+    m.propsIndex = propsIndex; m.ext2dbid = ext2dbid; m.indexStatus = 'ready';
+    const ver = await getModelVersion(m).catch(() => null);
+    m.indexVersionId = ver?.versionId ?? null;
+    fs.writeFileSync(path.join(indexCacheDir, 'index-' + m.key + '.json'), JSON.stringify({ versionId: m.indexVersionId, builtAt: new Date().toISOString(), propsIndex, ext2dbid }));
+    console.log(`index built: ${m.key} (props ${Object.keys(propsIndex).length}, map ${Object.keys(ext2dbid).length}) in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+  } catch (e) {
+    m.indexStatus = 'error'; m.indexError = String(e?.message ?? e);
+    console.error('index build failed:', m.key, e);
+  }
+}
+function initIndexes() {
+  for (const m of models) {
+    if (m.indexStatus === 'ready') {
+      // キャッシュ使用中でも、モデルのバージョンが変わっていたら作り直す
+      getModelVersion(m).then(ver => {
+        if (ver?.versionId && m.indexVersionId && ver.versionId !== m.indexVersionId) buildIndex(m);
+      }).catch(() => {});
+    } else {
+      buildIndex(m);
+    }
+  }
 }
 // ---- Issue タイプ（subtypeId → 親タイプ名／subtype名／コード）とプロジェクトメンバー（autodeskId → 名前） ----
 let typesCache = null, usersCache = null;
@@ -138,19 +197,11 @@ function enrich(issue, types, users) {
   out.modelKey = m.key;
   out.modelName = m.short;
   out.modelFullName = m.name;
+  if (!m.ext2dbid || !m.propsIndex) return out; // 索引を構築中（または失敗）のモデルは、付与なしで返す
   const dbId = m.ext2dbid[d.externalId];
   if (dbId === undefined) return out;
   out.targetDbId = dbId;
   out.element = m.propsIndex[d.externalId] ?? null;
-  out.targetBbox = m.bboxIndex[String(dbId)] ?? null;
-  if (out.targetBbox) {
-    // 先行表示サブセットと同じ選び方で、対象＋周辺（近い順に最大131要素）を Viewer の表示範囲にも使う
-    const tb = out.targetBbox;
-    const c = [(tb[0] + tb[3]) / 2, (tb[1] + tb[4]) / 2, (tb[2] + tb[5]) / 2];
-    out.contextDbIds = Object.keys(m.bboxIndex).map(Number)
-      .map(id => ({ id, d: id === dbId ? -1 : distToBox(m.bboxIndex[String(id)], c) }))
-      .sort((a, b) => a.d - b.d).slice(0, MAX_CONTEXT).map(x => x.id);
-  }
   return out;
 }
 async function fetchIssues() {
@@ -181,19 +232,6 @@ const server = http.createServer(async (req, res) => {
       const ver = await getModelVersion(m);
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ key: m.key, name: m.name, short: m.short, lineage: m.lineage, version: ver.versionNumber, urn: m.derivativeUrn, guid: m.viewableGuid }));
-      return;
-    }
-    if (url.pathname === '/api/footprints') {
-      // 平面ロケーター用：全要素の平面フットプリント（SVF の x/y）と全体の外形
-      const m = models.find(x => x.key === url.searchParams.get('key')) ?? models[0];
-      const rects = [];
-      let minx = 1e9, miny = 1e9, maxx = -1e9, maxy = -1e9;
-      for (const b of Object.values(m.bboxIndex)) {
-        rects.push([+b[0].toFixed(1), +b[1].toFixed(1), +b[3].toFixed(1), +b[4].toFixed(1)]);
-        minx = Math.min(minx, b[0]); miny = Math.min(miny, b[1]); maxx = Math.max(maxx, b[3]); maxy = Math.max(maxy, b[4]);
-      }
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ key: m.key, bounds: [minx, miny, maxx, maxy], rects }));
       return;
     }
     if (url.pathname === '/api/thumbnail') {
@@ -257,7 +295,7 @@ const server = http.createServer(async (req, res) => {
       const vers = await Promise.all(models.map(getModelVersion));
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({
-        models: models.map((m, i) => ({ key: m.key, name: m.name, short: m.short, version: vers[i].versionNumber, urn: m.derivativeUrn, guid: m.viewableGuid, bounds: m.bounds })),
+        models: models.map((m, i) => ({ key: m.key, name: m.name, short: m.short, version: vers[i].versionNumber, urn: m.derivativeUrn, guid: m.viewableGuid, indexStatus: m.indexStatus })),
         issues, fetchedAt: new Date().toISOString(),
       }));
       return;
@@ -275,4 +313,5 @@ const server = http.createServer(async (req, res) => {
   fs.createReadStream(file).pipe(res);
 });
 const port = process.env.PORT ?? 3000;
-server.listen(port, () => { console.log(`sample-d v6 server: http://localhost:${port}`); });
+initIndexes(); // 索引の非同期構築を開始（サーバーは待たずに起動する）
+server.listen(port, () => { console.log(`sample-d server: http://localhost:${port}`); });
