@@ -7,17 +7,17 @@
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/style.min.css">
 <style>
-body { font-family: "Hiragino Sans", "Noto Sans JP", sans-serif; margin: 24px; color: #1c2733; background: #f4f6f8; }
-h1 { font-size: 20px; margin: 0 0 14px; }
-.top { display: flex; gap: 14px; align-items: flex-start; }
-.grow { flex: 1 1 auto; min-width: 0; }
-.panel { background: #fff; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(20,40,60,.08); }
-.panel h2 { font-size: 15px; margin: 0 0 10px; }
-.viewer-panel { margin-top: 14px; }
+html, body { height: 100%; }
+body { font-family: "Hiragino Sans", "Noto Sans JP", sans-serif; margin: 0; padding: 14px 18px; box-sizing: border-box; color: #1c2733; background: #f4f6f8; display: flex; flex-direction: column; overflow: hidden; }
+h1 { font-size: 18px; margin: 0 0 10px; }
+.panel { background: #fff; border-radius: 10px; padding: 12px 16px; box-shadow: 0 1px 3px rgba(20,40,60,.08); }
+.panel h2 { font-size: 15px; margin: 0 0 8px; }
+.bottom { display: flex; gap: 14px; flex: 1 1 auto; min-height: 0; margin-top: 14px; }
+.viewer-panel { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
 /* ---- Issue 表（Forma の Issues 一覧に寄せた見た目） ---- */
 table.issues { width: 100%; border-collapse: collapse; font-size: 13px; }
-table.issues th { background: #fff; color: #3c4a57; text-align: left; padding: 8px 10px; font-weight: 600; white-space: nowrap; border-bottom: 2px solid #d9e2ea; }
-table.issues td { padding: 9px 10px; border-top: 1px solid #e7edf2; vertical-align: middle; }
+table.issues th { background: #fff; color: #3c4a57; text-align: left; padding: 7px 10px; font-weight: 600; white-space: nowrap; border-bottom: 2px solid #d9e2ea; }
+table.issues td { padding: 8px 10px; border-top: 1px solid #e7edf2; vertical-align: middle; }
 table.issues tbody tr { cursor: pointer; }
 table.issues tbody tr:hover { background: #f5f9fc; }
 table.issues tbody tr.sel { background: #e8f2fa; }
@@ -30,20 +30,20 @@ table.issues tbody tr.sel { background: #e8f2fa; }
 .place { color: #2b6cb0; }
 .vpill { display: inline-block; margin-left: 6px; padding: 0 7px; border: 1px solid #c3d2de; border-radius: 9px; font-size: 11px; color: #41586c; background: #f2f6f9; white-space: nowrap; }
 .mono { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.toolbar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; align-items: center; }
+.toolbar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; align-items: center; }
 .toolbar input[type="text"] { flex: 1 1 110px; min-width: 90px; padding: 5px 8px; border: 1px solid #b9c9d6; border-radius: 6px; font-size: 12.5px; }
 .toolbar select { padding: 5px 6px; border: 1px solid #b9c9d6; border-radius: 6px; font-size: 12.5px; background: #fff; }
 .toolbar button, .pager button, .btn { padding: 5px 12px; border: 1px solid #b9c9d6; background: #f2f7fb; border-radius: 6px; cursor: pointer; font-size: 12.5px; }
 .btn-primary { background: #2b7bbb; border-color: #2b7bbb; color: #fff; font-weight: 700; }
 .vbtn { padding: 2px 10px; border: 1px solid #2b7bbb; background: #2b7bbb; color: #fff; border-radius: 6px; cursor: pointer; font-size: 11.5px; font-weight: 700; white-space: nowrap; }
-.pager { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 12.5px; color: #41586c; }
+.pager { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 12.5px; color: #41586c; }
 .pager button:disabled { opacity: .45; cursor: default; }
 .colmenu-wrap { position: relative; }
 .colmenu { position: absolute; right: 0; top: 32px; z-index: 20; background: #fff; border: 1px solid #b9c9d6; border-radius: 8px; box-shadow: 0 6px 20px rgba(20,40,60,.18); padding: 10px 12px; width: 230px; max-height: 320px; overflow: auto; }
 .colmenu label { display: block; font-size: 12.5px; padding: 3px 0; cursor: pointer; }
 .colmenu .grp { font-size: 11px; color: #68798a; margin: 8px 0 2px; font-weight: 700; }
-/* ---- 詳細パネル（Forma の Detail に寄せた見た目） ---- */
-.detail { flex: 0 0 350px; width: 350px; }
+/* ---- 詳細パネル（ビューアの右に配置、内部スクロール） ---- */
+.detail { flex: 0 0 350px; width: 350px; overflow-y: auto; }
 .detail .dhead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .detail .dhead h2 { margin: 0; font-size: 16px; }
 .detail .x { border: none; background: none; font-size: 17px; cursor: pointer; color: #68798a; padding: 2px 6px; }
@@ -55,15 +55,14 @@ table.issues tbody tr.sel { background: #e8f2fa; }
 .detail dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 12.5px; margin: 4px 0 0; }
 .detail dl dt { color: #68798a; white-space: nowrap; }
 .detail dl dd { margin: 0; word-break: break-all; }
-.detail .actions { display: flex; gap: 8px; margin-top: 16px; align-items: center; }
+.detail .actions { display: flex; gap: 8px; margin: 16px 0 6px; align-items: center; }
 .detail .note { font-size: 12px; color: #166534; }
 .detail .err { font-size: 12px; color: #a02c2c; }
 /* ---- ビューア ---- */
-.view { position: relative; height: 620px; background: #e9eff4; border-radius: 8px; overflow: hidden; }
+.view { position: relative; flex: 1 1 auto; min-height: 0; background: #e9eff4; border-radius: 8px; overflow: hidden; }
 #viewerWrap { position: absolute; inset: 0; }
 .view .msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #68798a; font-size: 13px; text-align: center; padding: 12px; }
-#pinMark { position: absolute; z-index: 6; pointer-events: none; transform: translate(-50%, -97%); filter: drop-shadow(0 2px 3px rgba(10,40,80,.45)); }
-.stat { margin-top: 10px; font-size: 12.5px; color: #33475c; line-height: 1.8; }
+.stat { margin-top: 8px; font-size: 12.5px; color: #33475c; line-height: 1.7; }
 .stat b { color: #b3541e; }
 .tb-focus-btn .adsk-button-icon { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='6' fill='none' stroke='%23e8eef4' stroke-width='2'/%3E%3Cpath d='M12 2v4M12 18v4M2 12h4M18 12h4' stroke='%23e8eef4' stroke-width='2'/%3E%3Ccircle cx='12' cy='12' r='1.8' fill='%23e8eef4'/%3E%3C/svg%3E") !important; background-size: 20px 20px; background-position: center; background-repeat: no-repeat; }
 </style>
@@ -71,8 +70,7 @@ table.issues tbody tr.sel { background: #e8f2fa; }
 <body>
 <h1>指摘事項 拡張デモ②：実 Issue → 要素情報の自動付与 → 3D 表示</h1>
 
-<div class="top">
-<div class="panel grow">
+<div class="panel">
 <h2>Issues</h2>
 <div class="toolbar">
 <input type="text" id="fltQ" placeholder="Title, ID, or description">
@@ -100,6 +98,7 @@ table.issues tbody tr.sel { background: #e8f2fa; }
 <span style="flex:1"></span>
 <label>表示件数
 <select id="pageSize">
+<option value="5">5</option>
 <option value="10">10</option>
 <option value="25">25</option>
 <option value="50">50</option>
@@ -107,6 +106,16 @@ table.issues tbody tr.sel { background: #e8f2fa; }
 </select>
 </label>
 </div>
+</div>
+
+<div class="bottom">
+<div class="panel viewer-panel">
+<h2>3D 表示（APS Viewer）</h2>
+<div class="view" id="viewerOuter">
+<div id="viewerWrap"></div>
+<div class="msg" id="viewerMsg">モデルを読み込んでいます…</div>
+</div>
+<div class="stat" id="statV">—</div>
 </div>
 
 <aside class="panel detail" id="detailPanel" hidden>
@@ -140,21 +149,11 @@ table.issues tbody tr.sel { background: #e8f2fa; }
 </aside>
 </div>
 
-<div class="panel viewer-panel">
-<h2>3D 表示（APS Viewer）</h2>
-<div class="view" id="viewerOuter">
-<div id="viewerWrap"></div>
-<div id="pinMark" hidden><svg width="34" height="44" viewBox="0 0 34 44"><path d="M17 43 C17 43 3 27 3 15 A14 14 0 1 1 31 15 C31 27 17 43 17 43 Z" fill="#1e9bff" stroke="#ffffff" stroke-width="2"/><circle cx="17" cy="15" r="6" fill="#ffffff"/></svg></div>
-<div class="msg" id="viewerMsg">モデルを読み込んでいます…</div>
-</div>
-<div class="stat" id="statV">—</div>
-</div>
-
 <script src="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/viewer3D.min.js"></script>
 <script>
 let DATA = null, selected = null, focusedId = null;
 let viewer = null, viewerModelKey = null, rootLoaded = false, geoLoaded = false, tSelect = 0;
-let viewerReady = false, desiredModelKey = null, aimedFor = null;
+let viewerReady = false, desiredModelKey = null;
 let blinkTimer = null, blinkOn = false;
 const captured = new Map(); // Issue ごとのビューアキャプチャ（スナップショットの代替）
 const $ = id => document.getElementById(id);
@@ -259,10 +258,10 @@ $('btnCols').addEventListener('click', (e) => { e.stopPropagation(); $('colMenu'
 document.addEventListener('click', (e) => { if (!$('colMenu').hidden && !e.target.closest('.colmenu-wrap')) $('colMenu').hidden = true; });
 
 // ---- Issue 一覧 ----
-let PAGE_SIZE = Number(localStorage.getItem('sampled-pagesize') ?? 10);
-if (![10, 25, 50, 100].includes(PAGE_SIZE)) PAGE_SIZE = 10;
+let PAGE_SIZE = Number(localStorage.getItem('sampled-pagesize-v2') ?? 5);
+if (![5, 10, 25, 50, 100].includes(PAGE_SIZE)) PAGE_SIZE = 5;
 $('pageSize').value = String(PAGE_SIZE);
-$('pageSize').addEventListener('change', () => { PAGE_SIZE = Number($('pageSize').value); localStorage.setItem('sampled-pagesize', String(PAGE_SIZE)); page = 1; buildTable(); });
+$('pageSize').addEventListener('change', () => { PAGE_SIZE = Number($('pageSize').value); localStorage.setItem('sampled-pagesize-v2', String(PAGE_SIZE)); page = 1; buildTable(); });
 let page = 1;
 const flt = { q: '', status: 'all', sort: 'id' };
 function visibleIssues() {
@@ -434,69 +433,6 @@ function startBlink(dbId) {
   }, 650);
 }
 
-// ---- ピン：HTML マーカーを 3D 位置へ投影して重ねる（Viewer の描画に依存しない確実な方式） ----
-let pinPos = null, pinRaf = null;
-function hidePin() {
-  pinPos = null;
-  if (pinRaf) { cancelAnimationFrame(pinRaf); pinRaf = null; }
-  $('pinMark').hidden = true;
-}
-function pinLoop() {
-  pinRaf = requestAnimationFrame(pinLoop);
-  if (!viewer || !pinPos) return;
-  try {
-    const T = Autodesk.Viewing.Private.THREE;
-    const p = new T.Vector3(pinPos.x, pinPos.y, pinPos.z);
-    const cam = viewer.impl.camera;
-    const dir = new T.Vector3();
-    cam.getWorldDirection(dir);
-    const to = p.clone().sub(cam.position);
-    const el = $('pinMark');
-    if (to.dot(dir) <= 0) { el.hidden = true; return; }
-    const v = viewer.worldToClient(p);
-    el.style.left = v.x + 'px';
-    el.style.top = v.y + 'px';
-    el.hidden = false;
-  } catch (e) {}
-}
-function showPin(i) {
-  hidePin();
-  if (!i?.targetDbId) return;
-  const b = i.targetBbox;
-  pinPos = i.pin?.position ?? (b ? { x: (b[0] + b[3]) / 2, y: (b[1] + b[4]) / 2, z: b[5] } : null);
-  if (pinPos && !pinRaf) pinRaf = requestAnimationFrame(pinLoop);
-}
-
-// フォーカス対象の bbox からカメラ位置を決める（読み込み前／読み込み直後に呼んで、最初からピン位置にカメラを置く）
-function aimCameraAtTarget() {
-  const i = focusedIssue();
-  if (!viewer || !i?.targetBbox || i.modelKey !== viewerModelKey) return false;
-  try {
-    const V3 = Autodesk.Viewing.Private.THREE.Vector3;
-    const b = i.targetBbox;
-    const c = new V3((b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2);
-    const diag = Math.hypot(b[3] - b[0], b[4] - b[1], b[5] - b[2]) || 10;
-    const dir = new V3(0.95, 0.75, 0.95).normalize();
-    const pos = c.clone().add(dir.multiplyScalar(diag * 1.6 + 6));
-    viewer.navigation.setView(pos, c);
-    aimedFor = i.id;
-    return true;
-  } catch (e) { return false; }
-}
-function aimCameraAtModel(m) {
-  if (!viewer || !m?.bounds) return false;
-  try {
-    const V3 = Autodesk.Viewing.Private.THREE.Vector3;
-    const b = m.bounds;
-    const c = new V3((b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2);
-    const diag = Math.hypot(b[3] - b[0], b[4] - b[1], b[5] - b[2]) || 100;
-    const dir = new V3(0.95, 0.75, 0.95).normalize();
-    const pos = c.clone().add(dir.multiplyScalar(diag * 0.8));
-    viewer.navigation.setView(pos, c);
-    return true;
-  } catch (e) { return false; }
-}
-
 // ビューアの実描画をキャプチャして、その Issue のサムネイルにする（API ではスナップショットを生成できないため）
 let captureTimer = null;
 function scheduleCapture(i) {
@@ -518,7 +454,7 @@ function applySelection() {
   const i = focusedIssue();
   if (!viewer || !rootLoaded || !i) return;
   if (!i.targetDbId || i.modelKey !== viewerModelKey) {
-    if (!i.targetDbId) { stopBlink(); hidePin(); viewer.showAll(); viewer.clearThemingColors(); setStatV('この Issue は対象モデルへのピンがないため、モデル全体を表示しています。'); }
+    if (!i.targetDbId) { stopBlink(); viewer.showAll(); viewer.clearThemingColors(); setStatV('この Issue は対象モデルへのピンがないため、モデル全体を表示しています。'); }
     return;
   }
   if (!viewer.model?.getFragmentList?.()) return;
@@ -526,10 +462,9 @@ function applySelection() {
     if (typeof viewer.setGhosting === 'function') viewer.setGhosting(true);
     viewer.isolate([i.targetDbId]); // 残すのは対象だけ：壁の向こう・地中の対象でもゴースト越しに見える
     viewer.clearThemingColors();
-    if (aimedFor !== i.id && !aimCameraAtTarget()) viewer.fitToView([i.targetDbId]); // カメラは最初からピン位置へ（全体表示を経ない）
+    viewer.fitToView([i.targetDbId]);
   } catch (e) { return; }
   startBlink(i.targetDbId);
-  showPin(i);
   if (geoLoaded) {
     setStatV(`<b>#${i.displayId}</b> の対象要素を表示中（対象以外はゴースト表示）。`);
     scheduleCapture(i);
@@ -540,17 +475,15 @@ function setupViewer(modelKey) {
   const m = DATA?.models.find(x => x.key === modelKey);
   if (!m || !window.Autodesk) return;
   if (viewer && viewerModelKey === modelKey) return;
-  if (viewer) { stopBlink(); hidePin(); try { viewer.finish(); } catch (e) {} viewer = null; }
+  if (viewer) { stopBlink(); try { viewer.finish(); } catch (e) {} viewer = null; }
   $('viewerWrap').innerHTML = '';
   const msg = $('viewerMsg'); if (msg) msg.remove();
-  viewerModelKey = modelKey; rootLoaded = false; geoLoaded = false; aimedFor = null;
+  viewerModelKey = modelKey; rootLoaded = false; geoLoaded = false;
   viewer = new Autodesk.Viewing.GuiViewer3D($('viewerWrap'));
   viewer.start();
   viewer.loadExtension('DemoToolbarExtension').catch(() => {});
-  const aimed = aimCameraAtTarget() || aimCameraAtModel(m);
   viewer.addEventListener(Autodesk.Viewing.MODEL_ROOT_LOADED_EVENT, () => {
     rootLoaded = true;
-    aimCameraAtTarget(); // 読み込み直後の時点でカメラをピン位置へ（ジオメトリ配信もその周辺から優先される）
     applySelection();
     setStatV(`モデル（${esc(m.short)}）の読み込み中…`);
   });
@@ -564,7 +497,7 @@ function setupViewer(modelKey) {
     if (!geoLoaded && typeof e.percent === 'number') setStatV(`モデル（${esc(m.short)}）を読み込んでいます（逐次配信）… ${Math.round(e.percent)}%`);
   });
   Autodesk.Viewing.Document.load('urn:' + m.urn, (doc) => {
-    viewer.loadDocumentNode(doc, doc.getRoot().getDefaultGeometry(), aimed ? { preserveView: true } : undefined);
+    viewer.loadDocumentNode(doc, doc.getRoot().getDefaultGeometry());
     setStatV(`モデル（${esc(m.short)}）を読み込んでいます（逐次配信）…`);
   }, (code, msg2) => setStatV('モデルの読み込みに失敗しました：' + code + ' ' + esc(msg2 ?? '')));
 }
@@ -602,11 +535,12 @@ if (window.Autodesk?.Viewing?.Extension) {
   }
   Autodesk.Viewing.theExtensionManager.registerExtension('DemoToolbarExtension', DemoToolbarExtension);
 }
-window.addEventListener('demo-focus-target', () => { aimedFor = null; applySelection(); });
+window.addEventListener('demo-focus-target', () => applySelection());
 
 async function initViewer() {
   if (!window.Autodesk) {
-    $('viewerMsg').textContent = 'Viewer ライブラリを読み込めませんでした（この環境からは Autodesk の CDN に届きません）。通常のブラウザ環境で開いてください。';
+    const msg = $('viewerMsg');
+    if (msg) msg.textContent = 'Viewer ライブラリを読み込めませんでした（この環境からは Autodesk の CDN に届きません）。通常のブラウザ環境で開いてください。';
     setStatV('Viewer：未初期化（CDN に到達できませんでした）');
     return;
   }
