@@ -9,44 +9,47 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// ============ 設定 ============
 const root = path.dirname(fileURLToPath(import.meta.url));
 const pub = path.join(root, 'public');
+const BASE = 'https://developer.api.autodesk.com';
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png' };
 const env = {};
 for (const line of fs.readFileSync(path.join(root, '.env'), 'utf8').split('\n')) {
   const m = line.match(/^([A-Z_]+)=(.*)$/);
   if (m) env[m[1]] = m[2].trim();
 }
 const models = JSON.parse(fs.readFileSync(path.join(root, 'data', 'models.json'), 'utf8'));
-const indexCacheDir = path.join(root, 'cache');
-fs.mkdirSync(indexCacheDir, { recursive: true });
-for (const m of models) {
-  m.propsIndex = null; m.ext2dbid = null; m.indexStatus = 'idle'; m.indexError = null; m.indexVersionId = null;
-  // 派生キャッシュ（前回 API から構築した索引）があれば即座に使う。無ければ起動後に非同期で構築する
-  try {
-    const c = JSON.parse(fs.readFileSync(path.join(indexCacheDir, 'index-' + m.key + '.json'), 'utf8'));
-    if (c?.propsIndex && c?.ext2dbid) {
-      m.propsIndex = c.propsIndex; m.ext2dbid = c.ext2dbid;
-      m.indexVersionId = c.versionId ?? null; m.indexStatus = 'ready';
-    }
-  } catch (e) {}
-}
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.glb': 'model/gltf-binary', '.wasm': 'application/wasm' };
-const BASE = 'https://developer.api.autodesk.com';
+const PROJECT_ID = models[0].projectId; // 全モデル同一プロジェクト
+const PID = PROJECT_ID.replace(/^b\./, ''); // Issues API は b. なし
 
 function basicAuth() { return 'Basic ' + Buffer.from(env.APS_CLIENT_ID + ':' + env.APS_CLIENT_SECRET).toString('base64'); }
+function sendJson(res, status, obj) {
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify(obj));
+}
+async function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let d = ''; req.on('data', c => { d += c; }); req.on('end', () => resolve(d)); req.on('error', reject);
+  });
+}
 
-// ---- 2-legged トークン（Viewer 用） ----
+// ============ トークン ============
+// 2-legged（アプリ認証）：有効期限内はキャッシュし、認証リクエストを繰り返さない
+let token2Cache = null; // { access_token, expiresAt }
 async function getToken2() {
+  if (token2Cache && Date.now() < token2Cache.expiresAt) return token2Cache;
   const r = await fetch(BASE + '/authentication/v2/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: basicAuth() },
     body: new URLSearchParams({ grant_type: 'client_credentials', scope: 'viewables:read data:read' }),
   });
   if (!r.ok) throw new Error('2-legged token failed: ' + r.status);
-  return r.json();
+  const j = await r.json();
+  token2Cache = { access_token: j.access_token, expires_in: j.expires_in, expiresAt: Date.now() + (j.expires_in - 300) * 1000 };
+  return token2Cache;
 }
-
-// ---- 3-legged トークン（Issues API 用。refresh token を .token.json に保持し、ローテーションに追随する） ----
+// 3-legged（ユーザー認証、Issues API 用）：refresh token を .token.json に保持し、ローテーションに追随する
 const TOKFILE = path.join(root, '.token.json');
 let tok3 = JSON.parse(fs.readFileSync(TOKFILE, 'utf8'));
 async function getToken3() {
@@ -61,37 +64,51 @@ async function getToken3() {
   fs.writeFileSync(TOKFILE, JSON.stringify(tok3, null, 1));
   return tok3.access_token;
 }
-
-// ---- モデルの tip バージョン（表示用、モデルごと） ----
-const versionCache = new Map();
-const thumbCache = new Map();
-const snapCache = new Map();
-async function getModelVersion(m) {
-  const c = versionCache.get(m.key);
-  if (c && Date.now() - c.at < 60000) return c.value;
-  const token = (await getToken2()).access_token;
-  const r = await fetch(`${BASE}/data/v1/projects/${m.projectId}/items/${encodeURIComponent(m.lineage)}/versions`, { headers: { Authorization: 'Bearer ' + token } });
-  if (!r.ok) throw new Error('versions fetch failed: ' + r.status);
-  const j = await r.json();
-  const tip = j.data?.[0];
-  const value = { versionNumber: tip?.attributes?.versionNumber ?? 1, versionId: tip?.id ?? null };
-  versionCache.set(m.key, { at: Date.now(), value });
-  return value;
+// APS の GET（JSON）をまとめたヘルパー
+async function apsGet(url, token) {
+  const r = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+  if (!r.ok) throw new Error(`${url.split('/').slice(-2).join('/')} failed: ${r.status}`);
+  return r.json();
 }
-
-// ---- 要素索引の動的構築（Model Derivative API から非同期に作る。事前の JSON 生成は不要） ----
-let DatabaseSync = null;
-try { ({ DatabaseSync } = await import('node:sqlite')); } catch (e) {}
-async function getPoll2(url, token, label) {
-  const H = { Authorization: 'Bearer ' + token };
+// 202（処理中）を返し続ける API のポーリング（Model Derivative のプロパティ取得など）
+async function pollUntilReady(url, token, label) {
   for (let i = 0; i < 120; i++) {
-    const r = await fetch(url, { headers: H });
+    const r = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
     if (r.status === 200) return r.json();
     if (r.status !== 202) throw new Error(label + ' status ' + r.status);
     await new Promise(s => setTimeout(s, 3000));
   }
   throw new Error(label + ' timeout');
 }
+
+// ============ モデル登録簿とバージョン ============
+const versionCache = new Map(); // key → { at, value }（60秒）
+async function getModelVersion(m) {
+  const c = versionCache.get(m.key);
+  if (c && Date.now() - c.at < 60000) return c.value;
+  const token = (await getToken2()).access_token;
+  const j = await apsGet(`${BASE}/data/v1/projects/${m.projectId}/items/${encodeURIComponent(m.lineage)}/versions`, token);
+  const tip = j.data?.[0];
+  const value = { versionNumber: tip?.attributes?.versionNumber ?? 1, versionId: tip?.id ?? null };
+  versionCache.set(m.key, { at: Date.now(), value });
+  return value;
+}
+
+// ============ 要素索引（API から非同期に構築、cache/ に派生キャッシュ） ============
+const indexCacheDir = path.join(root, 'cache');
+fs.mkdirSync(indexCacheDir, { recursive: true });
+for (const m of models) {
+  m.propsIndex = null; m.ext2dbid = null; m.indexStatus = 'idle'; m.indexError = null; m.indexVersionId = null;
+  try { // 前回構築した派生キャッシュがあれば即座に使う
+    const c = JSON.parse(fs.readFileSync(path.join(indexCacheDir, 'index-' + m.key + '.json'), 'utf8'));
+    if (c?.propsIndex && c?.ext2dbid) {
+      m.propsIndex = c.propsIndex; m.ext2dbid = c.ext2dbid;
+      m.indexVersionId = c.versionId ?? null; m.indexStatus = 'ready';
+    }
+  } catch (e) {}
+}
+let DatabaseSync = null;
+try { ({ DatabaseSync } = await import('node:sqlite')); } catch (e) {}
 async function buildIndex(m) {
   if (m.indexStatus === 'building') return;
   m.indexStatus = 'building'; m.indexError = null;
@@ -99,9 +116,8 @@ async function buildIndex(m) {
   try {
     if (!DatabaseSync) throw new Error('node:sqlite が使えません（Node 22.5+ が必要です）');
     const token = (await getToken2()).access_token;
-    const H = { Authorization: 'Bearer ' + token };
     // プロパティ一式 → externalId → プロパティ（平坦化）
-    const props = await getPoll2(`${BASE}/modelderivative/v2/designdata/${m.derivativeUrn}/metadata/${m.viewableGuid}/properties?forceget=true`, token, 'properties');
+    const props = await pollUntilReady(`${BASE}/modelderivative/v2/designdata/${m.derivativeUrn}/metadata/${m.viewableGuid}/properties?forceget=true`, token, 'properties');
     const propsIndex = {};
     for (const o of props.data?.collection ?? []) {
       if (!o.externalId) continue;
@@ -113,7 +129,7 @@ async function buildIndex(m) {
     }
     // model.sdb（変換データ同梱のプロパティ DB）→ externalId → Viewer の dbId
     const sdbUrn = `urn:adsk.viewing:fs.file:${m.derivativeUrn}/output/Resource/model.sdb`;
-    const sr = await fetch(`${BASE}/modelderivative/v2/designdata/${m.derivativeUrn}/manifest/${encodeURIComponent(sdbUrn)}`, { headers: H });
+    const sr = await fetch(`${BASE}/modelderivative/v2/designdata/${m.derivativeUrn}/manifest/${encodeURIComponent(sdbUrn)}`, { headers: { Authorization: 'Bearer ' + token } });
     if (!sr.ok) throw new Error('sdb status ' + sr.status);
     const sdbPath = path.join(indexCacheDir, 'tmp-' + m.key + '.sdb');
     fs.writeFileSync(sdbPath, Buffer.from(await sr.arrayBuffer()));
@@ -144,40 +160,41 @@ function initIndexes() {
     }
   }
 }
-// ---- Issue タイプ（subtypeId → 親タイプ名／subtype名／コード）とプロジェクトメンバー（autodeskId → 名前） ----
-let typesCache = null, usersCache = null;
-async function getIssueTypes(token, pid) {
-  if (typesCache) return typesCache;
-  try {
-    const r = await fetch(`${BASE}/construction/issues/v1/projects/${pid}/issue-types?include=subtypes`, { headers: { Authorization: 'Bearer ' + token } });
-    const j = await r.json();
-    const map = new Map();
-    for (const t of j.results ?? []) for (const s of t.subtypes ?? []) {
-      map.set(s.id, { typeTitle: t.title, subtypeTitle: s.title, code: s.code ?? null });
-    }
-    typesCache = map;
-  } catch (e) { typesCache = new Map(); }
-  return typesCache;
+
+// ============ Issues（タイプ／メンバーは10分キャッシュ） ============
+function ttlCache(ttlMs) {
+  let box = null;
+  return async (fn) => {
+    if (box && Date.now() - box.at < ttlMs) return box.value;
+    const value = await fn().catch(() => null);
+    if (value) box = { at: Date.now(), value };
+    return value ?? new Map();
+  };
 }
-async function getProjectUsers(token, pidB) {
-  if (usersCache) return usersCache;
-  try {
-    const r = await fetch(`${BASE}/construction/admin/v1/projects/${pidB}/users?limit=200`, { headers: { Authorization: 'Bearer ' + token } });
-    const j = await r.json();
-    const map = new Map();
-    for (const u of j.results ?? []) if (u.autodeskId) map.set(u.autodeskId, u.name ?? null);
-    usersCache = map;
-  } catch (e) { usersCache = new Map(); }
-  return usersCache;
+const getIssueTypes = ttlCache(10 * 60000);
+const getProjectUsers = ttlCache(10 * 60000);
+async function loadIssueTypes(token) {
+  const j = await apsGet(`${BASE}/construction/issues/v1/projects/${PID}/issue-types?include=subtypes`, token);
+  const map = new Map();
+  for (const t of j.results ?? []) for (const s of t.subtypes ?? []) {
+    map.set(s.id, { typeTitle: t.title, subtypeTitle: s.title, code: s.code ?? null });
+  }
+  return map;
+}
+async function loadProjectUsers(token) {
+  const j = await apsGet(`${BASE}/construction/admin/v1/projects/${PROJECT_ID}/users?limit=200`, token);
+  const map = new Map();
+  for (const u of j.results ?? []) if (u.autodeskId) map.set(u.autodeskId, u.name ?? null);
+  return map;
 }
 
 function enrich(issue, types, users) {
-  const st = issue.issueSubtypeId ? types?.get(issue.issueSubtypeId) ?? null : null;
+  const st = issue.issueSubtypeId ? types.get(issue.issueSubtypeId) ?? null : null;
   const out = {
     id: issue.id, displayId: issue.displayId, title: issue.title, description: issue.description,
     status: issue.status, dueDate: issue.dueDate, startDate: issue.startDate ?? null,
-    assignedTo: issue.assignedTo, assignedToName: issue.assignedTo ? (users?.get(issue.assignedTo) ?? null) : null,
-    watcherNames: (issue.watchers ?? []).map(w => users?.get(w) ?? w),
+    assignedTo: issue.assignedTo, assignedToName: issue.assignedTo ? (users.get(issue.assignedTo) ?? null) : null,
+    watcherNames: (issue.watchers ?? []).map(w => users.get(w) ?? w),
     published: issue.published,
     typeLabel: st ? `${st.typeTitle} > ${st.subtypeTitle}` : null,
     typeCode: st?.code ?? null,
@@ -185,8 +202,7 @@ function enrich(issue, types, users) {
     snapshotUrn: issue.snapshotUrn ?? null, snapshotHasMarkups: issue.snapshotHasMarkups ?? false,
     permittedStatuses: issue.permittedStatuses ?? null, customAttributes: issue.customAttributes ?? [],
     attachmentCount: issue.attachmentCount ?? 0, commentCount: issue.commentCount ?? 0,
-    pin: null, element: null, targetDbId: null, targetBbox: null,
-    contextDbIds: null, modelKey: null, modelName: null, modelFullName: null,
+    pin: null, element: null, targetDbId: null, modelKey: null, modelName: null, modelFullName: null,
   };
   const ld = (issue.linkedDocuments ?? [])[0];
   if (!ld) return out;
@@ -206,109 +222,105 @@ function enrich(issue, types, users) {
 }
 async function fetchIssues() {
   const token = await getToken3();
-  const pid = models[0].projectId.replace(/^b\./, '');
-  const [r, types, users] = await Promise.all([
-    fetch(`${BASE}/construction/issues/v1/projects/${pid}/issues?limit=50`, { headers: { Authorization: 'Bearer ' + token } }),
-    getIssueTypes(token, pid),
-    getProjectUsers(token, models[0].projectId),
+  const [types, users] = await Promise.all([
+    getIssueTypes(() => loadIssueTypes(token)),
+    getProjectUsers(() => loadProjectUsers(token)),
   ]);
-  if (!r.ok) throw new Error('issues fetch failed: ' + r.status);
-  const j = await r.json();
-  return (j.results ?? []).filter((i) => !i.deleted).map(i => enrich(i, types, users));
+  const all = [];
+  for (let offset = 0; offset < 200; offset += 50) { // ページング（最大200件まで）
+    const j = await apsGet(`${BASE}/construction/issues/v1/projects/${PID}/issues?limit=50&offset=${offset}`, token);
+    const page = j.results ?? [];
+    all.push(...page);
+    if (page.length < 50) break;
+  }
+  return all.filter(i => !i.deleted).map(i => enrich(i, types, users));
+}
+async function updateIssue(id, patch) {
+  const token = await getToken3();
+  const r = await fetch(`${BASE}/construction/issues/v1/projects/${PID}/issues/${id}`, {
+    method: 'PATCH', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
+  });
+  return { status: r.status, body: await r.json().catch(() => null) };
 }
 
-// ---- HTTP サーバー ----
+// ============ 画像（モデルサムネイル／Issue スナップショット。メモリキャッシュ） ============
+const thumbCache = new Map();
+const snapCache = new Map();
+async function getThumbnail(m) {
+  if (!thumbCache.has(m.key)) {
+    const t = (await getToken2()).access_token;
+    const r = await fetch(`${BASE}/modelderivative/v2/designdata/${m.derivativeUrn}/thumbnail`, { headers: { Authorization: 'Bearer ' + t } });
+    if (!r.ok) throw new Error('thumbnail failed: ' + r.status);
+    thumbCache.set(m.key, Buffer.from(await r.arrayBuffer()));
+  }
+  return thumbCache.get(m.key);
+}
+async function getSnapshot(urn) {
+  // snapshotUrn（OSS オブジェクト）→ 署名付き S3 URL 経由で取得（旧 OSS 直 GET は廃止済み）
+  if (!snapCache.has(urn)) {
+    const rest = urn.slice('urn:adsk.objects:os.object:'.length);
+    const slash = rest.indexOf('/');
+    const bucket = rest.slice(0, slash), object = rest.slice(slash + 1);
+    const t = await getToken3();
+    const sr = await fetch(`${BASE}/oss/v2/buckets/${bucket}/objects/${encodeURIComponent(object)}/signeds3download`, { headers: { Authorization: 'Bearer ' + t } });
+    if (!sr.ok) throw new Error('snapshot sign failed: ' + sr.status);
+    const r = await fetch((await sr.json()).url);
+    if (!r.ok) throw new Error('snapshot download failed: ' + r.status);
+    const s3type = r.headers.get('content-type') ?? '';
+    const type = s3type.startsWith('image/') ? s3type : (object.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg');
+    snapCache.set(urn, { buf: Buffer.from(await r.arrayBuffer()), type });
+  }
+  return snapCache.get(urn);
+}
+
+// ============ HTTP ルーティング ============
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   try {
     if (url.pathname === '/api/token') {
-      const j = await getToken2();
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ access_token: j.access_token, expires_in: j.expires_in }));
-      return;
-    }
-    if (url.pathname === '/api/model') {
-      const m = models.find(x => x.key === url.searchParams.get('key')) ?? models[0];
-      const ver = await getModelVersion(m);
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ key: m.key, name: m.name, short: m.short, lineage: m.lineage, version: ver.versionNumber, urn: m.derivativeUrn, guid: m.viewableGuid }));
-      return;
-    }
-    if (url.pathname === '/api/thumbnail') {
-      // モデルのサムネイル（Model Derivative、2-legged）。メモリにキャッシュする
-      const m = models.find(x => x.key === url.searchParams.get('model')) ?? models[0];
-      if (!thumbCache.has(m.key)) {
-        const t = (await getToken2()).access_token;
-        const r = await fetch(`${BASE}/modelderivative/v2/designdata/${m.derivativeUrn}/thumbnail`, { headers: { Authorization: 'Bearer ' + t } });
-        if (!r.ok) throw new Error('thumbnail failed: ' + r.status);
-        thumbCache.set(m.key, Buffer.from(await r.arrayBuffer()));
-      }
-      res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'max-age=3600' });
-      res.end(thumbCache.get(m.key));
-      return;
-    }
-    if (url.pathname === '/api/snapshot') {
-      // Issue のスナップショット画像：snapshotUrn（OSS オブジェクト）→ 署名付き S3 URL 経由で取得（旧 OSS 直 GET は廃止済み）
-      const urn = url.searchParams.get('urn') ?? '';
-      const prefix = 'urn:adsk.objects:os.object:';
-      if (!urn.startsWith(prefix)) { res.writeHead(404); res.end('no snapshot'); return; }
-      if (!snapCache.has(urn)) {
-        const rest = urn.slice(prefix.length);
-        const slash = rest.indexOf('/');
-        const bucket = rest.slice(0, slash), object = rest.slice(slash + 1);
-        const t = await getToken3();
-        const sr = await fetch(`${BASE}/oss/v2/buckets/${bucket}/objects/${encodeURIComponent(object)}/signeds3download`, { headers: { Authorization: 'Bearer ' + t } });
-        if (!sr.ok) throw new Error('snapshot sign failed: ' + sr.status);
-        const signed = (await sr.json()).url;
-        const r = await fetch(signed);
-        if (!r.ok) throw new Error('snapshot download failed: ' + r.status);
-        const s3type = r.headers.get('content-type') ?? '';
-        const type = s3type.startsWith('image/') ? s3type : (object.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg');
-        snapCache.set(urn, { buf: Buffer.from(await r.arrayBuffer()), type });
-      }
-      const c = snapCache.get(urn);
-      res.writeHead(200, { 'Content-Type': c.type, 'Cache-Control': 'max-age=3600' });
-      res.end(c.buf);
-      return;
-    }
-    if (url.pathname === '/api/issues/update' && req.method === 'POST') {
-      // 実 Issue の編集（Issues API へ PATCH を中継する）
-      const body = JSON.parse(await new Promise((resolve, reject) => {
-        let d = ''; req.on('data', c => { d += c; }); req.on('end', () => resolve(d)); req.on('error', reject);
-      }));
-      const allow = ['title', 'description', 'status', 'dueDate'];
-      const patch = {};
-      for (const k of allow) if (body.patch && k in body.patch) patch[k] = body.patch[k];
-      if (!body.id || !Object.keys(patch).length) { res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ error: 'id and patch required' })); return; }
-      const t = await getToken3();
-      const pid = models[0].projectId.replace(/^b\./, '');
-      const r = await fetch(`${BASE}/construction/issues/v1/projects/${pid}/issues/${body.id}`, {
-        method: 'PATCH', headers: { Authorization: 'Bearer ' + t, 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
-      });
-      const j = await r.json().catch(() => null);
-      res.writeHead(r.status, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify(j ?? { error: 'empty response' }));
-      return;
+      const t = await getToken2();
+      const remain = Math.max(60, Math.floor((t.expiresAt - Date.now()) / 1000));
+      return sendJson(res, 200, { access_token: t.access_token, expires_in: remain });
     }
     if (url.pathname === '/api/issues') {
       const issues = await fetchIssues();
       const vers = await Promise.all(models.map(getModelVersion));
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({
+      return sendJson(res, 200, {
         models: models.map((m, i) => ({ key: m.key, name: m.name, short: m.short, version: vers[i].versionNumber, urn: m.derivativeUrn, guid: m.viewableGuid, indexStatus: m.indexStatus })),
         issues, fetchedAt: new Date().toISOString(),
-      }));
-      return;
+      });
+    }
+    if (url.pathname === '/api/index-status') { // 索引の構築状態だけを返す軽いエンドポイント（画面のポーリング用）
+      return sendJson(res, 200, { models: models.map(m => ({ key: m.key, short: m.short, indexStatus: m.indexStatus })) });
+    }
+    if (url.pathname === '/api/issues/update' && req.method === 'POST') {
+      const body = JSON.parse(await readBody(req));
+      const patch = {};
+      for (const k of ['title', 'description', 'status', 'dueDate']) if (body.patch && k in body.patch) patch[k] = body.patch[k];
+      if (!body.id || !Object.keys(patch).length) return sendJson(res, 400, { error: 'id and patch required' });
+      const r = await updateIssue(body.id, patch);
+      return sendJson(res, r.status, r.body ?? { error: 'empty response' });
+    }
+    if (url.pathname === '/api/thumbnail') {
+      const m = models.find(x => x.key === url.searchParams.get('model')) ?? models[0];
+      const buf = await getThumbnail(m);
+      res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'max-age=3600' });
+      return res.end(buf);
+    }
+    if (url.pathname === '/api/snapshot') {
+      const urn = url.searchParams.get('urn') ?? '';
+      if (!urn.startsWith('urn:adsk.objects:os.object:')) { res.writeHead(404); return res.end('no snapshot'); }
+      const c = await getSnapshot(urn);
+      res.writeHead(200, { 'Content-Type': c.type, 'Cache-Control': 'max-age=3600' });
+      return res.end(c.buf);
     }
   } catch (e) {
     console.error('api error:', e);
-    res.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ error: String(e?.message ?? e) }));
-    return;
+    return sendJson(res, 502, { error: String(e?.message ?? e) });
   }
   const rel = url.pathname === '/' ? 'index.html' : url.pathname.replace(/^\//, '');
   const file = path.join(pub, rel);
-  if (!file.startsWith(pub) || !fs.existsSync(file)) { res.writeHead(404); res.end('not found'); return; }
+  if (!file.startsWith(pub) || !fs.existsSync(file)) { res.writeHead(404); return res.end('not found'); }
   res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] ?? 'application/octet-stream' });
   fs.createReadStream(file).pipe(res);
 });

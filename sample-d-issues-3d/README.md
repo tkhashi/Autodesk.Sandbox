@@ -29,7 +29,7 @@ node server.mjs   # http://localhost:3000
 
 ## 仕組み
 
-- サーバーの API：`/api/issues`（実 Issue の取得＋要素情報の付与）、`/api/token`（Viewer 用 2-legged トークン）、`/api/thumbnail`（モデルのサムネイル）、`/api/snapshot`（Issue のスナップショット画像）、`/api/issues/update`（実 Issue の PATCH 中継）。
+- サーバーの API：`/api/issues`（実 Issue の取得＋要素情報の付与）、`/api/index-status`（索引の構築状態だけを返す軽い確認用）、`/api/token`（Viewer 用 2-legged トークン。サーバー側でキャッシュ）、`/api/thumbnail`（モデルのサムネイル）、`/api/snapshot`（Issue のスナップショット画像）、`/api/issues/update`（実 Issue の PATCH 中継）。画面のスクリプトは `public/app.js` に分離しています。
 - 要素情報の付与：Issue のピン（linkedDocuments）の externalId を、変換データ同梱のプロパティ DB（model.sdb）の対応表で Viewer の dbId に読み替え、要素のプロパティ（要素名・階・通り芯など）を引きます。Model Derivative の objectid と Viewer の dbId は一致しないため、この読み替えが要ります。
 - 索引は**事前生成せず、サーバー起動後に Model Derivative API から非同期に構築**します（プロパティ一式の取得＋model.sdb のダウンロードと解析）。サーバーは索引の完成を待たずに起動し、画面にはモデルごとに「構築中」が表示され、できあがったモデルから順に要素情報が付与されます。構築結果は `cache/` に派生キャッシュとして残り、次回起動時は即座に使われます（モデルのバージョンが変わっていたら自動で作り直し）。コールドスタートからの構築は実測で1モデルあたり3〜6秒でした。
 - スナップショットの取得：旧 OSS 直 GET は廃止（403 "Legacy endpoint is deprecated"）のため、`signeds3download` で署名付き S3 URL を得てから取得します。なお署名 URL の有効期限は約2分と短い点に注意。
