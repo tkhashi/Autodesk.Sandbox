@@ -53,7 +53,7 @@ table.issues tbody tr.na { cursor: default; opacity: .75; }
 <div class="col-model">
 <div class="panel">
 <h2>3D 表示（APS Viewer）</h2>
-<div class="desc">Issue をクリックすると対象にフォーカスします（対象＋周辺を残し、それ以外はゴースト表示）。対象要素は<b>赤く点滅</b>し、ピンが刺さった位置には<b>青いピン</b>を立てます。周辺の要素は半透明に落とすので、地中などに埋まった対象でも赤が透けて見えます。読み込み完了でカメラが全体ビューへ勝手に切り替わることはありません。Viewer 下部のツールバーに、対象要素への再フォーカスのボタンを拡張機能で追加しています。</div>
+<div class="desc">Issue をクリックすると対象にフォーカスします（対象以外はすべてゴースト表示）。対象要素は<b>赤く点滅</b>し、ピンが刺さった位置には<b>青いピン</b>を立てます。壁の向こうや地中に埋まった対象でも、ゴースト越しに赤い点滅が見えます。読み込み完了でカメラが全体ビューへ勝手に切り替わることはありません。Viewer 下部のツールバーに、対象要素への再フォーカスのボタンを拡張機能で追加しています。</div>
 <div class="viewbox">
 <div class="view" id="viewerWrap"><div class="msg" id="viewerMsg">モデルを読み込んでいます…</div></div>
 </div>
@@ -239,19 +239,14 @@ function applySelection() {
   }
   if (!viewer.model?.getFragmentList?.()) return; // フラグメント表が用意できていない間は触らない
   try {
-    const range = i.contextDbIds?.length ? i.contextDbIds : [i.targetDbId];
-    if (typeof viewer.setGhosting === 'function') viewer.setGhosting(true); // 範囲外は消さずゴーストにして位置関係を残す
-    viewer.isolate(range);
+    if (typeof viewer.setGhosting === 'function') viewer.setGhosting(true); // 対象以外は消さずゴーストにして位置関係を残す
+    viewer.isolate([i.targetDbId]); // 残すのは対象だけ：壁の向こう・地中の対象でもゴースト越しに見える
     viewer.clearThemingColors();
-    // 周辺は半透明に落とす（地中・躯体内部の対象でも赤い点滅が透けて見えるように）
-    const V4 = window.THREE?.Vector4 ?? Autodesk.Viewing.Private.THREE.Vector4;
-    const fade = new V4(0.72, 0.78, 0.84, 0.42);
-    for (const id of range) if (id !== i.targetDbId) { try { viewer.setThemingColor(id, fade); } catch (e) {} }
-    viewer.fitToView([i.targetDbId]); // フレーミングは対象のみ（周辺は表示範囲に含めつつ、全体俯瞰にしない）
+    viewer.fitToView([i.targetDbId]);
   } catch (e) { return; }
   startBlink(i.targetDbId);
   showPin(i);
-  if (geoLoaded) setStatV(`<b>#${i.displayId}</b> の対象要素＋周辺を表示中（読み込み済みのため即時）。`);
+  if (geoLoaded) setStatV(`<b>#${i.displayId}</b> の対象要素を表示中（対象以外はゴースト表示）。`);
 }
 
 // 選択中 Issue の対象 bbox からカメラ位置を読み込み前に決め、完了時にカメラが動かないようにする
