@@ -1,5 +1,4 @@
 .env
+.token.json
+cache/
 node_modules/
-tools/node_modules/
-tools/model.sdb
-tools/tmp-*/

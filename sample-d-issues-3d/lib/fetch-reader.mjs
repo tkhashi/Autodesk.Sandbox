@@ -3,10 +3,12 @@
 // signedcookies → CDN のダウンロードだけを fetch で差し替える。
 import path from 'node:path';
 import zlib from 'node:zlib';
+import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { SVFReader } from 'svf-utils';
 
 const BASE = 'https://developer.api.autodesk.com';
-export async function createFetchReader({ urn, guid, token }) {
+export async function createFetchReader({ urn, guid, token, cacheDir = null }) {
   const H = { Authorization: 'Bearer ' + token };
   const man = await (await fetch(`${BASE}/modelderivative/v2/designdata/${urn}/manifest`, { headers: H })).json();
   let found = null;
@@ -16,6 +18,13 @@ export async function createFetchReader({ urn, guid, token }) {
   })({ children: man.derivatives });
   if (!found) throw new Error('viewable not found: ' + guid);
   async function download(derivativeUrn) {
+    // SVF リソースのディスクキャッシュ（モデルバージョン単位のフォルダ配下）
+    let cacheFile = null;
+    if (cacheDir) {
+      fs.mkdirSync(cacheDir, { recursive: true });
+      cacheFile = path.join(cacheDir, crypto.createHash('sha1').update(derivativeUrn).digest('hex'));
+      if (fs.existsSync(cacheFile)) return fs.readFileSync(cacheFile);
+    }
     const sc = await fetch(`${BASE}/modelderivative/v2/designdata/${urn}/manifest/${encodeURIComponent(derivativeUrn)}/signedcookies`, { headers: H });
     if (!sc.ok) throw new Error('signedcookies ' + sc.status + ' for ' + derivativeUrn.slice(-60));
     const cookies = sc.headers.getSetCookie ? sc.headers.getSetCookie() : [];
@@ -28,6 +37,7 @@ export async function createFetchReader({ urn, guid, token }) {
     if (derivativeUrn.endsWith('.gz') && !(buf[0] === 0x1f && buf[1] === 0x8b)) {
       buf = zlib.gzipSync(buf);
     }
+    if (cacheFile) fs.writeFileSync(cacheFile, buf);
     return buf;
   }
   const svfUrn = found.urn;

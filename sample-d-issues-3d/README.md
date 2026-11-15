@@ -1,68 +1,48 @@
-# sample-d-issues-3d — 指摘事項 拡張デモ②：対象箇所＋周辺の3D表示（①Viewer方式 vs ③部分切り出し方式・都度変換）
+# sample-d: 指摘事項の拡張デモ②（実 Issue＋要素情報の自動付与＋部分 3D 表示・キャッシュ方式）
 
-指摘事項（Issue）を選ぶと、下側に「対象箇所と周辺の3D」を表示する画面のデモ。
-対象モデルは **DACHsampleproject.rvt**（Forma 実環境のサンプルプロジェクトにアップロードされた実モデル、約132MB・全2,626要素。木造＋鉄骨＋RC の建築モデル）。
-Issue はデモ用データ 6 件で、各 Issue は実在の要素にピンされている（ピンは必ず要素に対して付く前提）。
+Forma（ACC）の実 Issue を起点に、モデルを開かずに指摘箇所を把握し、クリックで対象箇所＋周辺だけを 3D 表示するデモ。
+対象モデルはサンプルプロジェクト内の実モデル **DACHsampleproject.rvt**（132MB、全 2,626 要素）。
 
-## 画面構成
+## 操作フロー（実 API で配線済み）
 
-- **Issue 一覧は表形式**（Forma の Issues 一覧と同系統）：ID／タイトル／ステータス／種別／担当者／期日／対象要素／階・位置。行クリックで選択。
-- **周辺の表示範囲バー（0〜100%）**：0%＝ピンの要素のみ、100%＝モデル全要素。間の % は「対象から近い順の要素割合」。バーを動かすと両パネルの表示要素がその場で増減する。
+1. Forma Issue で指摘登録（画面でも API でも可。ピン付き Issue は API からも作成できることを実測で確認済み）
+2. 本アプリが Issues API で実 Issue を取得し、ピン先の要素 ID（externalId）からモデルのプロパティを引いて、要素名・階・通り芯などを Issue 一覧に自動付与する
+3. Issue をクリックすると、① APS Viewer の分離表示（ハイライト＋フォーカス）と、③ キャッシュ済み GLB での部分表示（対象＋周辺、表示範囲はバーで 0〜100% 調整）が並ぶ
 
-## 2つの方式
+対象モデル以外にピンされた Issue やピンなし Issue は、一覧には出るが 3D 表示の対象外として扱う。
 
-| | ① APS Viewer 方式 | ③ 部分切り出し方式（都度変換） |
-|---|---|---|
-| 配信 | モデル全体の変換データ（SVF）をクラウドから逐次配信 | Issue を選ぶたびにサーバーが変換して返す（キャッシュなし） |
-| 表示の絞り込み | 表示側で分離（isolate） | 受け取った GLB 内で表示／非表示を切替 |
-| ハイライト／フォーカス | **可能**（対象要素を色付け＋カメラを対象へ寄せる） | 自前実装（対象を橙色表示＋対象中心にフレーミング） |
-| 実測（このデモ環境） | 初回読み込みに時間がかかる（モデル全体の配信） | **クリックから表示まで 33.3 秒**（内訳は下記） |
+## キャッシュ設計（「重い」への対策）
 
-### 都度変換の実測（DACHモデル・全要素変換、2026-11-15）
+都度変換は実測で約 33 秒（うち SVF ダウンロードが大半）かかったため、キャッシュ方式に作り替えた。キーはモデルの tip バージョン。
 
-| 段階 | 時間 |
-|---|---|
-| 変換データの読込（Autodesk から SVF をダウンロード＋パース） | 24.8 秒 |
-| glTF 書出（全2,626要素、重複ジオメトリ除去） | 1.4 秒 |
-| GLB 化（量子化を含む） | 5.8 秒 |
-| サーバー変換 合計 | **31.9 秒** |
-| GLB 転送＋ブラウザ描画 | 約1.4 秒（GLB 80.5 MB） |
-| **クリックから表示まで** | **33.3 秒** |
+- L1: SVF リソースを `cache/svf-v{version}/` に保存（再ダウンロード回避）
+- L2: 変換済み GLB を `cache/glb/model-v{version}.glb` に保存（再変換回避）。サーバー起動時にバックグラウンドで事前生成する
+- L3: ブラウザの Cache API に GLB を保持（再転送回避）
 
-- 読込が大半を占める。変換そのもの（書出＋GLB化）は約7秒。
-- 事前に切り出しておく方式（旧版・構造モデル）では同じ操作が 0.1 秒台だった。都度変換は「Issue が増えるたびに事前処理が要らない」代わりに、毎回このコストがかかる、という対比がこのデモの主眼。
-- 読込時間はネットワーク環境に大きく依存する（この計測は VM のプロキシ経由）。
+実測（この開発 VM、localhost）: 初回生成は読込 37.8 秒＋書出 1.3 秒＋GLB 化 5.4 秒（GLB 84.5MB）。キャッシュ後はクリックから表示まで 2.6 秒（84MB の転送＋描画 0.6 秒を含む）、ブラウザキャッシュが効けば転送なし。Issue の切り替えは GLB の再取得なしで表示切替のみ。
 
-## 仕組み（③）
+バージョンが変わると全層が自動で作り直される。
 
-1. ブラウザが `GET /api/convert` を呼ぶ（Issue ごと・キャッシュなし）
-2. サーバーが 2-legged トークンを取得し、Model Derivative の変換データ（SVF）をダウンロードしてパースする
-3. 全要素を glTF に書き出し（要素ごとにノードが分かれ、ノード名＝変換側 dbId）、重複ジオメトリ除去＋量子化をして GLB で返す。段階ごとの時間はレスポンスヘッダ（X-Read-Ms / X-Write-Ms / X-Pack-Ms）で返す
-4. ブラウザは three.js で表示し、Issue ごとの距離データ（model-data.json）と突き合わせて、バーの % に応じて要素を表示／非表示する
+## 動かし方
 
-技術メモ：
-- 要素 ID の対応：Model Derivative のプロパティの objectid と SVF／Viewer の dbId は一致しないことがあるため、変換データ同梱のプロパティ DB（model.sdb）の対応表で橋渡しする（tools/build-model-data.mjs）。
-- SVF のダウンロードは APS 公式 SDK（axios）経由だとプロキシ環境で詰まることがあったため、署名クッキー方式を fetch で直接実装した（lib/fetch-reader.mjs）。svf-utils の Reader はコンストラクタで svf 本体とアセット解決関数を受け取るので、ダウンロードだけ差し替えられる。
-- three.js の GLTFLoader は同名ノードに接尾辞を付けて一意化するため、dbId はノード名の先頭の数字列として読む。
-
-## 起動方法
+前提: APS アプリの認証情報（sample-a と同じ）と、3-legged トークン（Issues API はユーザー文脈が必須）。
 
 ```bash
-cp ../sample-a-http-client/.env .   # APS_CLIENT_ID / APS_CLIENT_SECRET（値は書き写さないこと）
+cp /path/to/sample-a/.env .env            # APS_CLIENT_ID / APS_CLIENT_SECRET
+cp /path/to/sample-a/.token.json .token.json  # 3-legged（refresh token 含む。サーバーが自動更新する）
 npm install
-npm start                            # http://localhost:3000
+node server.mjs   # http://localhost:3000
 ```
 
-## ファイル
+## 構成
 
-- `server.mjs` — 静的配信＋ /api/token ＋ /api/issues ＋ /api/convert（都度変換・段階時間ヘッダ付き）
-- `model-data.json` — Issue 定義と全要素の距離データ（tools/build-model-data.mjs で生成）
-- `lib/fetch-reader.mjs` — fetch 版 SVF リーダー（署名クッキー対応）
-- `public/index.html` — 画面（表＋バー＋①Viewer＋③three.js）
-- `public/vendor/` — three.js r160（モジュール＋アドオン）を同梱
-- `tools/build-model-data.mjs` — model-data.json の生成（モデル差し替え時は ISSUES を編集）
+- `server.mjs` — 静的配信＋API（`/api/issues` 実 Issue 取得と要素情報付与、`/api/glb` キャッシュ GLB 配信、`/api/glb/status`、`/api/token` Viewer 用 2-legged）
+- `public/index.html` — Issue 一覧（Forma Issues 風テーブル）＋① Viewer パネル＋③ three.js パネル＋表示範囲バー
+- `lib/fetch-reader.mjs` — SVF を fetch で読む Reader（APS SDK のプロキシ相性回避＋署名クッキーの転送＋SVF ディスクキャッシュ対応）
+- `data/` — モデル由来の静的データ（`model.json` 対象モデル、`props-index.json` 要素プロパティ、`ext2dbid.json` 要素 ID の橋渡し、`bbox-index.json` 要素の bbox）。モデルを差し替えたら再生成が必要
+- `cache/` — 実行時キャッシュ（git 管理外）
 
-## 検証状況（2026-11-15）
+## 注意
 
-- ③：ローカル環境で通し確認済み。表の表示、都度変換（33.3 秒）、バー 0%（ピンのみ）／5%（周辺131件）／100%（全2,626件）の増減を画面で確認。
-- ①：トークン発行とハイライト／フォーカスの実装は完了。ただし開発 VM 内蔵 Chromium からは Autodesk の CDN（developer.api.autodesk.com）に接続できない（ERR_TUNNEL_CONNECTION_FAILED）ため、Viewer の実描画はこの環境では未確認。通常のブラウザ環境では動作する想定で、利用側のネットワークで CDN に届くことが前提。
+- ① APS Viewer パネルは Autodesk CDN への接続が必要（この開発 VM からは CDN に届かず描画未確認。通常のブラウザ環境では動作する想定）
+- Issue のピンが持つ objectId はビュー側の要素 ID、externalId は Revit の一意識別子。変換側の dbId とは別体系のため、`data/ext2dbid.json`（変換データ同梱のプロパティ DB から生成）で橋渡ししている
