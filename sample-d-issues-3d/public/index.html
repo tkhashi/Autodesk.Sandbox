@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>指摘事項 拡張デモ②：実 Issue＋要素情報の自動付与＋ハイブリッド 3D 表示</title>
+<title>指摘事項 拡張デモ②：実 Issue＋要素情報の自動付与＋3D 表示</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/style.min.css">
 <style>
@@ -36,37 +36,28 @@ table.issues tbody tr.na { cursor: default; opacity: .75; }
 .pager button:disabled { opacity: .45; cursor: default; }
 .view { position: relative; height: 560px; background: #e9eff4; border-radius: 8px; overflow: hidden; }
 .viewbox { position: relative; }
-.subset-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 60px; z-index: 4; display: none; background: transparent; overflow: hidden; }
-.legend { margin-top: 8px; font-size: 12px; color: #41586c; }
-.chip { display: inline-flex; align-items: center; gap: 5px; margin: 0 10px 4px 0; white-space: nowrap; }
-.sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; border: 1px solid rgba(0,0,0,.18); }
 .view .msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #68798a; font-size: 13px; text-align: center; padding: 12px; }
 .stat { margin-top: 10px; font-size: 12.5px; color: #33475c; line-height: 1.8; }
 .stat b { color: #b3541e; }
 /* Viewer ツールバー拡張のボタンアイコン */
-.tb-glb-btn .adsk-button-icon { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='3' y='5' width='18' height='14' rx='2' fill='none' stroke='%23e8eef4' stroke-width='2'/%3E%3Ccircle cx='9' cy='10' r='1.6' fill='%23e8eef4'/%3E%3Cpath d='M5 17 L11 12 L14 15 L17 12 L20 16' stroke='%23e8eef4' stroke-width='2' fill='none'/%3E%3C/svg%3E") !important; background-size: 20px 20px; background-position: center; background-repeat: no-repeat; }
 .tb-focus-btn .adsk-button-icon { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='6' fill='none' stroke='%23e8eef4' stroke-width='2'/%3E%3Cpath d='M12 2v4M12 18v4M2 12h4M18 12h4' stroke='%23e8eef4' stroke-width='2'/%3E%3Ccircle cx='12' cy='12' r='1.8' fill='%23e8eef4'/%3E%3C/svg%3E") !important; background-size: 20px 20px; background-position: center; background-repeat: no-repeat; }
 </style>
 </head>
 <body>
-<h1>指摘事項 拡張デモ②：実 Issue の取得 → 要素情報の自動付与 → ハイブリッド 3D 表示</h1>
-<div class="sub">Issue とモデルはどちらも <b>Forma（ACC）の実データ</b>です。Issue は Issues API で、モデルは Forma のドキュメント管理に置かれた RVT を Model Derivative で変換した SVF を Viewer が逐次配信で読みます。対象は2モデル：<b>DACHsampleproject.rvt</b>（建築・132MB、SVF 66MB）と <b>Snowdon Towers Sample Structural.rvt</b>（構造・軽量、SVF 22MB）。<br>
-3D は2段構えです。SVF の読み込みが終わるまでの間は、対象＋周辺だけを切り出した軽量 GLB（先行サブセット）を Viewer の上に重ねて表示し、完了したら自動で隠れて Viewer に引き継がれます。GLB は Viewer 下部のツールバーボタンからいつでも表示・非表示を切り替えられます。</div>
+<h1>指摘事項 拡張デモ②：実 Issue の取得 → 要素情報の自動付与 → 3D 表示</h1>
+<div class="sub">Issue とモデルはどちらも <b>Forma（ACC）の実データ</b>です。Issue は Issues API で、モデルは Forma のドキュメント管理に置かれた RVT を Model Derivative で変換した SVF を Viewer が逐次配信で読みます。対象は2モデル：<b>DACHsampleproject.rvt</b>（建築・132MB、SVF 66MB）と <b>Snowdon Towers Sample Structural.rvt</b>（構造・軽量、SVF 22MB）。</div>
 
 <div class="selbar" id="selInfo">Issue を読み込んでいます…</div>
 
 <div class="split">
 <div class="col-model">
 <div class="panel">
-<h2>3D 表示（APS Viewer＋先行サブセット）</h2>
-<div class="desc">Issue をクリックすると対象にフォーカスします（対象＋周辺を残し、それ以外はゴースト表示）。対象要素は<b>赤く点滅</b>します。読み込み完了でカメラが全体ビューへ勝手に切り替わることはありません。Viewer 下部のツールバーに、GLB 先行表示のトグルと再フォーカスのボタンを拡張機能で追加しています。</div>
+<h2>3D 表示（APS Viewer）</h2>
+<div class="desc">Issue をクリックすると対象にフォーカスします（対象＋周辺を残し、それ以外はゴースト表示）。対象要素は<b>赤く点滅</b>します。読み込み完了でカメラが全体ビューへ勝手に切り替わることはありません。Viewer 下部のツールバーに、対象要素への再フォーカスのボタンを拡張機能で追加しています。</div>
 <div class="viewbox">
 <div class="view" id="viewerWrap"><div class="msg" id="viewerMsg">モデルを読み込んでいます…</div></div>
-<div class="subset-overlay" id="subsetOverlay"></div>
 </div>
 <div class="stat" id="statV">—</div>
-<div class="stat" id="statS">Issue を選択すると先行表示します。</div>
-<div class="legend" id="legend"></div>
 </div>
 </div>
 
@@ -102,7 +93,6 @@ table.issues tbody tr.na { cursor: default; opacity: .75; }
 let DATA = null, selected = null;
 let viewer = null, viewerModelKey = null, rootLoaded = false, geoLoaded = false, tSelect = 0;
 let viewerReady = false, desiredModelKey = null;
-let subsetManual = null; // null=自動（読込完了まで表示） / true=表示 / false=非表示
 let blinkTimer = null, blinkOn = false;
 const $ = id => document.getElementById(id);
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
@@ -115,26 +105,6 @@ function levelOf(e) { return e?.['Level'] ?? e?.['Base Level'] ?? e?.['Reference
 function nameOf(e) { return /\[\d+\]\s*$/.test(e.name) ? e.name : `${e.name} [${e.revitId}]`; }
 function locOf(e) { return e?.['Column Location Mark'] ?? e?.['Mark'] ?? e?.['Type Mark'] ?? '—'; }
 function setStatV(t) { $('statV').innerHTML = t; }
-
-let SUBSET_INDEX = {};
-fetch('/subsets/index.json').then(r => r.json()).then(j => { SUBSET_INDEX = j; updateOverlay(); renderLegend(); }).catch(() => {});
-// 先行サブセット：自動では Viewer の読み込み完了まで表示。ツールバーのトグルで手動切替もできる
-function overlayVisible() { return $('subsetOverlay').style.display === 'block'; }
-function updateOverlay() {
-  const i = issue();
-  const has = !!(i && SUBSET_INDEX[i.id]);
-  const ready = !!(i && geoLoaded && viewerModelKey === i.modelKey);
-  const visible = has && (subsetManual !== null ? subsetManual : !ready);
-  $('subsetOverlay').style.display = visible ? 'block' : 'none';
-  window.dispatchEvent(new CustomEvent('demo-subset-state', { detail: { visible } }));
-}
-function renderLegend() {
-  const i = issue();
-  const meta = i && SUBSET_INDEX[i.id];
-  if (!meta) { $('legend').innerHTML = ''; return; }
-  const chip = (color, label) => `<span class="chip"><span class="sw" style="background:${color}"></span>${esc(label)}</span>`;
-  $('legend').innerHTML = chip('#ff520d', '対象要素') + (meta.cats ?? []).map(c => chip(c.color, c.label)).join('');
-}
 
 // ---- Issue 一覧：フィルター／ソート／ページネーション ----
 const PAGE_SIZE = 6;
@@ -193,7 +163,6 @@ $('btnNext').addEventListener('click', () => { page++; buildTable(); });
 function selectIssue(id) {
   selected = id;
   tSelect = performance.now();
-  subsetManual = null; // 新しい選択では GLB 表示は自動に戻す
   markSelectedRow();
   const i = issue();
   const e = i?.element;
@@ -201,8 +170,6 @@ function selectIssue(id) {
     ? `<b>#${i.displayId}：${esc(i.title)}</b> ／ 対象要素：${e ? `${esc(nameOf(e))}（${esc(e['Type Name'] ?? '')}） ／ 階：${esc(levelOf(e))} ／ 位置：${esc(locOf(e))}` : (i.pin ? '対象外モデルのピン（3D 対象外）' : 'ピンなし（3D 対象外）')}`
     : '—';
   document.dispatchEvent(new CustomEvent('issue-selected', { detail: i }));
-  renderLegend();
-  updateOverlay();
   if (i?.modelKey) ensureViewerModel(i.modelKey);
   applySelection();
 }
@@ -295,7 +262,6 @@ function setupViewer(modelKey) {
   viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, () => {
     geoLoaded = true;
     applySelection();
-    updateOverlay(); // 読み込み完了：先行サブセットを隠して Viewer に引き継ぐ
     const i = issue();
     setStatV(`モデルの読み込みが完了しました。` + (i?.targetDbId && i.modelKey === viewerModelKey ? ` <b>#${i.displayId}</b> の対象要素を表示中（選択から ${((performance.now() - tSelect) / 1000).toFixed(1)} 秒）。` : ''));
   });
@@ -322,29 +288,19 @@ if (window.Autodesk?.Viewing?.Extension) {
       const viewer = this.viewer;
       const add = () => {
         if (this.group || !viewer.toolbar) return;
-        this.btnGlb = new Autodesk.Viewing.UI.Button('demo-glb-toggle');
-        this.btnGlb.setToolTip('GLB 先行表示の表示・非表示');
-        this.btnGlb.addClass('tb-glb-btn');
-        this.btnGlb.onClick = () => window.dispatchEvent(new CustomEvent('demo-toggle-subset'));
         this.btnFocus = new Autodesk.Viewing.UI.Button('demo-focus-target');
         this.btnFocus.setToolTip('対象要素にフォーカス');
         this.btnFocus.addClass('tb-focus-btn');
         this.btnFocus.onClick = () => window.dispatchEvent(new CustomEvent('demo-focus-target'));
         this.group = new Autodesk.Viewing.UI.ControlGroup('demo-toolbar-group');
-        this.group.addControl(this.btnGlb);
         this.group.addControl(this.btnFocus);
         viewer.toolbar.addControl(this.group);
       };
       if (viewer.toolbar) add();
       else viewer.addEventListener(Autodesk.Viewing.TOOLBAR_CREATED_EVENT, add);
-      this._onState = (e) => {
-        try { this.btnGlb?.setState(e.detail.visible ? Autodesk.Viewing.UI.Button.State.ACTIVE : Autodesk.Viewing.UI.Button.State.INACTIVE); } catch (err) {}
-      };
-      window.addEventListener('demo-subset-state', this._onState);
       return true;
     }
     unload() {
-      window.removeEventListener('demo-subset-state', this._onState);
       if (this.group && this.viewer.toolbar) this.viewer.toolbar.removeControl(this.group);
       this.group = null;
       return true;
@@ -352,7 +308,6 @@ if (window.Autodesk?.Viewing?.Extension) {
   }
   Autodesk.Viewing.theExtensionManager.registerExtension('DemoToolbarExtension', DemoToolbarExtension);
 }
-window.addEventListener('demo-toggle-subset', () => { subsetManual = !overlayVisible(); updateOverlay(); });
 window.addEventListener('demo-focus-target', () => applySelection());
 
 async function initViewer() {
@@ -395,95 +350,5 @@ initViewer();
 })();
 </script>
 
-<script type="importmap">
-{ "imports": {
-  "three": "./vendor/three.module.js",
-  "three/addons/": "./vendor/addons/"
-} }
-</script>
-<script type="module">
-import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-
-const wrap = document.getElementById('subsetOverlay');
-const statS = document.getElementById('statS');
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-renderer.setClearColor(0x000000, 0); // 背景は透明：Viewer の上に形状だけを重ねる
-wrap.appendChild(renderer.domElement);
-function fitRenderer() {
-  const w = wrap.clientWidth, h = wrap.clientHeight;
-  if (w > 0 && h > 0 && (renderer.domElement.width !== w || renderer.domElement.height !== h)) {
-    renderer.setSize(w, h);
-    camera.aspect = w / h; camera.updateProjectionMatrix();
-  }
-}
-const scene = new THREE.Scene();
-
-const camera = new THREE.PerspectiveCamera(45, wrap.clientWidth / wrap.clientHeight, 0.1, 5000);
-const controls = new OrbitControls(camera, renderer.domElement);
-scene.add(new THREE.AmbientLight(0xffffff, 1.6));
-scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 0.8));
-const dl = new THREE.DirectionalLight(0xffffff, 2.0); dl.position.set(30, 50, 20); scene.add(dl);
-const dl2 = new THREE.DirectionalLight(0xffffff, 0.7); dl2.position.set(-25, 30, -30); scene.add(dl2);
-const draco = new DRACOLoader(); draco.setDecoderPath('./vendor/draco/');
-const loader = new GLTFLoader(); loader.setDRACOLoader(draco);
-const indexPromise = fetch('/subsets/index.json').then(r => r.json()).catch(() => ({}));
-let current = null, seq = 0;
-renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
-window.__subset = { renderer, scene, camera, controls, THREE };
-
-document.addEventListener('issue-selected', async (ev) => {
-  const issue = ev.detail;
-  const my = ++seq;
-  if (current) { scene.remove(current); current = null; }
-  if (!issue?.id) { statS.textContent = 'Issue を選択すると先行表示します。'; return; }
-  const index = await indexPromise;
-  const meta = index[issue.id];
-  if (!meta) { statS.textContent = 'この Issue の先行表示はありません（対象モデル外のピン、またはピンなし）。'; return; }
-  statS.textContent = '先行表示を読み込んでいます…';
-  const t0 = performance.now();
-  try {
-    const buf = await (await fetch('/subsets/' + issue.id + '.glb')).arrayBuffer();
-    const gltf = await loader.parseAsync(buf, '');
-    if (my !== seq) return;
-    gltf.scene.traverse(o => {
-      if (o.isMesh && o.material?.name === 'target') {
-        // 対象は周辺（半透明パス）に遮られても見えるよう、透明パス最後尾で深度テストなしに描く
-        o.material = o.material.clone();
-        o.material.transparent = true;
-        o.material.opacity = 1;
-        o.material.depthTest = false;
-        o.material.depthWrite = false;
-        o.renderOrder = 999;
-      }
-      if (o.isMesh && o.material?.name?.startsWith('cat:')) {
-        o.material = o.material.clone();
-        o.material.color.multiplyScalar(1.18);
-        o.material.transparent = true; o.material.opacity = 0.9;
-      }
-    });
-    fitRenderer();
-    current = gltf.scene;
-    scene.add(current);
-    current.updateWorldMatrix(true, true);
-    // フレーミングは対象メッシュを中心に、周辺が程よく入る距離にする
-    let targetMesh = null;
-    current.traverse(o => { if (o.isMesh && o.material?.name === 'target') targetMesh = o; });
-    const box = new THREE.Box3().setFromObject(targetMesh ?? current);
-    const c = box.getCenter(new THREE.Vector3());
-    const diag = box.getSize(new THREE.Vector3()).length() || 3;
-    const dist = Math.max(diag * 2.4, 8);
-    camera.position.set(c.x + dist * 0.72, c.y + dist * 0.38, c.z + dist * 0.72);
-    controls.target.copy(c);
-    renderer.render(scene, camera);
-    const ms = Math.round(performance.now() - t0);
-    statS.innerHTML = `先行表示：<b>${ms} ms</b> で表示（${(meta.bytes / 1024).toFixed(0)} KB、対象＋周辺 ${meta.elems} 要素、モデル：${meta.modelKey}）`;
-  } catch (e) {
-    if (my === seq) statS.textContent = '先行表示の読み込みに失敗しました：' + e.message;
-  }
-});
-</script>
 </body>
 </html>
