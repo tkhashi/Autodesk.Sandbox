@@ -5,7 +5,7 @@ let viewerReady = false, desiredModelKey = null;
 let blinkTimer = null, blinkOn = false;
 const captured = new Map(); // Issue ごとのビューアキャプチャ（スナップショットの代替）
 const $ = id => document.getElementById(id);
-const LS_COLS = 'sampled-cols-v2', LS_PAGE = 'sampled-pagesize-v2'; // ユーザー設定の保存キー（互換のため変更しない）
+const LS_COLS = 'sampled-cols-v2', LS_PAGE = 'sampled-pagesize-v2', LS_GHOST = 'sampled-ghost-transparency'; // ユーザー設定の保存キー（互換のため変更しない）
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 function issue() { return DATA?.issues.find(i => i.id === selected); }
 function issuesOnCurrentModel() { return DATA.issues.filter(x => x.modelKey === viewerModelKey && x.targetDbId); }
@@ -465,12 +465,18 @@ function updateMarkers() {
 function enterOverview() {
   if (!viewer || !geoLoaded) return;
   stopBlink();
-  try { viewer.showAll(); } catch (e) {}
+  try {
+    if (typeof viewer.setGhosting === 'function') viewer.setGhosting(true);
+    const dbIds = issuesOnCurrentModel().map(i => i.targetDbId);
+    // ゴースト表示は切らない：Issue の要素だけを実体表示にし、それ以外はゴーストのまま残す
+    if (dbIds.length) viewer.isolate(dbIds);
+    else viewer.showAll();
+  } catch (e) {}
   viewer.clearThemingColors();
   colorIssueElements();
   buildMarkers();
   const n = issuesOnCurrentModel().length;
-  setStatV(`指摘事項一覧を表示中（このモデルの Issue ${n} 件）。色はステータス別、選択中は赤。ラベルをクリックすると詳細が開きます。`);
+  setStatV(`指摘事項一覧を表示中（このモデルの Issue ${n} 件）。色はステータス別、選択中は赤。Issue の要素以外はゴースト表示です。ラベルをクリックすると詳細が開きます。`);
   syncOverviewBtn();
 }
 function exitOverview(restore = true) {
@@ -488,6 +494,41 @@ function toggleOverview() {
   else setStatV('モデルの読み込みが終わったら、指摘事項一覧を表示します。');
 }
 window.addEventListener('resize', () => { if (overviewOn) updateMarkers(); });
+
+// ---- ゴースト透明度（ゴースト表示に使うフェード用マテリアルの不透明度を調整する） ----
+let ghostTransparency = Math.min(97, Math.max(40, Number(localStorage.getItem(LS_GHOST) ?? 90) || 90));
+function applyGhostOpacity() {
+  if (!viewer) return;
+  const opacity = 1 - ghostTransparency / 100;
+  try {
+    const impl = viewer.impl;
+    const mat = impl.fadeMaterial ?? impl.renderer?.()?.fadeMaterial ?? impl._renderer?.fadeMaterial ?? impl.glrenderer?.()?.fadeMaterial ?? null;
+    if (!mat) return;
+    mat.opacity = opacity;
+    mat.transparent = true;
+    mat.needsUpdate = true;
+    mat.variants?.forEach(v => { v.opacity = opacity; v.needsUpdate = true; });
+    impl.invalidate?.(true);
+  } catch (e) {}
+}
+function syncGhostBtn() {
+  const p = $('ghostPanel');
+  window.dispatchEvent(new CustomEvent('demo-ghost-state', { detail: p ? !p.hidden : false }));
+}
+function toggleGhostPanel() {
+  const p = $('ghostPanel');
+  if (!p) return;
+  p.hidden = !p.hidden;
+  if (!p.hidden) { $('ghostRange').value = ghostTransparency; $('ghostVal').textContent = ghostTransparency + '%'; }
+  syncGhostBtn();
+}
+const ghostRangeEl = $('ghostRange');
+if (ghostRangeEl) ghostRangeEl.addEventListener('input', () => {
+  ghostTransparency = Number(ghostRangeEl.value);
+  $('ghostVal').textContent = ghostTransparency + '%';
+  localStorage.setItem(LS_GHOST, String(ghostTransparency));
+  applyGhostOpacity();
+});
 
 // フォーカス中の Issue を Viewer に反映
 function applySelection() {
@@ -530,11 +571,13 @@ function setupViewer(modelKey) {
   viewer.addEventListener(Autodesk.Viewing.SHOW_EVENT, updMarkers);
   viewer.addEventListener(Autodesk.Viewing.MODEL_ROOT_LOADED_EVENT, () => {
     rootLoaded = true;
+    applyGhostOpacity();
     applySelection();
     setStatV(`モデル（${esc(m.short)}）の読み込み中…`);
   });
   viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, () => {
     geoLoaded = true;
+    applyGhostOpacity();
     if (overviewOn) { enterOverview(); return; }
     applySelection();
     const i = focusedIssue();
@@ -571,9 +614,15 @@ if (window.Autodesk?.Viewing?.Extension) {
         this.btnOverview.addClass('tb-overview-btn');
         this.btnOverview.onClick = () => window.dispatchEvent(new CustomEvent('demo-toggle-overview'));
         window.addEventListener('demo-overview-state', (e) => { try { this.btnOverview.setState(e.detail ? 0 : 1); } catch (err) {} });
+        this.btnGhost = new Autodesk.Viewing.UI.Button('demo-ghost-opacity');
+        this.btnGhost.setToolTip('ゴースト透明度');
+        this.btnGhost.addClass('tb-ghost-btn');
+        this.btnGhost.onClick = () => window.dispatchEvent(new CustomEvent('demo-toggle-ghost-panel'));
+        window.addEventListener('demo-ghost-state', (e) => { try { this.btnGhost.setState(e.detail ? 0 : 1); } catch (err) {} });
         this.group = new Autodesk.Viewing.UI.ControlGroup('demo-toolbar-group');
         this.group.addControl(this.btnFocus);
         this.group.addControl(this.btnOverview);
+        this.group.addControl(this.btnGhost);
         viewer.toolbar.addControl(this.group);
       };
       if (viewer.toolbar) add();
@@ -590,6 +639,7 @@ if (window.Autodesk?.Viewing?.Extension) {
 }
 window.addEventListener('demo-focus-target', () => { exitOverview(false); applySelection(); });
 window.addEventListener('demo-toggle-overview', () => toggleOverview());
+window.addEventListener('demo-toggle-ghost-panel', () => toggleGhostPanel());
 
 async function initViewer() {
   if (!window.Autodesk) {
