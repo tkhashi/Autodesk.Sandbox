@@ -24,6 +24,9 @@ for (const m of models) {
   m.propsIndex = JSON.parse(fs.readFileSync(path.join(dir, 'props-index.json'), 'utf8'));
   m.ext2dbid = JSON.parse(fs.readFileSync(path.join(dir, 'ext2dbid.json'), 'utf8'));
   m.bboxIndex = JSON.parse(fs.readFileSync(path.join(dir, 'bbox-index.json'), 'utf8'));
+  const u = [1e9, 1e9, 1e9, -1e9, -1e9, -1e9];
+  for (const b of Object.values(m.bboxIndex)) for (let k = 0; k < 3; k++) { u[k] = Math.min(u[k], b[k]); u[k + 3] = Math.max(u[k + 3], b[k + 3]); }
+  m.bounds = u;
 }
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.glb': 'model/gltf-binary', '.wasm': 'application/wasm' };
 const BASE = 'https://developer.api.autodesk.com';
@@ -154,7 +157,7 @@ const server = http.createServer(async (req, res) => {
       const vers = await Promise.all(models.map(getModelVersion));
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({
-        models: models.map((m, i) => ({ key: m.key, name: m.name, short: m.short, version: vers[i].versionNumber, urn: m.derivativeUrn, guid: m.viewableGuid })),
+        models: models.map((m, i) => ({ key: m.key, name: m.name, short: m.short, version: vers[i].versionNumber, urn: m.derivativeUrn, guid: m.viewableGuid, bounds: m.bounds })),
         issues, fetchedAt: new Date().toISOString(),
       }));
       return;

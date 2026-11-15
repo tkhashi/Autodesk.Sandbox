@@ -240,27 +240,12 @@ function applySelection() {
     if (typeof viewer.setGhosting === 'function') viewer.setGhosting(true); // 範囲外は消さずゴーストにして位置関係を残す
     viewer.isolate(range);
     viewer.clearThemingColors();
-    if (i.targetBbox) {
-      const V3 = Autodesk.Viewing.Private.THREE.Vector3;
-      const b = i.targetBbox;
-      const c = new V3((b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2);
-      const diag = Math.hypot(b[3] - b[0], b[4] - b[1], b[5] - b[2]) || 10;
-      setObliqueView(c, Math.max(diag * 3, 14));
-    }
     viewer.fitToView([i.targetDbId]); // フレーミングは対象のみ（周辺は表示範囲に含めつつ、全体俯瞰にしない）
   } catch (e) { return; }
   startBlink(i.targetDbId);
   if (geoLoaded) setStatV(`<b>#${i.displayId}</b> の対象要素＋周辺を表示中（読み込み済みのため即時）。`);
 }
 
-// モデル座標（Z-up）で斜め上から見る視点にする。ビューワブル既定の平面ビューを引き継がないため
-function setObliqueView(center, dist) {
-  const V3 = Autodesk.Viewing.Private.THREE.Vector3;
-  // モデル座標（Z-up、Front は -Y 側）で手前右上から。GLB 先行表示の視点とも一致させる
-  const dir = new V3(1, -1, 0.55).normalize();
-  const pos = center.clone().add(dir.multiplyScalar(dist));
-  viewer.navigation.setView(pos, center);
-}
 // 選択中 Issue の対象 bbox からカメラ位置を読み込み前に決め、完了時にカメラが動かないようにする
 function aimCameraAtTarget() {
   const i = issue();
@@ -270,7 +255,23 @@ function aimCameraAtTarget() {
     const b = i.targetBbox;
     const c = new V3((b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2);
     const diag = Math.hypot(b[3] - b[0], b[4] - b[1], b[5] - b[2]) || 10;
-    setObliqueView(c, diag * 1.6 + 6);
+    const dir = new V3(0.95, 0.75, 0.95).normalize();
+    const pos = c.clone().add(dir.multiplyScalar(diag * 1.6 + 6));
+    viewer.navigation.setView(pos, c);
+    return true;
+  } catch (e) { return false; }
+}
+// 対象がまだ無い場合はモデル全体の斜め視点を初期カメラにする（素の既定カメラ＝平面方向を残さないため）
+function aimCameraAtModel(m) {
+  if (!viewer || !m?.bounds) return false;
+  try {
+    const V3 = Autodesk.Viewing.Private.THREE.Vector3;
+    const b = m.bounds;
+    const c = new V3((b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2);
+    const diag = Math.hypot(b[3] - b[0], b[4] - b[1], b[5] - b[2]) || 100;
+    const dir = new V3(0.95, 0.75, 0.95).normalize();
+    const pos = c.clone().add(dir.multiplyScalar(diag * 0.8));
+    viewer.navigation.setView(pos, c);
     return true;
   } catch (e) { return false; }
 }
@@ -285,18 +286,9 @@ function setupViewer(modelKey) {
   viewer = new Autodesk.Viewing.GuiViewer3D($('viewerWrap'));
   viewer.start();
   viewer.loadExtension('DemoToolbarExtension').catch(() => {});
-  aimCameraAtTarget();
+  const aimed = aimCameraAtTarget() || aimCameraAtModel(m);
   viewer.addEventListener(Autodesk.Viewing.MODEL_ROOT_LOADED_EVENT, () => {
     rootLoaded = true;
-    aimCameraAtTarget(); // 既定カメラが適用された直後に対象視点へ戻す
-    const cur = issue();
-    if (!cur?.targetDbId || cur.modelKey !== viewerModelKey) {
-      try {
-        const V3 = Autodesk.Viewing.Private.THREE.Vector3;
-        const bb = viewer.model.getBoundingBox();
-        setObliqueView(bb.getCenter(new V3()), bb.getSize(new V3()).length() * 0.72);
-      } catch (e) {}
-    }
     applySelection();
     setStatV(`モデル（${esc(m.short)}）の読み込み中… 骨格は表示可能になりました（選択から ${((performance.now() - tSelect) / 1000).toFixed(1)} 秒）。`);
   });
@@ -304,10 +296,6 @@ function setupViewer(modelKey) {
     geoLoaded = true;
     applySelection();
     updateOverlay(); // 読み込み完了：先行サブセットを隠して Viewer に引き継ぐ
-    const idAtLoad = selected, keyAtLoad = viewerModelKey;
-    setTimeout(() => {
-      if (viewer && geoLoaded && selected === idAtLoad && viewerModelKey === keyAtLoad) applySelection();
-    }, 900);
     const i = issue();
     setStatV(`モデルの読み込みが完了しました。` + (i?.targetDbId && i.modelKey === viewerModelKey ? ` <b>#${i.displayId}</b> の対象要素を表示中（選択から ${((performance.now() - tSelect) / 1000).toFixed(1)} 秒）。` : ''));
   });
@@ -315,8 +303,8 @@ function setupViewer(modelKey) {
     if (!geoLoaded && typeof e.percent === 'number') setStatV(`モデル（${esc(m.short)}）を読み込んでいます（逐次配信）… ${Math.round(e.percent)}%`);
   });
   Autodesk.Viewing.Document.load('urn:' + m.urn, (doc) => {
-    // preserveView: 読み込み完了時にカメラを全体ビューへ自動で切り替えない
-    viewer.loadDocumentNode(doc, doc.getRoot().getDefaultGeometry(), { preserveView: true });
+    // エイミングできた場合はその視点を保持し、できなかった場合はモデルのホームビューに任せる
+    viewer.loadDocumentNode(doc, doc.getRoot().getDefaultGeometry(), aimed ? { preserveView: true } : undefined);
     setStatV(`モデル（${esc(m.short)}）を読み込んでいます（逐次配信）…`);
   }, (code, msg) => setStatV('モデルの読み込みに失敗しました：' + code + ' ' + esc(msg ?? '')));
 }
