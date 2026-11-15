@@ -53,7 +53,7 @@ table.issues tbody tr.na { cursor: default; opacity: .75; }
 <div class="col-model">
 <div class="panel">
 <h2>3D 表示（APS Viewer）</h2>
-<div class="desc">Issue をクリックすると対象にフォーカスします（対象＋周辺を残し、それ以外はゴースト表示）。対象要素は<b>赤く点滅</b>し、ピンが刺さった位置には<b>赤いピン</b>を立てます。読み込み完了でカメラが全体ビューへ勝手に切り替わることはありません。Viewer 下部のツールバーに、対象要素への再フォーカスのボタンを拡張機能で追加しています。</div>
+<div class="desc">Issue をクリックすると対象にフォーカスします（対象＋周辺を残し、それ以外はゴースト表示）。対象要素は<b>赤く点滅</b>し、ピンが刺さった位置には<b>青いピン</b>を立てます。周辺の要素は半透明に落とすので、地中などに埋まった対象でも赤が透けて見えます。読み込み完了でカメラが全体ビューへ勝手に切り替わることはありません。Viewer 下部のツールバーに、対象要素への再フォーカスのボタンを拡張機能で追加しています。</div>
 <div class="viewbox">
 <div class="view" id="viewerWrap"><div class="msg" id="viewerMsg">モデルを読み込んでいます…</div></div>
 </div>
@@ -214,7 +214,7 @@ function showPin(i) {
     const diag = b ? Math.hypot(b[3] - b[0], b[4] - b[1], b[5] - b[2]) : 10;
     const H = Math.min(Math.max(diag * 0.5, 1.5), 16); // 針の長さ（対象の大きさに比例）
     const R = H * 0.34;                                 // 頭の半径
-    const mat = new T.MeshBasicMaterial({ color: 0xff2d16, depthTest: false, transparent: true, opacity: 0.96 });
+    const mat = new T.MeshBasicMaterial({ color: 0x1e9bff, depthTest: false, transparent: true, opacity: 0.96 });
     const cone = new T.Mesh(new T.ConeGeometry(R * 0.62, H, 20), mat);
     cone.rotation.x = -Math.PI / 2;                     // 尖端を下へ向ける
     cone.position.set(pos.x, pos.y, pos.z + H / 2);     // 尖端がちょうどピン位置に来る
@@ -243,6 +243,10 @@ function applySelection() {
     if (typeof viewer.setGhosting === 'function') viewer.setGhosting(true); // 範囲外は消さずゴーストにして位置関係を残す
     viewer.isolate(range);
     viewer.clearThemingColors();
+    // 周辺は半透明に落とす（地中・躯体内部の対象でも赤い点滅が透けて見えるように）
+    const V4 = window.THREE?.Vector4 ?? Autodesk.Viewing.Private.THREE.Vector4;
+    const fade = new V4(0.72, 0.78, 0.84, 0.42);
+    for (const id of range) if (id !== i.targetDbId) { try { viewer.setThemingColor(id, fade); } catch (e) {} }
     viewer.fitToView([i.targetDbId]); // フレーミングは対象のみ（周辺は表示範囲に含めつつ、全体俯瞰にしない）
   } catch (e) { return; }
   startBlink(i.targetDbId);
