@@ -85,16 +85,49 @@ function distToBox(b, p) {
   const dz = Math.max(b[2] - p[2], 0, p[2] - b[5]);
   return Math.hypot(dx, dy, dz);
 }
-function enrich(issue) {
+// ---- Issue タイプ（subtypeId → 親タイプ名／subtype名／コード）とプロジェクトメンバー（autodeskId → 名前） ----
+let typesCache = null, usersCache = null;
+async function getIssueTypes(token, pid) {
+  if (typesCache) return typesCache;
+  try {
+    const r = await fetch(`${BASE}/construction/issues/v1/projects/${pid}/issue-types?include=subtypes`, { headers: { Authorization: 'Bearer ' + token } });
+    const j = await r.json();
+    const map = new Map();
+    for (const t of j.results ?? []) for (const s of t.subtypes ?? []) {
+      map.set(s.id, { typeTitle: t.title, subtypeTitle: s.title, code: s.code ?? null });
+    }
+    typesCache = map;
+  } catch (e) { typesCache = new Map(); }
+  return typesCache;
+}
+async function getProjectUsers(token, pidB) {
+  if (usersCache) return usersCache;
+  try {
+    const r = await fetch(`${BASE}/construction/admin/v1/projects/${pidB}/users?limit=200`, { headers: { Authorization: 'Bearer ' + token } });
+    const j = await r.json();
+    const map = new Map();
+    for (const u of j.results ?? []) if (u.autodeskId) map.set(u.autodeskId, u.name ?? null);
+    usersCache = map;
+  } catch (e) { usersCache = new Map(); }
+  return usersCache;
+}
+
+function enrich(issue, types, users) {
+  const st = issue.issueSubtypeId ? types?.get(issue.issueSubtypeId) ?? null : null;
   const out = {
     id: issue.id, displayId: issue.displayId, title: issue.title, description: issue.description,
-    status: issue.status, dueDate: issue.dueDate, assignedTo: issue.assignedTo, published: issue.published,
+    status: issue.status, dueDate: issue.dueDate, startDate: issue.startDate ?? null,
+    assignedTo: issue.assignedTo, assignedToName: issue.assignedTo ? (users?.get(issue.assignedTo) ?? null) : null,
+    watcherNames: (issue.watchers ?? []).map(w => users?.get(w) ?? w),
+    published: issue.published,
+    typeLabel: st ? `${st.typeTitle} > ${st.subtypeTitle}` : null,
+    typeCode: st?.code ?? null,
     createdAt: issue.createdAt, openedBy: issue.openedBy, openedAt: issue.openedAt, createdBy: issue.createdBy,
     snapshotUrn: issue.snapshotUrn ?? null, snapshotHasMarkups: issue.snapshotHasMarkups ?? false,
     permittedStatuses: issue.permittedStatuses ?? null, customAttributes: issue.customAttributes ?? [],
     attachmentCount: issue.attachmentCount ?? 0, commentCount: issue.commentCount ?? 0,
     pin: null, element: null, targetDbId: null, targetBbox: null,
-    contextDbIds: null, modelKey: null, modelName: null,
+    contextDbIds: null, modelKey: null, modelName: null, modelFullName: null,
   };
   const ld = (issue.linkedDocuments ?? [])[0];
   if (!ld) return out;
@@ -104,6 +137,7 @@ function enrich(issue) {
   if (!m || !d.externalId) return out;
   out.modelKey = m.key;
   out.modelName = m.short;
+  out.modelFullName = m.name;
   const dbId = m.ext2dbid[d.externalId];
   if (dbId === undefined) return out;
   out.targetDbId = dbId;
@@ -122,10 +156,14 @@ function enrich(issue) {
 async function fetchIssues() {
   const token = await getToken3();
   const pid = models[0].projectId.replace(/^b\./, '');
-  const r = await fetch(`${BASE}/construction/issues/v1/projects/${pid}/issues?limit=50`, { headers: { Authorization: 'Bearer ' + token } });
+  const [r, types, users] = await Promise.all([
+    fetch(`${BASE}/construction/issues/v1/projects/${pid}/issues?limit=50`, { headers: { Authorization: 'Bearer ' + token } }),
+    getIssueTypes(token, pid),
+    getProjectUsers(token, models[0].projectId),
+  ]);
   if (!r.ok) throw new Error('issues fetch failed: ' + r.status);
   const j = await r.json();
-  return (j.results ?? []).filter((i) => !i.deleted).map(enrich);
+  return (j.results ?? []).filter((i) => !i.deleted).map(i => enrich(i, types, users));
 }
 
 // ---- HTTP サーバー ----

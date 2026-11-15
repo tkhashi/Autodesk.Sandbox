@@ -9,20 +9,26 @@
 <style>
 body { font-family: "Hiragino Sans", "Noto Sans JP", sans-serif; margin: 24px; color: #1c2733; background: #f4f6f8; }
 h1 { font-size: 20px; margin: 0 0 14px; }
-.split { display: flex; gap: 14px; align-items: flex-start; }
-.col-model { flex: 6 1 0; min-width: 0; }
-.col-issues { flex: 4 1 0; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.top { display: flex; gap: 14px; align-items: flex-start; }
+.grow { flex: 1 1 auto; min-width: 0; }
 .panel { background: #fff; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(20,40,60,.08); }
 .panel h2 { font-size: 15px; margin: 0 0 10px; }
-table.issues { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-table.issues th { background: #22374a; color: #fff; text-align: left; padding: 7px 8px; font-weight: 600; white-space: nowrap; }
-table.issues td { padding: 7px 8px; border-top: 1px solid #e4eaef; vertical-align: top; }
+.viewer-panel { margin-top: 14px; }
+/* ---- Issue 表（Forma の Issues 一覧に寄せた見た目） ---- */
+table.issues { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.issues th { background: #fff; color: #3c4a57; text-align: left; padding: 8px 10px; font-weight: 600; white-space: nowrap; border-bottom: 2px solid #d9e2ea; }
+table.issues td { padding: 9px 10px; border-top: 1px solid #e7edf2; vertical-align: middle; }
 table.issues tbody tr { cursor: pointer; }
-table.issues tbody tr:hover { background: #f2f7fb; }
-table.issues tbody tr.sel { background: #e3f0fb; box-shadow: inset 3px 0 0 #2b7bbb; }
-.sub2 { color: #68798a; font-size: 11.5px; }
-.pill { display: inline-block; padding: 1px 8px; border-radius: 9px; font-size: 11px; font-weight: 700; white-space: nowrap; }
-.st-open { background: #fde3e3; color: #a02c2c; } .st-doing { background: #fdf0d5; color: #8a6d1a; } .st-wait { background: #dbeafe; color: #1d4ed8; } .st-done { background: #dcf2e3; color: #166534; } .st-draft { background: #e8eef4; color: #41586c; }
+table.issues tbody tr:hover { background: #f5f9fc; }
+table.issues tbody tr.sel { background: #e8f2fa; }
+.fst { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.fst i { width: 4px; height: 16px; border-radius: 2px; display: inline-block; }
+.tchip { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; max-width: 190px; }
+.tchip .code { flex: none; width: 24px; height: 24px; border-radius: 50%; background: #eda93c; color: #fff; font-size: 10.5px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.tchip .lbl { overflow: hidden; text-overflow: ellipsis; }
+.unspec { color: #8a9aa8; }
+.place { color: #2b6cb0; }
+.vpill { display: inline-block; margin-left: 6px; padding: 0 7px; border: 1px solid #c3d2de; border-radius: 9px; font-size: 11px; color: #41586c; background: #f2f6f9; white-space: nowrap; }
 .mono { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .toolbar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; align-items: center; }
 .toolbar input[type="text"] { flex: 1 1 110px; min-width: 90px; padding: 5px 8px; border: 1px solid #b9c9d6; border-radius: 6px; font-size: 12.5px; }
@@ -36,41 +42,40 @@ table.issues tbody tr.sel { background: #e3f0fb; box-shadow: inset 3px 0 0 #2b7b
 .colmenu { position: absolute; right: 0; top: 32px; z-index: 20; background: #fff; border: 1px solid #b9c9d6; border-radius: 8px; box-shadow: 0 6px 20px rgba(20,40,60,.18); padding: 10px 12px; width: 230px; max-height: 320px; overflow: auto; }
 .colmenu label { display: block; font-size: 12.5px; padding: 3px 0; cursor: pointer; }
 .colmenu .grp { font-size: 11px; color: #68798a; margin: 8px 0 2px; font-weight: 700; }
-.view { position: relative; height: 560px; background: #e9eff4; border-radius: 8px; overflow: hidden; }
-.view .msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #68798a; font-size: 13px; text-align: center; padding: 12px; }
-.stat { margin-top: 10px; font-size: 12.5px; color: #33475c; line-height: 1.8; }
-.stat b { color: #b3541e; }
-.detail img.thumb { width: 100%; max-height: 220px; object-fit: contain; background: #e9eff4; border-radius: 8px; margin-bottom: 10px; }
-.detail label.fl { display: block; font-size: 11px; color: #68798a; font-weight: 700; margin: 10px 0 3px; }
+/* ---- 詳細パネル（Forma の Detail に寄せた見た目） ---- */
+.detail { flex: 0 0 350px; width: 350px; }
+.detail .dhead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.detail .dhead h2 { margin: 0; font-size: 16px; }
+.detail .x { border: none; background: none; font-size: 17px; cursor: pointer; color: #68798a; padding: 2px 6px; }
+.detail .flabel { font-size: 12px; color: #68798a; margin: 12px 0 4px; }
+.detail img.thumb { width: 100%; max-height: 200px; object-fit: contain; background: #eef2f5; border-radius: 6px; }
 .detail input[type="text"], .detail input[type="date"], .detail select, .detail textarea { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid #b9c9d6; border-radius: 6px; font-size: 13px; font-family: inherit; }
-.detail textarea { min-height: 64px; resize: vertical; }
-.detail dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 12.5px; margin: 6px 0 0; }
+.detail textarea { min-height: 58px; resize: vertical; }
+.detail .ro { font-size: 13px; padding: 2px 0; }
+.detail dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 12.5px; margin: 4px 0 0; }
 .detail dl dt { color: #68798a; white-space: nowrap; }
 .detail dl dd { margin: 0; word-break: break-all; }
-.detail .actions { display: flex; gap: 8px; margin-top: 14px; align-items: center; }
+.detail .actions { display: flex; gap: 8px; margin-top: 16px; align-items: center; }
 .detail .note { font-size: 12px; color: #166534; }
 .detail .err { font-size: 12px; color: #a02c2c; }
-/* Viewer ツールバー拡張のボタンアイコン */
+/* ---- ビューア ---- */
+.view { position: relative; height: 620px; background: #e9eff4; border-radius: 8px; overflow: hidden; }
+#viewerWrap { position: absolute; inset: 0; }
+.view .msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #68798a; font-size: 13px; text-align: center; padding: 12px; }
+#pinMark { position: absolute; z-index: 6; pointer-events: none; transform: translate(-50%, -97%); filter: drop-shadow(0 2px 3px rgba(10,40,80,.45)); }
+.stat { margin-top: 10px; font-size: 12.5px; color: #33475c; line-height: 1.8; }
+.stat b { color: #b3541e; }
 .tb-focus-btn .adsk-button-icon { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='6' fill='none' stroke='%23e8eef4' stroke-width='2'/%3E%3Cpath d='M12 2v4M12 18v4M2 12h4M18 12h4' stroke='%23e8eef4' stroke-width='2'/%3E%3Ccircle cx='12' cy='12' r='1.8' fill='%23e8eef4'/%3E%3C/svg%3E") !important; background-size: 20px 20px; background-position: center; background-repeat: no-repeat; }
 </style>
 </head>
 <body>
 <h1>指摘事項 拡張デモ②：実 Issue → 要素情報の自動付与 → 3D 表示</h1>
 
-<div class="split">
-<div class="col-model">
-<div class="panel">
-<h2>3D 表示（APS Viewer）</h2>
-<div class="view" id="viewerWrap"><div class="msg" id="viewerMsg">モデルを読み込んでいます…</div></div>
-<div class="stat" id="statV">—</div>
-</div>
-</div>
-
-<div class="col-issues">
-<div class="panel">
-<h2>Issue 一覧（Forma の実 Issue）</h2>
+<div class="top">
+<div class="panel grow">
+<h2>Issues</h2>
 <div class="toolbar">
-<input type="text" id="fltQ" placeholder="タイトル・要素名で検索">
+<input type="text" id="fltQ" placeholder="Title, ID, or description">
 <select id="fltStatus"><option value="all">ステータス：すべて</option></select>
 <select id="fltSort">
 <option value="id">並び順：番号 ↑</option>
@@ -104,37 +109,54 @@ table.issues tbody tr.sel { background: #e3f0fb; box-shadow: inset 3px 0 0 #2b7b
 </div>
 </div>
 
-<div class="panel detail" id="detailPanel" hidden>
-<h2>Issue 詳細 <span class="sub2" id="dtId"></span></h2>
+<aside class="panel detail" id="detailPanel" hidden>
+<div class="dhead"><h2 id="dtId">Issue</h2><button class="x" id="dtClose" title="閉じる">✕</button></div>
+<div class="flabel">Issue thumbnail</div>
 <img class="thumb" id="dtThumb" alt="" hidden>
-<label class="fl">タイトル</label>
+<div class="flabel">Title</div>
 <input type="text" id="dtTitle">
-<label class="fl">ステータス</label>
+<div class="flabel">Status</div>
 <select id="dtStatus"></select>
-<label class="fl">期日</label>
+<div class="flabel">Type</div>
+<div class="ro" id="dtType">—</div>
+<div class="flabel">Due date</div>
 <input type="date" id="dtDue">
-<label class="fl">説明</label>
+<div class="flabel">Description</div>
 <textarea id="dtDesc"></textarea>
-<label class="fl">対象要素（モデルから自動付与）</label>
+<div class="flabel">Assigned to</div>
+<div class="ro" id="dtAssignee">—</div>
+<div class="flabel">Watchers</div>
+<div class="ro" id="dtWatchers">—</div>
+<div class="flabel">Placement</div>
+<div class="ro" id="dtPlacement">—</div>
+<div class="flabel">対象要素（モデルから自動付与）</div>
 <dl id="dtElement"></dl>
-<label class="fl">ピン・その他</label>
-<dl id="dtMeta"></dl>
 <div class="actions">
 <button class="btn btn-primary" id="dtShow3d">ビューアで表示</button>
 <button class="btn" id="dtSave">変更を保存</button>
 <span class="note" id="dtNote"></span>
 <span class="err" id="dtErr"></span>
 </div>
+</aside>
 </div>
+
+<div class="panel viewer-panel">
+<h2>3D 表示（APS Viewer）</h2>
+<div class="view" id="viewerOuter">
+<div id="viewerWrap"></div>
+<div id="pinMark" hidden><svg width="34" height="44" viewBox="0 0 34 44"><path d="M17 43 C17 43 3 27 3 15 A14 14 0 1 1 31 15 C31 27 17 43 17 43 Z" fill="#1e9bff" stroke="#ffffff" stroke-width="2"/><circle cx="17" cy="15" r="6" fill="#ffffff"/></svg></div>
+<div class="msg" id="viewerMsg">モデルを読み込んでいます…</div>
 </div>
+<div class="stat" id="statV">—</div>
 </div>
 
 <script src="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/viewer3D.min.js"></script>
 <script>
 let DATA = null, selected = null, focusedId = null;
 let viewer = null, viewerModelKey = null, rootLoaded = false, geoLoaded = false, tSelect = 0;
-let viewerReady = false, desiredModelKey = null;
+let viewerReady = false, desiredModelKey = null, aimedFor = null;
 let blinkTimer = null, blinkOn = false;
+const captured = new Map(); // Issue ごとのビューアキャプチャ（スナップショットの代替）
 const $ = id => document.getElementById(id);
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 function issue() { return DATA?.issues.find(i => i.id === selected); }
@@ -143,12 +165,22 @@ const STATUS = {
   draft: ['下書き', 'st-draft'], open: ['未対応', 'st-open'], pending: ['対応中', 'st-doing'],
   in_review: ['確認待ち', 'st-wait'], closed: ['完了', 'st-done'], void: ['無効', 'st-draft'],
 };
+const FSTATUS = { // Forma 風ステータス表示（色バー＋英語）
+  draft: ['Draft', '#8a9aa8'], open: ['Open', '#e8a33d'], pending: ['Pending', '#d97706'],
+  in_review: ['In review', '#3b82c4'], closed: ['Closed', '#4caf7d'], void: ['Void', '#8a9aa8'],
+};
+function fmtDate(s) {
+  if (!s) return '-';
+  const d = new Date(s + (s.length === 10 ? 'T00:00:00' : ''));
+  return isNaN(d) ? s : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
 function levelOf(e) { return e?.['Level'] ?? e?.['Base Level'] ?? e?.['Reference Level'] ?? e?.['Host Level'] ?? '—'; }
 function nameOf(e) { return /\[\d+\]\s*$/.test(e.name) ? e.name : `${e.name} [${e.revitId}]`; }
 function locOf(e) { return e?.['Column Location Mark'] ?? e?.['Mark'] ?? e?.['Type Mark'] ?? '—'; }
+function modelVersion(i) { const m = DATA?.models.find(x => x.key === i.modelKey); return m?.version != null ? 'V' + m.version : ''; }
 function setStatV(t) { $('statV').innerHTML = t; }
 
-// ---- 列定義：固定列＋モデル情報から自動追加される列 ----
+// ---- 列定義：Forma の列＋モデル情報から自動追加される列 ----
 const PROP_LABELS = {
   'Type Name': 'タイプ名', 'Level': '階', 'Base Level': '基準レベル', 'Reference Level': '参照レベル',
   'Host Level': 'ホストレベル', 'Top Level': '上部レベル', 'Schedule Level': 'スケジュールレベル',
@@ -157,33 +189,34 @@ const PROP_LABELS = {
   'Family Name': 'ファミリ名', 'Length': '長さ', 'Area': '面積', 'Volume': '体積', 'Elevation from Level': 'レベルからの標高',
 };
 let COLUMNS = [];
-let visibleCols = new Set(JSON.parse(localStorage.getItem('sampled-cols') ?? 'null') ?? ['id', 'title', 'status', 'due', 'element', 'level', 'loc']);
+let visibleCols = new Set(JSON.parse(localStorage.getItem('sampled-cols-v2') ?? 'null') ?? ['title', 'status', 'type', 'assignee', 'due', 'start', 'placement']);
 function buildColumns() {
   const cols = [
-    { id: 'id', label: 'ID', grp: 'Issue', get: i => i.displayId, mono: true },
-    { id: 'title', label: 'タイトル', grp: 'Issue', get: i => i.title, bold: true },
-    { id: 'status', label: 'ステータス', grp: 'Issue', get: i => i.status, pill: true },
-    { id: 'due', label: '期日', grp: 'Issue', get: i => i.dueDate ?? '—', mono: true },
-    { id: 'created', label: '作成日', grp: 'Issue', get: i => (i.createdAt ?? '').slice(0, 10) || '—', mono: true },
-    { id: 'assignee', label: '担当者', grp: 'Issue', get: i => i.assignedTo ?? '未割当' },
-    { id: 'published', label: '公開', grp: 'Issue', get: i => i.published ? '公開' : '未公開' },
-    { id: 'comments', label: 'コメント', grp: 'Issue', get: i => i.commentCount ?? 0, mono: true },
-    { id: 'attachments', label: '添付', grp: 'Issue', get: i => i.attachmentCount ?? 0, mono: true },
-    { id: 'element', label: '対象要素', grp: 'モデル情報', get: i => i.element ? nameOf(i.element) : (i.pin ? '対象外モデルのピン' : 'ピンなし') },
-    { id: 'model', label: 'モデル', grp: 'モデル情報', get: i => i.modelName ?? '—' },
-    { id: 'level', label: '階', grp: 'モデル情報', get: i => i.element ? levelOf(i.element) : '—' },
-    { id: 'loc', label: '位置', grp: 'モデル情報', get: i => i.element ? locOf(i.element) : '—' },
+    { id: 'title', label: 'Title', grp: 'Issue', cell: 'title', get: i => i.title },
+    { id: 'status', label: 'Status', grp: 'Issue', cell: 'fstatus', get: i => i.status },
+    { id: 'type', label: 'Type', grp: 'Issue', cell: 'type', get: i => i.typeLabel ?? '—' },
+    { id: 'assignee', label: 'Assigned to', grp: 'Issue', cell: 'assignee', get: i => i.assignedToName ?? '' },
+    { id: 'due', label: 'Due date', grp: 'Issue', cell: 'text', get: i => fmtDate(i.dueDate) },
+    { id: 'start', label: 'Start date', grp: 'Issue', cell: 'text', get: i => fmtDate(i.startDate) },
+    { id: 'placement', label: 'Placement', grp: 'Issue', cell: 'placement', get: i => i.modelFullName ?? '' },
+    { id: 'id', label: 'ID', grp: 'Issue', cell: 'text', get: i => i.displayId, mono: true },
+    { id: 'created', label: '作成日', grp: 'Issue', cell: 'text', get: i => (i.createdAt ?? '').slice(0, 10) || '—', mono: true },
+    { id: 'published', label: '公開', grp: 'Issue', cell: 'text', get: i => i.published ? '公開' : '未公開' },
+    { id: 'comments', label: 'コメント', grp: 'Issue', cell: 'text', get: i => i.commentCount ?? 0, mono: true },
+    { id: 'attachments', label: '添付', grp: 'Issue', cell: 'text', get: i => i.attachmentCount ?? 0, mono: true },
+    { id: 'element', label: '対象要素', grp: 'モデル情報', cell: 'text', get: i => i.element ? nameOf(i.element) : (i.pin ? '対象外モデルのピン' : 'ピンなし') },
+    { id: 'model', label: 'モデル', grp: 'モデル情報', cell: 'text', get: i => i.modelName ?? '—' },
+    { id: 'level', label: '階', grp: 'モデル情報', cell: 'text', get: i => i.element ? levelOf(i.element) : '—' },
+    { id: 'loc', label: '位置', grp: 'モデル情報', cell: 'text', get: i => i.element ? locOf(i.element) : '—' },
   ];
-  // 要素プロパティのキーを集めて自動で列化する
   const freq = new Map();
   for (const i of DATA.issues) if (i.element) for (const k of Object.keys(i.element)) {
     if (['name', 'revitId', 'objectid'].includes(k)) continue;
     freq.set(k, (freq.get(k) ?? 0) + 1);
   }
   for (const [k] of [...freq.entries()].sort((a, b) => b[1] - a[1])) {
-    cols.push({ id: 'prop:' + k, label: PROP_LABELS[k] ?? k, grp: 'モデル情報（自動）', get: i => i.element?.[k] ?? '—' });
+    cols.push({ id: 'prop:' + k, label: PROP_LABELS[k] ?? k, grp: 'モデル情報（自動）', cell: 'text', get: i => i.element?.[k] ?? '—' });
   }
-  // Issue のカスタム属性も列化する
   const caLabels = new Set();
   for (const i of DATA.issues) for (const ca of i.customAttributes ?? []) {
     const label = ca.title ?? ca.name ?? ca.attributeId ?? ca.id;
@@ -191,7 +224,7 @@ function buildColumns() {
   }
   for (const label of caLabels) {
     cols.push({
-      id: 'ca:' + label, label, grp: 'カスタム属性',
+      id: 'ca:' + label, label, grp: 'カスタム属性', cell: 'text',
       get: i => { const ca = (i.customAttributes ?? []).find(c => String(c.title ?? c.name ?? c.attributeId ?? c.id) === label); return ca?.value ?? '—'; },
     });
   }
@@ -208,8 +241,7 @@ function renderColMenu() {
     const q = $('colFilter').value.trim().toLowerCase();
     for (const lb of $('colMenu').querySelectorAll('label[data-label]')) lb.style.display = !q || lb.dataset.label.includes(q) ? '' : 'none';
     for (const g of $('colMenu').querySelectorAll('.grp')) {
-      let n = g.nextElementSibling;
-      let any = false;
+      let n = g.nextElementSibling, any = false;
       while (n && !n.classList.contains('grp')) { if (n.style.display !== 'none') any = true; n = n.nextElementSibling; }
       g.style.display = any ? '' : 'none';
     }
@@ -218,7 +250,7 @@ function renderColMenu() {
   for (const cb of $('colMenu').querySelectorAll('input[data-col]')) {
     cb.addEventListener('change', () => {
       if (cb.checked) visibleCols.add(cb.dataset.col); else visibleCols.delete(cb.dataset.col);
-      localStorage.setItem('sampled-cols', JSON.stringify([...visibleCols]));
+      localStorage.setItem('sampled-cols-v2', JSON.stringify([...visibleCols]));
       buildTable();
     });
   }
@@ -226,7 +258,7 @@ function renderColMenu() {
 $('btnCols').addEventListener('click', (e) => { e.stopPropagation(); $('colMenu').hidden = !$('colMenu').hidden; });
 document.addEventListener('click', (e) => { if (!$('colMenu').hidden && !e.target.closest('.colmenu-wrap')) $('colMenu').hidden = true; });
 
-// ---- Issue 一覧：フィルター／ソート／ページネーション ----
+// ---- Issue 一覧 ----
 let PAGE_SIZE = Number(localStorage.getItem('sampled-pagesize') ?? 10);
 if (![10, 25, 50, 100].includes(PAGE_SIZE)) PAGE_SIZE = 10;
 $('pageSize').value = String(PAGE_SIZE);
@@ -238,7 +270,7 @@ function visibleIssues() {
   const list = DATA.issues.filter(i => {
     if (flt.status !== 'all' && i.status !== flt.status) return false;
     if (q) {
-      const hay = `${i.title} ${i.description ?? ''} ${i.element?.name ?? ''} ${i.modelName ?? ''}`.toLowerCase();
+      const hay = `${i.title} ${i.description ?? ''} ${i.element?.name ?? ''} ${i.modelName ?? ''} ${i.displayId}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -252,6 +284,17 @@ function visibleIssues() {
   };
   return list.sort(by[flt.sort] ?? by.id);
 }
+function cellHtml(c, i) {
+  const v = c.get(i);
+  switch (c.cell) {
+    case 'fstatus': { const [label, color] = FSTATUS[i.status] ?? [i.status, '#8a9aa8']; return `<span class="fst"><i style="background:${color}"></i>${esc(label)}</span>`; }
+    case 'type': return i.typeLabel ? `<span class="tchip"><span class="code">${esc(i.typeCode ?? '')}</span><span class="lbl">${esc(i.typeLabel)}</span></span>` : '—';
+    case 'assignee': return i.assignedToName ? esc(i.assignedToName) : '<span class="unspec">Unspecified</span>';
+    case 'placement': return i.modelFullName ? `<span class="place">${esc(i.modelFullName)}</span>${modelVersion(i) ? `<span class="vpill">${esc(modelVersion(i))}</span>` : ''}` : '-';
+    case 'title': return `<b style="font-weight:600">${esc(v)}</b>`;
+    default: return esc(v);
+  }
+}
 function buildTable() {
   const cols = COLUMNS.filter(c => visibleCols.has(c.id));
   $('issueHead').innerHTML = '<tr>' + cols.map(c => `<th>${esc(c.label)}</th>`).join('') + '<th>表示</th></tr>';
@@ -259,14 +302,11 @@ function buildTable() {
   const pages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
   page = Math.min(Math.max(1, page), pages);
   const slice = list.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  $('issueRows').innerHTML = slice.map(i => {
-    const cells = cols.map(c => {
-      if (c.pill) { const [label, cls] = STATUS[i.status] ?? [i.status, 'st-draft']; return `<td><span class="pill ${cls}">${esc(label)}</span></td>`; }
-      const v = c.get(i);
-      return `<td class="${c.mono ? 'mono' : ''}">${c.bold ? `<b>${esc(v)}</b>` : esc(v)}</td>`;
-    }).join('');
-    return `<tr data-id="${i.id}" class="${i.id === selected ? 'sel' : ''}">${cells}<td>${i.targetDbId ? `<button class="vbtn" data-view="${i.id}">3D</button>` : ''}</td></tr>`;
-  }).join('') || '<tr><td colspan="99" style="color:#68798a">条件に合う Issue はありません。</td></tr>';
+  $('issueRows').innerHTML = slice.map(i =>
+    `<tr data-id="${i.id}" class="${i.id === selected ? 'sel' : ''}">` +
+    cols.map(c => `<td class="${c.mono ? 'mono' : ''}">${cellHtml(c, i)}</td>`).join('') +
+    `<td>${i.targetDbId ? `<button class="vbtn" data-view="${i.id}">3D</button>` : ''}</td></tr>`
+  ).join('') || '<tr><td colspan="99" style="color:#68798a">条件に合う Issue はありません。</td></tr>';
   for (const tr of $('issueRows').children) if (tr.dataset.id) tr.addEventListener('click', () => selectIssue(tr.dataset.id));
   for (const b of $('issueRows').querySelectorAll('button[data-view]')) {
     b.addEventListener('click', (e) => { e.stopPropagation(); showInViewer(b.dataset.view); });
@@ -294,48 +334,42 @@ function statusOptions(i) {
   if (!list.includes(i.status)) list = [i.status, ...list];
   return [...new Set(list)];
 }
+function setDetailThumb(i) {
+  const img = $('dtThumb');
+  img.onerror = () => { if (i.modelKey && !img.dataset.fbk) { img.dataset.fbk = '1'; img.src = '/api/thumbnail?model=' + encodeURIComponent(i.modelKey); } else img.hidden = true; };
+  img.onload = () => { img.hidden = false; };
+  delete img.dataset.fbk;
+  if (i.snapshotUrn) img.src = '/api/snapshot?urn=' + encodeURIComponent(i.snapshotUrn);
+  else if (captured.has(i.id)) img.src = captured.get(i.id);
+  else if (i.modelKey) img.src = '/api/thumbnail?model=' + encodeURIComponent(i.modelKey);
+  else img.hidden = true;
+}
 function selectIssue(id) {
   selected = id;
   markSelectedRow();
   const i = issue();
   if (!i) { $('detailPanel').hidden = true; return; }
   $('detailPanel').hidden = false;
-  $('dtId').textContent = `#${i.displayId}`;
+  $('dtId').textContent = `Issue #${i.displayId}`;
   $('dtTitle').value = i.title ?? '';
   $('dtStatus').innerHTML = statusOptions(i).map(s => `<option value="${esc(s)}" ${s === i.status ? 'selected' : ''}>${esc(STATUS[s]?.[0] ?? s)}</option>`).join('');
+  $('dtType').innerHTML = i.typeLabel ? `<span class="tchip"><span class="code">${esc(i.typeCode ?? '')}</span><span class="lbl">${esc(i.typeLabel)}</span></span>` : '—';
   $('dtDue').value = i.dueDate ?? '';
   $('dtDesc').value = i.description ?? '';
+  $('dtAssignee').textContent = i.assignedToName ?? 'Unspecified';
+  $('dtWatchers').textContent = i.watcherNames?.length ? i.watcherNames.join(', ') : '—';
+  $('dtPlacement').innerHTML = i.modelFullName ? `<span class="place">${esc(i.modelFullName)}</span>${modelVersion(i) ? `<span class="vpill">${esc(modelVersion(i))}</span>` : ''}` : '—';
   $('dtNote').textContent = '';
   $('dtErr').textContent = '';
-  // サムネイル：Issue のスナップショット → 無ければモデルのサムネイル
-  const img = $('dtThumb');
-  img.hidden = true;
-  img.onerror = () => {
-    if (i.modelKey && !img.dataset.fbk) { img.dataset.fbk = '1'; img.src = '/api/thumbnail?model=' + encodeURIComponent(i.modelKey); }
-    else img.hidden = true;
-  };
-  img.onload = () => { img.hidden = false; };
-  delete img.dataset.fbk;
-  img.src = i.snapshotUrn ? '/api/snapshot?urn=' + encodeURIComponent(i.snapshotUrn) : (i.modelKey ? '/api/thumbnail?model=' + encodeURIComponent(i.modelKey) : '');
-  if (!i.snapshotUrn && !i.modelKey) img.hidden = true;
-  // 対象要素（自動付与された情報）
+  setDetailThumb(i);
   const e = i.element;
   $('dtElement').innerHTML = e ? Object.entries(e)
     .filter(([k]) => !['revitId', 'objectid'].includes(k))
     .map(([k, v]) => `<dt>${esc(PROP_LABELS[k] ?? k)}</dt><dd>${esc(v)}</dd>`).join('')
     : '<dd style="color:#68798a">対象要素なし（ピンなし、または対象外モデル）</dd>';
-  const meta = [
-    ['モデル', i.modelName ?? '—'],
-    ['ピン先ビュー', i.pin?.viewName ?? '—'],
-    ['担当者', i.assignedTo ?? '未割当'],
-    ['公開', i.published ? '公開' : '未公開（作成者と担当者のみ）'],
-    ['作成日時', i.createdAt ? i.createdAt.replace('T', ' ').slice(0, 16) : '—'],
-    ['コメント', String(i.commentCount ?? 0)],
-    ['添付', String(i.attachmentCount ?? 0)],
-  ];
-  $('dtMeta').innerHTML = meta.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
   $('dtShow3d').disabled = !i.targetDbId;
 }
+$('dtClose').addEventListener('click', () => { $('detailPanel').hidden = true; });
 $('dtShow3d').addEventListener('click', () => { if (selected) showInViewer(selected); });
 $('dtSave').addEventListener('click', async () => {
   const i = issue();
@@ -400,63 +434,40 @@ function startBlink(dbId) {
   }, 650);
 }
 
-// ピンが刺さった位置に、Viewer のオーバーレイへ青いピンを立てる（形状に遮られても見えるよう深度テストなし）
-let pinObjects = [];
+// ---- ピン：HTML マーカーを 3D 位置へ投影して重ねる（Viewer の描画に依存しない確実な方式） ----
+let pinPos = null, pinRaf = null;
 function hidePin() {
-  if (viewer?.impl && pinObjects.length) {
-    for (const o of pinObjects) { try { viewer.impl.removeOverlay('issue-pin', o); } catch (e) {} }
-    try { viewer.impl.invalidate(true); } catch (e) {}
-  }
-  pinObjects = [];
+  pinPos = null;
+  if (pinRaf) { cancelAnimationFrame(pinRaf); pinRaf = null; }
+  $('pinMark').hidden = true;
+}
+function pinLoop() {
+  pinRaf = requestAnimationFrame(pinLoop);
+  if (!viewer || !pinPos) return;
+  try {
+    const T = Autodesk.Viewing.Private.THREE;
+    const p = new T.Vector3(pinPos.x, pinPos.y, pinPos.z);
+    const cam = viewer.impl.camera;
+    const dir = new T.Vector3();
+    cam.getWorldDirection(dir);
+    const to = p.clone().sub(cam.position);
+    const el = $('pinMark');
+    if (to.dot(dir) <= 0) { el.hidden = true; return; }
+    const v = viewer.worldToClient(p);
+    el.style.left = v.x + 'px';
+    el.style.top = v.y + 'px';
+    el.hidden = false;
+  } catch (e) {}
 }
 function showPin(i) {
   hidePin();
-  if (!viewer?.impl || !i?.targetDbId) return;
+  if (!i?.targetDbId) return;
   const b = i.targetBbox;
-  const pos = i.pin?.position ?? (b ? { x: (b[0] + b[3]) / 2, y: (b[1] + b[4]) / 2, z: b[5] } : null);
-  if (!pos) return;
-  try {
-    const T = Autodesk.Viewing.Private.THREE;
-    try { viewer.impl.createOverlayScene('issue-pin'); } catch (e) {}
-    const diag = b ? Math.hypot(b[3] - b[0], b[4] - b[1], b[5] - b[2]) : 10;
-    const H = Math.min(Math.max(diag * 0.5, 1.5), 16); // 針の長さ（対象の大きさに比例）
-    const R = H * 0.34;                                 // 頭の半径
-    const mat = new T.MeshBasicMaterial({ color: 0x1e9bff, depthTest: false, transparent: true, opacity: 0.96 });
-    const cone = new T.Mesh(new T.ConeGeometry(R * 0.62, H, 20), mat);
-    cone.rotation.x = -Math.PI / 2;                     // 尖端を下へ向ける
-    cone.position.set(pos.x, pos.y, pos.z + H / 2);     // 尖端がちょうどピン位置に来る
-    cone.renderOrder = 999;
-    const head = new T.Mesh(new T.SphereGeometry(R, 20, 14), mat);
-    head.position.set(pos.x, pos.y, pos.z + H + R * 0.55);
-    head.renderOrder = 999;
-    viewer.impl.addOverlay('issue-pin', cone);
-    viewer.impl.addOverlay('issue-pin', head);
-    pinObjects = [cone, head];
-    viewer.impl.invalidate(true);
-  } catch (e) {}
+  pinPos = i.pin?.position ?? (b ? { x: (b[0] + b[3]) / 2, y: (b[1] + b[4]) / 2, z: b[5] } : null);
+  if (pinPos && !pinRaf) pinRaf = requestAnimationFrame(pinLoop);
 }
 
-// フォーカス中の Issue を Viewer に反映：対象だけを残して他はゴースト表示にし、対象を赤点滅＋ピン＋カメラを寄せる
-function applySelection() {
-  const i = focusedIssue();
-  if (!viewer || !rootLoaded || !i) return;
-  if (!i.targetDbId || i.modelKey !== viewerModelKey) {
-    if (!i.targetDbId) { stopBlink(); hidePin(); viewer.showAll(); viewer.clearThemingColors(); setStatV('この Issue は対象モデルへのピンがないため、モデル全体を表示しています。'); }
-    return;
-  }
-  if (!viewer.model?.getFragmentList?.()) return; // フラグメント表が用意できていない間は触らない
-  try {
-    if (typeof viewer.setGhosting === 'function') viewer.setGhosting(true); // 対象以外は消さずゴーストにして位置関係を残す
-    viewer.isolate([i.targetDbId]); // 残すのは対象だけ：壁の向こう・地中の対象でもゴースト越しに見える
-    viewer.clearThemingColors();
-    viewer.fitToView([i.targetDbId]);
-  } catch (e) { return; }
-  startBlink(i.targetDbId);
-  showPin(i);
-  if (geoLoaded) setStatV(`<b>#${i.displayId}</b> の対象要素を表示中（対象以外はゴースト表示）。`);
-}
-
-// フォーカス対象の bbox からカメラ位置を読み込み前に決め、完了時にカメラが動かないようにする
+// フォーカス対象の bbox からカメラ位置を決める（読み込み前／読み込み直後に呼んで、最初からピン位置にカメラを置く）
 function aimCameraAtTarget() {
   const i = focusedIssue();
   if (!viewer || !i?.targetBbox || i.modelKey !== viewerModelKey) return false;
@@ -468,10 +479,10 @@ function aimCameraAtTarget() {
     const dir = new V3(0.95, 0.75, 0.95).normalize();
     const pos = c.clone().add(dir.multiplyScalar(diag * 1.6 + 6));
     viewer.navigation.setView(pos, c);
+    aimedFor = i.id;
     return true;
   } catch (e) { return false; }
 }
-// 対象がまだ無い場合はモデル全体の斜め視点を初期カメラにする（素の既定カメラ＝平面方向を残さないため）
 function aimCameraAtModel(m) {
   if (!viewer || !m?.bounds) return false;
   try {
@@ -486,19 +497,60 @@ function aimCameraAtModel(m) {
   } catch (e) { return false; }
 }
 
+// ビューアの実描画をキャプチャして、その Issue のサムネイルにする（API ではスナップショットを生成できないため）
+let captureTimer = null;
+function scheduleCapture(i) {
+  if (captured.has(i.id) || typeof viewer?.getScreenshot !== 'function') return;
+  if (captureTimer) clearTimeout(captureTimer);
+  captureTimer = setTimeout(() => {
+    try {
+      viewer.getScreenshot(560, 350, (res) => {
+        const done = (url) => { if (url) { captured.set(i.id, url); if (selected === i.id) setDetailThumb(issue()); } };
+        if (typeof res === 'string' && res.startsWith('data:')) done(res);
+        else if (res instanceof Blob) done(URL.createObjectURL(res));
+      });
+    } catch (e) {}
+  }, 900);
+}
+
+// フォーカス中の Issue を Viewer に反映
+function applySelection() {
+  const i = focusedIssue();
+  if (!viewer || !rootLoaded || !i) return;
+  if (!i.targetDbId || i.modelKey !== viewerModelKey) {
+    if (!i.targetDbId) { stopBlink(); hidePin(); viewer.showAll(); viewer.clearThemingColors(); setStatV('この Issue は対象モデルへのピンがないため、モデル全体を表示しています。'); }
+    return;
+  }
+  if (!viewer.model?.getFragmentList?.()) return;
+  try {
+    if (typeof viewer.setGhosting === 'function') viewer.setGhosting(true);
+    viewer.isolate([i.targetDbId]); // 残すのは対象だけ：壁の向こう・地中の対象でもゴースト越しに見える
+    viewer.clearThemingColors();
+    if (aimedFor !== i.id && !aimCameraAtTarget()) viewer.fitToView([i.targetDbId]); // カメラは最初からピン位置へ（全体表示を経ない）
+  } catch (e) { return; }
+  startBlink(i.targetDbId);
+  showPin(i);
+  if (geoLoaded) {
+    setStatV(`<b>#${i.displayId}</b> の対象要素を表示中（対象以外はゴースト表示）。`);
+    scheduleCapture(i);
+  }
+}
+
 function setupViewer(modelKey) {
   const m = DATA?.models.find(x => x.key === modelKey);
   if (!m || !window.Autodesk) return;
   if (viewer && viewerModelKey === modelKey) return;
-  if (viewer) { stopBlink(); pinObjects = []; try { viewer.finish(); } catch (e) {} viewer = null; }
+  if (viewer) { stopBlink(); hidePin(); try { viewer.finish(); } catch (e) {} viewer = null; }
   $('viewerWrap').innerHTML = '';
-  viewerModelKey = modelKey; rootLoaded = false; geoLoaded = false;
+  const msg = $('viewerMsg'); if (msg) msg.remove();
+  viewerModelKey = modelKey; rootLoaded = false; geoLoaded = false; aimedFor = null;
   viewer = new Autodesk.Viewing.GuiViewer3D($('viewerWrap'));
   viewer.start();
   viewer.loadExtension('DemoToolbarExtension').catch(() => {});
   const aimed = aimCameraAtTarget() || aimCameraAtModel(m);
   viewer.addEventListener(Autodesk.Viewing.MODEL_ROOT_LOADED_EVENT, () => {
     rootLoaded = true;
+    aimCameraAtTarget(); // 読み込み直後の時点でカメラをピン位置へ（ジオメトリ配信もその周辺から優先される）
     applySelection();
     setStatV(`モデル（${esc(m.short)}）の読み込み中…`);
   });
@@ -512,15 +564,14 @@ function setupViewer(modelKey) {
     if (!geoLoaded && typeof e.percent === 'number') setStatV(`モデル（${esc(m.short)}）を読み込んでいます（逐次配信）… ${Math.round(e.percent)}%`);
   });
   Autodesk.Viewing.Document.load('urn:' + m.urn, (doc) => {
-    // エイミングできた場合はその視点を保持し、できなかった場合はモデルのホームビューに任せる
     viewer.loadDocumentNode(doc, doc.getRoot().getDefaultGeometry(), aimed ? { preserveView: true } : undefined);
     setStatV(`モデル（${esc(m.short)}）を読み込んでいます（逐次配信）…`);
-  }, (code, msg) => setStatV('モデルの読み込みに失敗しました：' + code + ' ' + esc(msg ?? '')));
+  }, (code, msg2) => setStatV('モデルの読み込みに失敗しました：' + code + ' ' + esc(msg2 ?? '')));
 }
 
 function ensureViewerModel(modelKey) {
   desiredModelKey = modelKey;
-  if (!viewerReady) return; // 初期化が終わるまでは作らない（Initializer 完了時に desiredModelKey で作る）
+  if (!viewerReady) return;
   if (viewerModelKey !== modelKey) setupViewer(modelKey);
 }
 
@@ -551,7 +602,7 @@ if (window.Autodesk?.Viewing?.Extension) {
   }
   Autodesk.Viewing.theExtensionManager.registerExtension('DemoToolbarExtension', DemoToolbarExtension);
 }
-window.addEventListener('demo-focus-target', () => applySelection());
+window.addEventListener('demo-focus-target', () => { aimedFor = null; applySelection(); });
 
 async function initViewer() {
   if (!window.Autodesk) {
@@ -572,7 +623,6 @@ async function initViewer() {
   });
 }
 
-// Viewer の初期化は Issue 取得と並行に始める（初期化完了までは Viewer を作らない）
 initViewer();
 (async () => {
   try {
