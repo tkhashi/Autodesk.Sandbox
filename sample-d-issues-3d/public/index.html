@@ -35,7 +35,9 @@ table.issues tbody tr.sel { background: #e8f2fa; }
 .toolbar select { padding: 5px 6px; border: 1px solid #b9c9d6; border-radius: 6px; font-size: 12.5px; background: #fff; }
 .toolbar button, .pager button, .btn { padding: 5px 12px; border: 1px solid #b9c9d6; background: #f2f7fb; border-radius: 6px; cursor: pointer; font-size: 12.5px; }
 .btn-primary { background: #2b7bbb; border-color: #2b7bbb; color: #fff; font-weight: 700; }
-.vbtn { padding: 2px 10px; border: 1px solid #2b7bbb; background: #2b7bbb; color: #fff; border-radius: 6px; cursor: pointer; font-size: 11.5px; font-weight: 700; white-space: nowrap; }
+.vbtn { flex: none; width: 48px; text-align: center; padding: 6px 0; border: 1px solid #2b7bbb; background: #2b7bbb; color: #fff; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 700; white-space: nowrap; }
+.titlecell { display: flex; align-items: center; gap: 9px; }
+.vbtn-spacer { flex: none; width: 48px; }
 .pager { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 12.5px; color: #41586c; }
 .pager button:disabled { opacity: .45; cursor: default; }
 .colmenu-wrap { position: relative; }
@@ -298,13 +300,13 @@ function cellHtml(c, i) {
     case 'type': return i.typeLabel ? `<span class="tchip"><span class="code">${esc(i.typeCode ?? '')}</span><span class="lbl">${esc(i.typeLabel)}</span></span>` : '—';
     case 'assignee': return i.assignedToName ? esc(i.assignedToName) : '<span class="unspec">Unspecified</span>';
     case 'placement': return i.modelFullName ? `<span class="place">${esc(i.modelFullName)}</span>${modelVersion(i) ? `<span class="vpill">${esc(modelVersion(i))}</span>` : ''}` : '-';
-    case 'title': return `<b style="font-weight:600">${esc(v)}</b>`;
+    case 'title': return `<span class="titlecell">${i.targetDbId ? `<button class="vbtn" data-view="${i.id}">3D</button>` : '<span class="vbtn-spacer"></span>'}<b style="font-weight:600">${esc(v)}</b></span>`;
     default: return esc(v);
   }
 }
 function buildTable() {
   const cols = COLUMNS.filter(c => visibleCols.has(c.id));
-  $('issueHead').innerHTML = '<tr>' + cols.map(c => `<th>${esc(c.label)}</th>`).join('') + '<th>表示</th></tr>';
+  $('issueHead').innerHTML = '<tr>' + cols.map(c => `<th>${esc(c.label)}</th>`).join('') + '</tr>';
   const list = visibleIssues();
   const pages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
   page = Math.min(Math.max(1, page), pages);
@@ -312,7 +314,7 @@ function buildTable() {
   $('issueRows').innerHTML = slice.map(i =>
     `<tr data-id="${i.id}" class="${i.id === selected ? 'sel' : ''}">` +
     cols.map(c => `<td class="${c.mono ? 'mono' : ''}">${cellHtml(c, i)}</td>`).join('') +
-    `<td>${i.targetDbId ? `<button class="vbtn" data-view="${i.id}">3D</button>` : ''}</td></tr>`
+    '</tr>'
   ).join('') || '<tr><td colspan="99" style="color:#68798a">条件に合う Issue はありません。</td></tr>';
   for (const tr of $('issueRows').children) if (tr.dataset.id) tr.addEventListener('click', () => selectIssue(tr.dataset.id));
   for (const b of $('issueRows').querySelectorAll('button[data-view]')) {
