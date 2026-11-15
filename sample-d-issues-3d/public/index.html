@@ -200,10 +200,21 @@ function buildColumns() {
 }
 function renderColMenu() {
   const grps = [...new Set(COLUMNS.map(c => c.grp))];
-  $('colMenu').innerHTML = grps.map(g =>
+  $('colMenu').innerHTML = '<input type="text" id="colFilter" placeholder="列名で絞り込み" style="width:100%;box-sizing:border-box;padding:5px 8px;border:1px solid #b9c9d6;border-radius:6px;font-size:12.5px;margin-bottom:4px">' + grps.map(g =>
     `<div class="grp">${esc(g)}</div>` + COLUMNS.filter(c => c.grp === g).map(c =>
-      `<label><input type="checkbox" data-col="${esc(c.id)}" ${visibleCols.has(c.id) ? 'checked' : ''}> ${esc(c.label)}</label>`).join('')
+      `<label data-label="${esc(c.label.toLowerCase())}"><input type="checkbox" data-col="${esc(c.id)}" ${visibleCols.has(c.id) ? 'checked' : ''}> ${esc(c.label)}</label>`).join('')
   ).join('');
+  $('colFilter').addEventListener('input', () => {
+    const q = $('colFilter').value.trim().toLowerCase();
+    for (const lb of $('colMenu').querySelectorAll('label[data-label]')) lb.style.display = !q || lb.dataset.label.includes(q) ? '' : 'none';
+    for (const g of $('colMenu').querySelectorAll('.grp')) {
+      let n = g.nextElementSibling;
+      let any = false;
+      while (n && !n.classList.contains('grp')) { if (n.style.display !== 'none') any = true; n = n.nextElementSibling; }
+      g.style.display = any ? '' : 'none';
+    }
+  });
+  $('colFilter').addEventListener('click', (e) => e.stopPropagation());
   for (const cb of $('colMenu').querySelectorAll('input[data-col]')) {
     cb.addEventListener('change', () => {
       if (cb.checked) visibleCols.add(cb.dataset.col); else visibleCols.delete(cb.dataset.col);
