@@ -481,15 +481,15 @@ function enterOverview() {
   try {
     if (typeof viewer.setGhosting === 'function') viewer.setGhosting(true);
     const dbIds = issuesOnCurrentModel().map(i => i.targetDbId);
-    // ゴースト表示は切らない：Issue の要素だけを実体表示にし、それ以外はゴーストのまま残す
-    if (dbIds.length) viewer.isolate(dbIds);
+    // ゴースト表示は切らない：Issue の要素だけを実体表示にし、それ以外はゴーストのまま残す（透明度0%のときだけ全表示）
+    if (ghostTransparency > 0 && dbIds.length) viewer.isolate(dbIds);
     else viewer.showAll();
   } catch (e) {}
   viewer.clearThemingColors();
   colorIssueElements();
   buildMarkers();
   const n = issuesOnCurrentModel().length;
-  setStatV(`指摘事項一覧を表示中（このモデルの Issue ${n} 件）。色はステータス別、選択中は赤。Issue の要素以外はゴースト表示です。ラベルをクリックすると詳細が開きます。`);
+  setStatV(`指摘事項一覧を表示中（このモデルの Issue ${n} 件）。色はステータス別、選択中は赤。${ghostTransparency === 0 ? 'ゴーストオフ：モデル全体を表示しています。' : 'Issue の要素以外はゴースト表示です。'}ラベルをクリックすると詳細が開きます。`);
   syncOverviewBtn();
 }
 function exitOverview(restore = true) {
@@ -514,21 +514,31 @@ let ghostTransparency = (() => {
   const n = raw === null ? NaN : Number(raw);
   return Number.isFinite(n) ? Math.min(97, Math.max(0, n)) : 90;
 })();
+let ghostAppliedOff = null; // 直前に適用した「透明度0%（ゴーストオフ）」かどうか
 function applyGhostOpacity() {
   if (!viewer) return;
-  const opacity = 1 - ghostTransparency / 100;
+  const off = ghostTransparency === 0;
   try {
     const impl = viewer.impl;
     const mat = impl.fadeMaterial ?? impl.renderer?.()?.fadeMaterial ?? impl._renderer?.fadeMaterial ?? impl.glrenderer?.()?.fadeMaterial ?? null;
-    if (!mat) return;
-    const solid = opacity >= 0.99; // 透明度0%はゴーストオフ相当：元のモデルと同じ見え方にする
-    mat.opacity = opacity;
-    mat.transparent = !solid;
-    mat.depthWrite = solid;
-    mat.needsUpdate = true;
-    mat.variants?.forEach(v => { v.opacity = opacity; v.transparent = !solid; v.depthWrite = solid; v.needsUpdate = true; });
+    if (mat && !off) {
+      // ゴースト用の単色マテリアルは不透明度を上げると全面がその色（濃いグレー）に染まるため、
+      // 0% のときはマテリアルではなく表示状態そのものを切り替える（下の境界処理）
+      const opacity = 1 - ghostTransparency / 100;
+      mat.opacity = opacity;
+      mat.transparent = true;
+      mat.depthWrite = false;
+      mat.needsUpdate = true;
+      mat.variants?.forEach(v => { v.opacity = opacity; v.transparent = true; v.depthWrite = false; v.needsUpdate = true; });
+    }
     impl.invalidate?.(true);
   } catch (e) {}
+  // 0% との境界を跨いだら、現在のモード（一覧／フォーカス）の表示を作り直す
+  if (ghostAppliedOff !== null && ghostAppliedOff !== off && geoLoaded) {
+    if (overviewOn) enterOverview();
+    else applySelection();
+  }
+  ghostAppliedOff = off;
 }
 function syncGhostBtn() {
   const p = $('ghostPanel');
@@ -561,13 +571,14 @@ function applySelection() {
   if (!viewer.model?.getFragmentList?.()) return;
   try {
     if (typeof viewer.setGhosting === 'function') viewer.setGhosting(true);
-    viewer.isolate([i.targetDbId]); // 残すのは対象だけ：壁の向こう・地中の対象でもゴースト越しに見える
+    if (ghostTransparency === 0) viewer.showAll(); // 透明度0%＝ゴーストオフ：元のモデルをそのまま表示する
+    else viewer.isolate([i.targetDbId]); // 残すのは対象だけ：壁の向こう・地中の対象でもゴースト越しに見える
     viewer.clearThemingColors();
     viewer.fitToView([i.targetDbId]);
   } catch (e) { return; }
   startBlink(i.targetDbId);
   if (geoLoaded) {
-    setStatV(`<b>#${i.displayId}</b> の対象要素を表示中（対象以外はゴースト表示）。`);
+    setStatV(`<b>#${i.displayId}</b> の対象要素を表示中（${ghostTransparency === 0 ? 'ゴーストオフ：モデル全体を表示' : '対象以外はゴースト表示'}）。`);
     scheduleCapture(i);
   }
 }
