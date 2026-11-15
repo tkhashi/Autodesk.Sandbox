@@ -63,6 +63,7 @@ button.focus:hover { background: #e3f0fb; }
 <script>
 let DATA = null, selected = null;
 let viewer = null, viewerModelKey = null, rootLoaded = false, geoLoaded = false, tSelect = 0;
+let viewerReady = false, desiredModelKey = null;
 const $ = id => document.getElementById(id);
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 function issue() { return DATA?.issues.find(i => i.id === selected); }
@@ -117,11 +118,14 @@ function applySelection() {
     if (!i.targetDbId) { viewer.showAll(); viewer.clearThemingColors(); setStatV('この Issue は対象モデルへのピンがないため、モデル全体を表示しています。'); }
     return;
   }
-  viewer.isolate([i.targetDbId]);
-  viewer.clearThemingColors();
-  const V4 = window.THREE?.Vector4 ?? Autodesk.Viewing.Private.THREE.Vector4;
-  viewer.setThemingColor(i.targetDbId, new V4(1, 0.32, 0.05, 1));
-  viewer.fitToView([i.targetDbId]);
+  if (!viewer.model?.getFragmentList?.()) return; // フラグメント表が用意できていない間は触らない
+  try {
+    viewer.isolate([i.targetDbId]);
+    viewer.clearThemingColors();
+    const V4 = window.THREE?.Vector4 ?? Autodesk.Viewing.Private.THREE.Vector4;
+    viewer.setThemingColor(i.targetDbId, new V4(1, 0.32, 0.05, 1));
+    viewer.fitToView([i.targetDbId]);
+  } catch (e) { return; }
   if (geoLoaded) setStatV(`<b>#${i.displayId}</b> の対象要素を表示中（読み込み済みのため即時）。`);
 }
 
@@ -144,6 +148,7 @@ function aimCameraAtTarget() {
 function setupViewer(modelKey) {
   const m = DATA?.models.find(x => x.key === modelKey);
   if (!m || !window.Autodesk) return;
+  if (viewer && viewerModelKey === modelKey) return;
   if (viewer) { try { viewer.finish(); } catch (e) {} viewer = null; }
   $('viewerWrap').innerHTML = '';
   viewerModelKey = modelKey; rootLoaded = false; geoLoaded = false;
@@ -171,9 +176,9 @@ function setupViewer(modelKey) {
 }
 
 function ensureViewerModel(modelKey) {
-  if (!window.Autodesk || !DATA) return;
-  if (viewer && viewerModelKey === modelKey) return;
-  if (viewer || viewerModelKey === null) setupViewer(modelKey);
+  desiredModelKey = modelKey;
+  if (!viewerReady) return; // 初期化が終わるまでは作らない（Initializer 完了時に desiredModelKey で作る）
+  if (viewerModelKey !== modelKey) setupViewer(modelKey);
 }
 
 async function initViewer() {
@@ -190,8 +195,8 @@ async function initViewer() {
     },
   };
   Autodesk.Viewing.Initializer(options, () => {
-    const key = issue()?.modelKey ?? DATA?.models[0]?.key ?? 'dach';
-    setupViewer(key);
+    viewerReady = true;
+    setupViewer(desiredModelKey ?? issue()?.modelKey ?? DATA?.models[0]?.key ?? 'dach');
   });
 }
 
@@ -204,6 +209,8 @@ $('btnAll').addEventListener('click', () => {
   setStatV('モデル全体を表示しています。');
 });
 
+// Viewer の初期化は Issue 取得と並行に始める（初期化完了までは Viewer を作らない）
+initViewer();
 (async () => {
   try {
     DATA = await (await fetch('/api/issues')).json();
@@ -211,7 +218,6 @@ $('btnAll').addEventListener('click', () => {
     selected = first?.id ?? DATA.issues[0]?.id;
     buildTable();
     if (selected) selectIssue(selected);
-    initViewer();
   } catch (e) {
     $('selInfo').textContent = 'Issue の取得に失敗しました：' + e.message;
   }
