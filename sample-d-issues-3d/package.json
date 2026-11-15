@@ -2,5 +2,10 @@
   "name": "sample-d-issues-3d",
   "private": true,
   "type": "module",
-  "scripts": { "start": "node server.mjs" }
+  "scripts": { "start": "node server.mjs" },
+  "dependencies": {
+    "svf-utils": "^8.0.0",
+    "@gltf-transform/core": "^4.3.0",
+    "@gltf-transform/functions": "^4.3.0"
+  }
 }

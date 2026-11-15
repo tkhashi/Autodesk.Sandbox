@@ -39,4 +39,4 @@ Forma Embedded View 拡張（`forma-embedded-view-sdk` + Vite + TypeScript）の
 
 - `sample-c-issues-enrichment/` — 指摘事項（Issues）拡張デモ①：ピン先要素のプロパティ（階・通り芯・断面・設計かぶり等）を Issue のカスタムフィールドへ自動付与するデモ（実モデルから抽出したデータ使用、単一HTML）
 
-- `sample-d-issues-3d/` — 指摘事項 拡張デモ②：Issue選択で対象箇所＋周辺の3Dを表示。①APS Viewer分離表示と③部分ジオメトリ切り出し（GLB）を比較できるデモ（要サーバー起動）
+- `sample-d-issues-3d/` — sample-c の Issue を表形式 UI で選び、対象箇所＋周辺の3Dを表示するデモ。対象は DACHsampleproject.rvt（実モデル）。①APS Viewer 方式（分離表示＋対象のハイライト／フォーカス）と、③部分切り出し方式を比較。③は事前変換なしの都度変換で、実測 33.3 秒（読込 24.8 秒が大半）。周辺表示バーは 0%=ピンのみ〜100%=全要素

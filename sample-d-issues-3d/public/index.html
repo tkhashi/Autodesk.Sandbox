@@ -3,316 +3,308 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>指摘事項 拡張デモ② 対象箇所の3D表示（①Viewer方式／③部分切り出し方式）</title>
+<title>指摘事項 拡張デモ②：対象箇所＋周辺の3D表示（DACHモデル／都度変換の実測）</title>
 <link rel="stylesheet" href="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/style.min.css">
 <style>
-  :root { --blue:#0696d7; --ink:#22303c; --mut:#5a6b7a; --line:#d5dee6; --bg:#f4f7fa; --accent:#e8590c; }
-  * { box-sizing: border-box; }
-  body { margin:0; font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans CJK JP",sans-serif; color:var(--ink); background:var(--bg); }
-  header { background:#fff; border-bottom:1px solid var(--line); padding:18px 26px 12px; }
-  h1 { font-size:21px; margin:0 0 6px; }
-  .sub { color:var(--mut); font-size:13px; line-height:1.7; }
-  .sub b { color:var(--ink); }
-  .issues { display:flex; gap:10px; flex-wrap:wrap; padding:16px 26px 4px; }
-  .issue { background:#fff; border:1.5px solid var(--line); border-radius:10px; padding:9px 13px; cursor:pointer; max-width:300px; text-align:left; font:inherit; }
-  .issue:hover { border-color:var(--blue); }
-  .issue.sel { border-color:var(--blue); background:#eef7fc; box-shadow:0 0 0 2px #bfe6f7; }
-  .issue .t { font-size:13.5px; font-weight:700; line-height:1.45; }
-  .issue .e { font-size:11.5px; color:var(--mut); margin-top:3px; line-height:1.5; }
-  .detail { margin:10px 26px 0; font-size:13px; color:var(--mut); }
-  .detail b { color:var(--ink); }
-  .rangebar { margin:12px 26px 0; background:#fff; border:1px solid var(--line); border-radius:12px; padding:12px 16px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
-  .rangebar label { font-size:13.5px; font-weight:700; white-space:nowrap; }
-  .rangebar input[type=range] { flex:1; min-width:220px; accent-color:var(--blue); height:28px; }
-  .rangebar .val { font-size:13px; color:var(--mut); white-space:nowrap; }
-  .rangebar .val b { color:var(--ink); }
-  .panels { display:grid; grid-template-columns:1fr 1fr; gap:16px; padding:14px 26px 6px; }
-  @media (max-width: 1100px) { .panels { grid-template-columns:1fr; } }
-  .panel { background:#fff; border:1px solid var(--line); border-radius:12px; overflow:hidden; }
-  .panel h2 { font-size:15px; margin:0; padding:11px 14px 4px; }
-  .panel .desc { font-size:12px; color:var(--mut); padding:0 14px 9px; line-height:1.6; }
-  .stage { position:relative; height:470px; background:#e9eff4; }
-  #viewer { position:absolute; inset:0; }
-  #three { position:absolute; inset:0; }
-  #three canvas { display:block; }
-  .stat { display:flex; gap:16px; flex-wrap:wrap; padding:9px 14px 12px; font-size:12.5px; color:var(--mut); border-top:1px solid var(--line); }
-  .stat b { color:var(--ink); font-size:14px; }
-  .stat .big { color:var(--accent); }
-  .placeholder { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--mut); font-size:13px; padding:20px; text-align:center; line-height:1.8; }
-  .compare { margin:8px 26px 0; background:#fff; border:1px solid var(--line); border-radius:12px; padding:12px 16px; font-size:13.5px; line-height:1.8; }
-  footer { padding:14px 26px 26px; color:var(--mut); font-size:12px; line-height:1.85; }
+  body { font-family: "Hiragino Sans", "Noto Sans JP", sans-serif; margin: 24px; color: #1c2733; background: #f4f6f8; }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  .sub { color: #5a6a78; font-size: 13px; margin-bottom: 14px; line-height: 1.7; }
+  table.issues { width: 100%; border-collapse: collapse; background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(20,40,60,.08); font-size: 13px; }
+  table.issues th { background: #22374a; color: #fff; text-align: left; padding: 9px 10px; font-weight: 600; white-space: nowrap; }
+  table.issues td { padding: 9px 10px; border-top: 1px solid #e4eaef; vertical-align: top; }
+  table.issues tbody tr { cursor: pointer; }
+  table.issues tbody tr:hover { background: #f2f7fb; }
+  table.issues tbody tr.sel { background: #e3f0fb; box-shadow: inset 3px 0 0 #2b7bbb; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 9px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+  .st-open { background: #fde3e3; color: #a02c2c; } .st-doing { background: #fdf0d5; color: #8a6d1a; } .st-wait { background: #dbeafe; color: #1d4ed8; }
+  .tp { background: #e8eef4; color: #41586c; }
+  .mono { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .selbar { margin: 14px 0 4px; font-size: 13px; }
+  .sliderrow { background: #fff; border-radius: 10px; padding: 12px 16px; box-shadow: 0 1px 3px rgba(20,40,60,.08); display: flex; align-items: center; gap: 14px; margin: 10px 0 16px; }
+  .sliderrow label { font-weight: 700; font-size: 13px; white-space: nowrap; }
+  .sliderrow input[type=range] { flex: 1; }
+  .sliderrow .val { font-size: 13px; color: #33475c; white-space: nowrap; }
+  .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .panel { background: #fff; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(20,40,60,.08); }
+  .panel h2 { font-size: 15px; margin: 0 0 4px; }
+  .panel .desc { font-size: 12px; color: #5a6a78; line-height: 1.6; margin-bottom: 8px; }
+  .view { position: relative; height: 520px; background: #e9eff4; border-radius: 8px; overflow: hidden; }
+  .view .msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #68798a; font-size: 13px; text-align: center; padding: 12px; }
+  .stat { margin-top: 10px; font-size: 12.5px; color: #33475c; line-height: 1.8; }
+  .stat b { color: #b3541e; }
+  .compare { margin-top: 16px; background: #fff8ef; border: 1px solid #f0ddc2; border-radius: 10px; padding: 12px 16px; font-size: 13px; line-height: 1.8; }
+  button.focus { font-size: 12px; padding: 3px 10px; border: 1px solid #b9c9d6; background: #f2f7fb; border-radius: 6px; cursor: pointer; }
+  button.focus:hover { background: #e3f0fb; }
 </style>
 </head>
 <body>
-<header>
-  <h1>指摘事項 拡張デモ②：対象箇所＋周辺の3D表示 ― ①Viewer方式 vs ③部分切り出し方式</h1>
-  <div class="sub">
-    対象モデル：<b>Snowdon Towers Sample Structural.rvt</b>（Forma 実環境のサンプルプロジェクト）／ Issue はデモ用データ（ピンは必ず要素前提、要望3デモと同一の6件）<br>
-    仮説：「モデル全体を開かず、対象箇所の部分データだけ読めば高速に表示できるはず」を、2つの実装方式で比べる。周辺の表示範囲は下のバーで調整でき、動かすと両パネルの表示要素がその場で増減する。
-  </div>
-</header>
-<div class="issues" id="issues"></div>
-<div class="detail" id="detail">Issue を選んでください。</div>
-<div class="rangebar">
+<h1>指摘事項 拡張デモ②：対象箇所＋周辺の3D表示 — ①Viewer方式 vs ③部分切り出し方式（都度変換）</h1>
+<div class="sub">対象モデル：<b>DACHsampleproject.rvt</b>（Forma 実環境のサンプルプロジェクトにアップロードされた実モデル／全 2,626 要素）／ Issue はデモ用データ（ピンは必ず要素前提）。<br>
+仮説：「モデル全体を開かず、対象箇所の部分データだけ読めば高速に表示できるはず」。③は今回、<b>事前変換なし＝Issue を選ぶたびにサーバーで変換からやり直す</b>方式にして、都度変換だと実際にどのくらいかかるかを測る。周辺の表示量は下のバー（％）で調整でき、0%＝ピンの要素のみ、100%＝モデル全要素。</div>
+
+<table class="issues">
+  <thead><tr><th>ID</th><th>タイトル</th><th>ステータス</th><th>種別</th><th>担当者</th><th>期日</th><th>対象要素</th><th>階・位置</th></tr></thead>
+  <tbody id="issueRows"></tbody>
+</table>
+
+<div class="selbar" id="selInfo">Issue を選択してください</div>
+<div class="sliderrow">
   <label for="range">周辺の表示範囲</label>
-  <input type="range" id="range" min="0" max="10" step="0.1" value="3" disabled>
-  <span class="val" id="rangeLabel">Issue を選択すると調整できます</span>
+  <input type="range" id="range" min="0" max="100" step="1" value="5">
+  <span class="val" id="rangeLabel">—</span>
 </div>
+
 <div class="panels">
   <div class="panel">
-    <h2>① APS Viewer 方式（モデル全体を配信して分離表示）</h2>
-    <div class="desc">変換データ（SVF）はクラウドから逐次配信。表示側で対象＋範囲内の要素だけを分離（isolate）してカメラを寄せる、標準的な実装。バーを動かすと分離対象が付け替わる。</div>
-    <div class="stage"><div id="viewer"></div><div class="placeholder" id="viewerPh">Issue を選択するとモデルを読み込みます</div></div>
-    <div class="stat" id="statA"><span>状態：未読み込み</span></div>
+    <h2>① APS Viewer 方式（モデル全体を配信して分離表示） <button class="focus" id="btnFocus">対象にフォーカス</button></h2>
+    <div class="desc">変換データ（SVF）はクラウドから逐次配信。表示側で対象＋範囲内の要素だけを分離（isolate）し、対象要素は色付け（ハイライト）してカメラを寄せる（フォーカス）。バーを動かすと分離対象が付け替わる。</div>
+    <div class="view" id="viewerWrap"><div class="msg" id="viewerMsg">Issue を選択するとモデルを読み込みます</div></div>
+    <div class="stat" id="statA">—</div>
   </div>
   <div class="panel">
-    <h2>③ 部分切り出し方式（対象＋周辺だけの軽量ファイル）</h2>
-    <div class="desc">起票時に裏側で対象＋周辺のジオメトリだけを切り出して用意しておく想定（このデモでは事前に切り出し済み）。バーの最大範囲までの候補要素を1ファイルに同梱し、範囲内の増減は転送なしで即時に切り替わる。</div>
-    <div class="stage"><div id="three"></div><div class="placeholder" id="threePh">Issue を選択すると部分モデルを表示します</div></div>
-    <div class="stat" id="statB"><span>状態：未読み込み</span></div>
+    <h2>③ 部分切り出し方式（都度変換：事前変換なし）</h2>
+    <div class="desc">Issue を選ぶたびに、サーバーが Autodesk から変換データをダウンロードし、モデル全体を軽量ファイル（GLB）に変換してから返す。変換結果はキャッシュしない。バーの範囲内の増減は、受け取ったファイルの中で表示／非表示を切り替える（追加の転送なし）。</div>
+    <div class="view" id="threeWrap"><div class="msg" id="threeMsg">Issue を選択すると都度変換を開始します</div></div>
+    <div class="stat" id="statB">—</div>
   </div>
 </div>
-<div class="compare" id="compare">比較結果はここに表示されます。</div>
-<footer>
-  実装メモ：要素の対応付けは Model Derivative のプロパティ（objectid）→ externalId → 変換データ同梱のプロパティDB（model.sdb）の id、という経路で解決している（SVF2 ではこの3つの番号が一致しない）。「周辺」の定義はデモ仕様：対象要素のバウンディングボックス表面からの距離が近い順に最大200件（上限10m）。③の GLB は要素ごとにノードが分かれており（ノード名＝変換側 dbId）、距離のメタデータと突き合わせて表示／非表示を切り替えている。切り出しは svf-utils の glTF 変換（dbId フィルタ）で生成。①の Viewer はトークン発行のため同梱サーバー（server.mjs）経由でのみ動作する。③は静的ファイルだけでも動作する。
-</footer>
+
+<div class="compare" id="compare">Issue を選択すると、都度変換の実測（サーバー変換の内訳・転送量・表示まで）がここに出ます。</div>
+
 <script src="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/viewer3D.min.js"></script>
-<script type="importmap">
-{ "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/" } }
-</script>
 <script>
-const DATA = {"urn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLlpSRjFpamFyWFJTN1gzbWk3QllpRmc_dmVyc2lvbj0x", "issues": [{"id": "ISSUE-001", "title": "柱脚ベースプレート アンカーボルトの位置ずれ"}, {"id": "ISSUE-002", "title": "大梁端部 ハイテンションボルトの締め忘れ"}, {"id": "ISSUE-003", "title": "杭頭天端の高さ相違"}, {"id": "ISSUE-004", "title": "基礎スラブ下面 かぶり不足の疑い"}, {"id": "ISSUE-005", "title": "地中梁 かぶり・主筋位置の確認依頼"}, {"id": "ISSUE-006", "title": "スラブ厚 計測値の相違"}], "elements": {"ISSUE-001": {"name": "W Shapes-Column [608201]", "category": "Structural Columns", "typeName": "W14x109", "level": "L1_37_Med", "locationMark": "E-5"}, "ISSUE-002": {"name": "W Shapes [608386]", "category": "Structural Framing", "typeName": "W18x55", "level": "L2 TOS", "locationMark": null}, "ISSUE-003": {"name": "SFD_Round [784236]", "category": "Structural Foundations", "typeName": "24x24x25'", "level": "Top of Footing", "locationMark": null}, "ISSUE-004": {"name": "Foundation Slab [680685]", "category": "Structural Foundations", "typeName": "FNDN-36", "level": "Elevator Pit", "locationMark": null}, "ISSUE-005": {"name": "Concrete-Rectangular Beam [606873]", "category": "Structural Framing", "typeName": "CB24x24", "level": "L1_35_Low", "locationMark": null}, "ISSUE-006": {"name": "Floor [621720]", "category": "Floors", "typeName": "NW Concrete on Metal Deck", "level": "M1", "locationMark": null}}, "subsets": {"ISSUE-001": {"targetDbId": 3284, "contextGlb": "assets/subsets/ISSUE-001-context.glb", "contextBytes": 9787544, "candidates": [{"dbId": 13, "distM": 0}, {"dbId": 10, "distM": 0}, {"dbId": 17, "distM": 0}, {"dbId": 15, "distM": 0}, {"dbId": 19, "distM": 0}, {"dbId": 18, "distM": 0}, {"dbId": 4, "distM": 0}, {"dbId": 5, "distM": 0}, {"dbId": 6, "distM": 0}, {"dbId": 14, "distM": 0}, {"dbId": 2, "distM": 0}, {"dbId": 3, "distM": 0}, {"dbId": 11, "distM": 0}, {"dbId": 4702, "distM": 0}, {"dbId": 4384, "distM": 0}, {"dbId": 8242, "distM": 0}, {"dbId": 8539, "distM": 0}, {"dbId": 8538, "distM": 0}, {"dbId": 8540, "distM": 0}, {"dbId": 8545, "distM": 0}, {"dbId": 8544, "distM": 0}, {"dbId": 5379, "distM": 0}, {"dbId": 4460, "distM": 0}, {"dbId": 5402, "distM": 0}, {"dbId": 4036, "distM": 0}, {"dbId": 4006, "distM": 0}, {"dbId": 3477, "distM": 0.01}, {"dbId": 5455, "distM": 0.01}, {"dbId": 3359, "distM": 0.01}, {"dbId": 4090, "distM": 0.01}, {"dbId": 5168, "distM": 0.01}, {"dbId": 5549, "distM": 0.01}, {"dbId": 3576, "distM": 0.01}, {"dbId": 5262, "distM": 0.01}, {"dbId": 5454, "distM": 0.01}, {"dbId": 4089, "distM": 0.01}, {"dbId": 3844, "distM": 0.03}, {"dbId": 3476, "distM": 0.04}, {"dbId": 5167, "distM": 0.04}, {"dbId": 3358, "distM": 0.04}, {"dbId": 7, "distM": 0.08}, {"dbId": 3928, "distM": 0.28}, {"dbId": 3259, "distM": 0.28}, {"dbId": 12, "distM": 0.7}, {"dbId": 4701, "distM": 0.84}, {"dbId": 4383, "distM": 0.92}, {"dbId": 3619, "distM": 0.97}, {"dbId": 5592, "distM": 0.97}, {"dbId": 5295, "distM": 0.97}, {"dbId": 6010, "distM": 0.99}, {"dbId": 4385, "distM": 1.07}, {"dbId": 4703, "distM": 1.1}, {"dbId": 4700, "distM": 2.03}, {"dbId": 4382, "distM": 2.14}, {"dbId": 3618, "distM": 2.17}, {"dbId": 5591, "distM": 2.17}, {"dbId": 5294, "distM": 2.17}, {"dbId": 6009, "distM": 2.2}, {"dbId": 4386, "distM": 2.29}, {"dbId": 4704, "distM": 2.29}, {"dbId": 4003, "distM": 3.1}, {"dbId": 5620, "distM": 3.1}, {"dbId": 5615, "distM": 3.15}, {"dbId": 3995, "distM": 3.15}, {"dbId": 4699, "distM": 3.22}, {"dbId": 4381, "distM": 3.36}, {"dbId": 3617, "distM": 3.37}, {"dbId": 5590, "distM": 3.37}, {"dbId": 5293, "distM": 3.37}, {"dbId": 6008, "distM": 3.41}, {"dbId": 4002, "distM": 3.46}, {"dbId": 5619, "distM": 3.46}, {"dbId": 4705, "distM": 3.47}, {"dbId": 4387, "distM": 3.51}, {"dbId": 5616, "distM": 3.67}, {"dbId": 3996, "distM": 3.67}, {"dbId": 9, "distM": 3.73}, {"dbId": 5550, "distM": 3.94}, {"dbId": 3577, "distM": 3.94}, {"dbId": 8, "distM": 4.05}, {"dbId": 3042, "distM": 4.13}, {"dbId": 3168, "distM": 4.13}, {"dbId": 4738, "distM": 4.13}, {"dbId": 3990, "distM": 4.22}, {"dbId": 5612, "distM": 4.22}, {"dbId": 20, "distM": 4.23}, {"dbId": 3929, "distM": 4.31}, {"dbId": 4698, "distM": 4.41}, {"dbId": 5617, "distM": 4.44}, {"dbId": 3997, "distM": 4.44}, {"dbId": 3616, "distM": 4.56}, {"dbId": 5589, "distM": 4.56}, {"dbId": 5292, "distM": 4.56}, {"dbId": 4380, "distM": 4.58}, {"dbId": 5613, "distM": 4.58}, {"dbId": 3991, "distM": 4.58}, {"dbId": 6007, "distM": 4.62}, {"dbId": 4706, "distM": 4.66}, {"dbId": 4388, "distM": 4.73}, {"dbId": 3906, "distM": 4.76}, {"dbId": 5614, "distM": 5.16}, {"dbId": 3992, "distM": 5.16}, {"dbId": 4001, "distM": 5.28}, {"dbId": 5618, "distM": 5.28}, {"dbId": 8543, "distM": 5.62}, {"dbId": 8542, "distM": 5.62}, {"dbId": 8541, "distM": 5.62}, {"dbId": 3052, "distM": 5.64}, {"dbId": 3061, "distM": 5.64}, {"dbId": 3053, "distM": 5.65}, {"dbId": 3043, "distM": 5.71}, {"dbId": 4066, "distM": 5.71}, {"dbId": 4379, "distM": 5.8}, {"dbId": 6006, "distM": 5.83}, {"dbId": 4707, "distM": 5.85}, {"dbId": 3046, "distM": 5.88}, {"dbId": 16, "distM": 5.88}, {"dbId": 4067, "distM": 5.89}, {"dbId": 3208, "distM": 5.95}, {"dbId": 3223, "distM": 6.3}, {"dbId": 3270, "distM": 6.3}, {"dbId": 3273, "distM": 6.3}, {"dbId": 8599, "distM": 6.35}, {"dbId": 8567, "distM": 6.41}, {"dbId": 3293, "distM": 6.47}, {"dbId": 3350, "distM": 6.5}, {"dbId": 5433, "distM": 6.5}, {"dbId": 3446, "distM": 6.5}, {"dbId": 5146, "distM": 6.5}, {"dbId": 4097, "distM": 6.5}, {"dbId": 5601, "distM": 6.5}, {"dbId": 5304, "distM": 6.5}, {"dbId": 4102, "distM": 6.5}, {"dbId": 3351, "distM": 6.5}, {"dbId": 3628, "distM": 6.5}, {"dbId": 5089, "distM": 6.57}, {"dbId": 4719, "distM": 6.6}, {"dbId": 6579, "distM": 6.6}, {"dbId": 6581, "distM": 6.6}, {"dbId": 6584, "distM": 6.6}, {"dbId": 5342, "distM": 6.61}, {"dbId": 4548, "distM": 6.62}, {"dbId": 5648, "distM": 6.62}, {"dbId": 4995, "distM": 6.62}, {"dbId": 4718, "distM": 6.65}, {"dbId": 5982, "distM": 6.66}, {"dbId": 4357, "distM": 6.67}, {"dbId": 5103, "distM": 6.67}, {"dbId": 5080, "distM": 6.69}, {"dbId": 4720, "distM": 6.7}, {"dbId": 5683, "distM": 6.72}, {"dbId": 5377, "distM": 6.73}, {"dbId": 4892, "distM": 6.73}, {"dbId": 5088, "distM": 6.73}, {"dbId": 3578, "distM": 6.74}, {"dbId": 4212, "distM": 6.74}, {"dbId": 5551, "distM": 6.74}, {"dbId": 5263, "distM": 6.74}, {"dbId": 3262, "distM": 6.78}, {"dbId": 5343, "distM": 6.79}, {"dbId": 5132, "distM": 6.8}, {"dbId": 4549, "distM": 6.83}, {"dbId": 5649, "distM": 6.83}, {"dbId": 8243, "distM": 6.83}, {"dbId": 5136, "distM": 6.87}, {"dbId": 5104, "distM": 6.88}, {"dbId": 3285, "distM": 6.89}, {"dbId": 5983, "distM": 6.89}, {"dbId": 5133, "distM": 6.89}, {"dbId": 3258, "distM": 6.91}, {"dbId": 4717, "distM": 6.92}, {"dbId": 4358, "distM": 6.96}, {"dbId": 5306, "distM": 6.98}, {"dbId": 5603, "distM": 6.98}, {"dbId": 3365, "distM": 6.98}, {"dbId": 3981, "distM": 6.98}, {"dbId": 4721, "distM": 7.01}, {"dbId": 4378, "distM": 7.02}, {"dbId": 5682, "distM": 7.05}, {"dbId": 5376, "distM": 7.07}, {"dbId": 4891, "distM": 7.07}, {"dbId": 5344, "distM": 7.18}, {"dbId": 4550, "distM": 7.24}, {"dbId": 5650, "distM": 7.24}, {"dbId": 4837, "distM": 7.24}, {"dbId": 3360, "distM": 7.28}, {"dbId": 5169, "distM": 7.28}, {"dbId": 5456, "distM": 7.28}, {"dbId": 3478, "distM": 7.28}, {"dbId": 4091, "distM": 7.28}, {"dbId": 5105, "distM": 7.28}, {"dbId": 5984, "distM": 7.29}, {"dbId": 4716, "distM": 7.37}, {"dbId": 4359, "distM": 7.43}, {"dbId": 3969, "distM": 7.5}, {"dbId": 4722, "distM": 7.51}, {"dbId": 5012, "distM": 7.52}, {"dbId": 5681, "distM": 7.56}, {"dbId": 6064, "distM": 7.56}, {"dbId": 4890, "distM": 7.59}], "maxDistM": 7.59}, "ISSUE-002": {"targetDbId": 3316, "contextGlb": "assets/subsets/ISSUE-002-context.glb", "contextBytes": 10612012, "candidates": [{"dbId": 10, "distM": 0}, {"dbId": 3367, "distM": 0}, {"dbId": 3370, "distM": 0}, {"dbId": 3369, "distM": 0}, {"dbId": 3368, "distM": 0}, {"dbId": 4730, "distM": 0}, {"dbId": 4731, "distM": 0}, {"dbId": 4732, "distM": 0}, {"dbId": 4733, "distM": 0}, {"dbId": 6543, "distM": 0}, {"dbId": 3296, "distM": 0.01}, {"dbId": 3294, "distM": 0.01}, {"dbId": 14, "distM": 0.04}, {"dbId": 3382, "distM": 0.06}, {"dbId": 3384, "distM": 0.06}, {"dbId": 3339, "distM": 0.06}, {"dbId": 4006, "distM": 0.06}, {"dbId": 3, "distM": 0.14}, {"dbId": 13, "distM": 0.19}, {"dbId": 3338, "distM": 0.2}, {"dbId": 3352, "distM": 0.28}, {"dbId": 4729, "distM": 1.22}, {"dbId": 3337, "distM": 1.42}, {"dbId": 2, "distM": 1.71}, {"dbId": 8232, "distM": 1.74}, {"dbId": 3225, "distM": 1.79}, {"dbId": 3860, "distM": 1.79}, {"dbId": 3269, "distM": 2.05}, {"dbId": 3268, "distM": 2.05}, {"dbId": 3241, "distM": 2.09}, {"dbId": 4728, "distM": 2.44}, {"dbId": 3336, "distM": 2.64}, {"dbId": 11, "distM": 2.77}, {"dbId": 8226, "distM": 2.79}, {"dbId": 3448, "distM": 2.82}, {"dbId": 3449, "distM": 2.83}, {"dbId": 3447, "distM": 2.83}, {"dbId": 3224, "distM": 2.84}, {"dbId": 3844, "distM": 2.84}, {"dbId": 4285, "distM": 2.93}, {"dbId": 4284, "distM": 2.93}, {"dbId": 4283, "distM": 2.93}, {"dbId": 4282, "distM": 2.93}, {"dbId": 4878, "distM": 2.93}, {"dbId": 4879, "distM": 2.93}, {"dbId": 4880, "distM": 2.93}, {"dbId": 4881, "distM": 2.93}, {"dbId": 4882, "distM": 2.93}, {"dbId": 4286, "distM": 2.94}, {"dbId": 3394, "distM": 3.01}, {"dbId": 4281, "distM": 3.04}, {"dbId": 3264, "distM": 3.1}, {"dbId": 3265, "distM": 3.1}, {"dbId": 3240, "distM": 3.1}, {"dbId": 4883, "distM": 3.12}, {"dbId": 3239, "distM": 3.13}, {"dbId": 4877, "distM": 3.16}, {"dbId": 15, "distM": 3.26}, {"dbId": 4287, "distM": 3.27}, {"dbId": 4697, "distM": 3.29}, {"dbId": 4036, "distM": 3.34}, {"dbId": 4, "distM": 3.42}, {"dbId": 12, "distM": 3.52}, {"dbId": 4280, "distM": 3.56}, {"dbId": 4727, "distM": 3.66}, {"dbId": 3694, "distM": 3.7}, {"dbId": 4884, "distM": 3.72}, {"dbId": 4876, "distM": 3.78}, {"dbId": 3335, "distM": 3.86}, {"dbId": 4288, "distM": 3.97}, {"dbId": 3391, "distM": 4.2}, {"dbId": 3395, "distM": 4.34}, {"dbId": 4279, "distM": 4.36}, {"dbId": 4885, "distM": 4.57}, {"dbId": 4875, "distM": 4.65}, {"dbId": 3304, "distM": 4.87}, {"dbId": 4289, "distM": 4.87}, {"dbId": 3162, "distM": 4.88}, {"dbId": 4726, "distM": 4.88}, {"dbId": 3160, "distM": 4.89}, {"dbId": 3340, "distM": 4.9}, {"dbId": 3355, "distM": 4.91}, {"dbId": 3334, "distM": 5.08}, {"dbId": 3056, "distM": 5.2}, {"dbId": 4278, "distM": 5.33}, {"dbId": 3059, "distM": 5.49}, {"dbId": 4886, "distM": 5.56}, {"dbId": 8227, "distM": 5.56}, {"dbId": 3461, "distM": 5.65}, {"dbId": 4874, "distM": 5.65}, {"dbId": 3460, "distM": 5.66}, {"dbId": 3586, "distM": 5.79}, {"dbId": 3584, "distM": 5.79}, {"dbId": 3585, "distM": 5.79}, {"dbId": 3587, "distM": 5.79}, {"dbId": 3583, "distM": 5.88}, {"dbId": 4290, "distM": 5.89}, {"dbId": 3161, "distM": 5.92}, {"dbId": 3055, "distM": 5.93}, {"dbId": 4725, "distM": 6.1}, {"dbId": 3582, "distM": 6.21}, {"dbId": 3044, "distM": 6.24}, {"dbId": 4277, "distM": 6.38}, {"dbId": 3462, "distM": 6.47}, {"dbId": 3197, "distM": 6.49}, {"dbId": 3045, "distM": 6.49}, {"dbId": 3288, "distM": 6.5}, {"dbId": 3286, "distM": 6.5}, {"dbId": 3317, "distM": 6.59}, {"dbId": 3360, "distM": 6.6}, {"dbId": 4887, "distM": 6.63}, {"dbId": 3043, "distM": 6.65}, {"dbId": 4068, "distM": 6.67}, {"dbId": 8233, "distM": 6.67}, {"dbId": 4873, "distM": 6.72}, {"dbId": 3581, "distM": 6.75}, {"dbId": 3365, "distM": 6.76}, {"dbId": 3207, "distM": 6.78}, {"dbId": 3261, "distM": 6.78}, {"dbId": 8, "distM": 6.87}, {"dbId": 5148, "distM": 6.88}, {"dbId": 5149, "distM": 6.89}, {"dbId": 5147, "distM": 6.89}, {"dbId": 3163, "distM": 6.94}, {"dbId": 3172, "distM": 6.94}, {"dbId": 4738, "distM": 6.94}, {"dbId": 3170, "distM": 6.95}, {"dbId": 3471, "distM": 6.97}, {"dbId": 5315, "distM": 7}, {"dbId": 5316, "distM": 7}, {"dbId": 5317, "distM": 7}, {"dbId": 5318, "distM": 7}, {"dbId": 5314, "distM": 7}, {"dbId": 5364, "distM": 7}, {"dbId": 5365, "distM": 7}, {"dbId": 5366, "distM": 7}, {"dbId": 5367, "distM": 7}, {"dbId": 5363, "distM": 7}, {"dbId": 8231, "distM": 7.02}, {"dbId": 5313, "distM": 7.04}, {"dbId": 20, "distM": 7.05}, {"dbId": 4067, "distM": 7.06}, {"dbId": 4065, "distM": 7.08}, {"dbId": 5368, "distM": 7.08}, {"dbId": 3571, "distM": 7.09}, {"dbId": 5362, "distM": 7.1}, {"dbId": 3295, "distM": 7.12}, {"dbId": 3971, "distM": 7.12}, {"dbId": 3973, "distM": 7.12}, {"dbId": 5319, "distM": 7.15}, {"dbId": 3928, "distM": 7.17}, {"dbId": 3479, "distM": 7.17}, {"dbId": 3480, "distM": 7.18}, {"dbId": 3478, "distM": 7.18}, {"dbId": 3262, "distM": 7.25}, {"dbId": 8235, "distM": 7.27}, {"dbId": 5312, "distM": 7.28}, {"dbId": 4724, "distM": 7.32}, {"dbId": 19, "distM": 7.33}, {"dbId": 3981, "distM": 7.34}, {"dbId": 5369, "distM": 7.35}, {"dbId": 5361, "distM": 7.4}, {"dbId": 5379, "distM": 7.4}, {"dbId": 3580, "distM": 7.45}, {"dbId": 5, "distM": 7.48}, {"dbId": 4276, "distM": 7.48}, {"dbId": 5320, "distM": 7.49}, {"dbId": 5311, "distM": 7.71}, {"dbId": 3972, "distM": 7.73}, {"dbId": 3974, "distM": 7.73}, {"dbId": 4888, "distM": 7.74}, {"dbId": 3572, "distM": 7.78}, {"dbId": 3472, "distM": 7.79}, {"dbId": 5370, "distM": 7.82}, {"dbId": 4872, "distM": 7.84}, {"dbId": 3226, "distM": 7.86}, {"dbId": 3279, "distM": 7.86}, {"dbId": 3278, "distM": 7.87}, {"dbId": 5360, "distM": 7.88}, {"dbId": 3302, "distM": 7.89}, {"dbId": 4707, "distM": 7.94}, {"dbId": 5321, "distM": 8.01}, {"dbId": 3354, "distM": 8.12}, {"dbId": 3280, "distM": 8.14}, {"dbId": 3579, "distM": 8.27}, {"dbId": 5310, "distM": 8.29}, {"dbId": 8225, "distM": 8.29}, {"dbId": 5004, "distM": 8.31}, {"dbId": 3263, "distM": 8.42}, {"dbId": 5371, "distM": 8.43}, {"dbId": 5153, "distM": 8.45}, {"dbId": 5154, "distM": 8.45}, {"dbId": 5359, "distM": 8.52}, {"dbId": 4723, "distM": 8.54}, {"dbId": 3164, "distM": 8.56}, {"dbId": 3573, "distM": 8.57}, {"dbId": 3482, "distM": 8.58}, {"dbId": 3459, "distM": 8.6}, {"dbId": 6576, "distM": 8.6}, {"dbId": 6575, "distM": 8.6}], "maxDistM": 8.6}, "ISSUE-003": {"targetDbId": 5009, "contextGlb": "assets/subsets/ISSUE-003-context.glb", "contextBytes": 3742996, "candidates": [{"dbId": 16, "distM": 0}, {"dbId": 4995, "distM": 0}, {"dbId": 20, "distM": 0.84}, {"dbId": 3062, "distM": 0.91}, {"dbId": 3993, "distM": 0.92}, {"dbId": 4738, "distM": 0.94}, {"dbId": 4837, "distM": 0.95}, {"dbId": 8, "distM": 1.02}, {"dbId": 3163, "distM": 1.09}, {"dbId": 3167, "distM": 1.09}, {"dbId": 5015, "distM": 1.6}, {"dbId": 5010, "distM": 2.55}, {"dbId": 3061, "distM": 2.78}, {"dbId": 5013, "distM": 3.21}, {"dbId": 3238, "distM": 3.84}, {"dbId": 5014, "distM": 4.1}, {"dbId": 3256, "distM": 4.19}, {"dbId": 3831, "distM": 4.19}, {"dbId": 12, "distM": 4.37}, {"dbId": 3164, "distM": 4.69}, {"dbId": 3844, "distM": 4.94}, {"dbId": 11, "distM": 5.12}, {"dbId": 3054, "distM": 5.19}, {"dbId": 3060, "distM": 5.19}, {"dbId": 5016, "distM": 5.2}, {"dbId": 3975, "distM": 5.34}, {"dbId": 3270, "distM": 5.44}, {"dbId": 3976, "distM": 5.49}, {"dbId": 3222, "distM": 5.56}, {"dbId": 3174, "distM": 5.74}, {"dbId": 3052, "distM": 5.82}, {"dbId": 2, "distM": 6.17}, {"dbId": 3276, "distM": 6.26}, {"dbId": 3935, "distM": 6.37}, {"dbId": 3934, "distM": 6.55}, {"dbId": 8241, "distM": 6.58}, {"dbId": 3249, "distM": 6.61}, {"dbId": 3955, "distM": 6.64}, {"dbId": 3956, "distM": 6.71}, {"dbId": 3252, "distM": 6.76}, {"dbId": 3042, "distM": 6.79}, {"dbId": 3300, "distM": 6.84}, {"dbId": 3229, "distM": 6.84}, {"dbId": 3208, "distM": 6.86}, {"dbId": 8217, "distM": 7}, {"dbId": 5011, "distM": 7.02}, {"dbId": 8487, "distM": 7.08}, {"dbId": 3232, "distM": 7.17}, {"dbId": 3928, "distM": 7.18}, {"dbId": 3349, "distM": 7.19}, {"dbId": 8580, "distM": 7.19}, {"dbId": 3272, "distM": 7.2}, {"dbId": 3297, "distM": 7.22}, {"dbId": 3929, "distM": 7.27}, {"dbId": 5012, "distM": 7.47}, {"dbId": 4631, "distM": 7.48}, {"dbId": 8483, "distM": 7.6}, {"dbId": 13, "distM": 7.7}, {"dbId": 3275, "distM": 7.79}, {"dbId": 14, "distM": 7.85}, {"dbId": 3764, "distM": 7.97}, {"dbId": 8485, "distM": 8}, {"dbId": 3420, "distM": 8.03}, {"dbId": 3386, "distM": 8.1}, {"dbId": 8607, "distM": 8.1}, {"dbId": 4712, "distM": 8.16}, {"dbId": 4713, "distM": 8.3}, {"dbId": 3969, "distM": 8.31}, {"dbId": 3649, "distM": 8.32}, {"dbId": 3659, "distM": 8.38}, {"dbId": 3658, "distM": 8.39}, {"dbId": 3912, "distM": 8.39}, {"dbId": 3691, "distM": 8.41}, {"dbId": 3970, "distM": 8.46}, {"dbId": 10, "distM": 8.48}, {"dbId": 3763, "distM": 8.48}, {"dbId": 3673, "distM": 8.48}, {"dbId": 3255, "distM": 8.5}, {"dbId": 3223, "distM": 8.51}, {"dbId": 3959, "distM": 8.51}, {"dbId": 3350, "distM": 8.53}, {"dbId": 3677, "distM": 8.54}, {"dbId": 4006, "distM": 8.56}, {"dbId": 3676, "distM": 8.57}, {"dbId": 3661, "distM": 8.6}, {"dbId": 4714, "distM": 8.62}, {"dbId": 3660, "distM": 8.62}, {"dbId": 3, "distM": 8.64}, {"dbId": 3962, "distM": 8.72}, {"dbId": 3679, "distM": 8.76}, {"dbId": 3230, "distM": 8.77}, {"dbId": 3678, "distM": 8.79}, {"dbId": 3053, "distM": 8.8}, {"dbId": 3168, "distM": 8.83}, {"dbId": 4715, "distM": 9.08}, {"dbId": 3762, "distM": 9.09}, {"dbId": 4698, "distM": 9.13}, {"dbId": 8627, "distM": 9.16}, {"dbId": 3353, "distM": 9.19}, {"dbId": 8495, "distM": 9.21}, {"dbId": 3166, "distM": 9.26}, {"dbId": 3348, "distM": 9.32}, {"dbId": 8494, "distM": 9.34}, {"dbId": 8626, "distM": 9.36}, {"dbId": 4688, "distM": 9.38}, {"dbId": 4672, "distM": 9.39}, {"dbId": 8218, "distM": 9.49}, {"dbId": 3258, "distM": 9.55}, {"dbId": 3259, "distM": 9.55}, {"dbId": 4671, "distM": 9.57}, {"dbId": 8484, "distM": 9.67}, {"dbId": 4716, "distM": 9.68}, {"dbId": 3290, "distM": 9.69}, {"dbId": 4699, "distM": 9.72}, {"dbId": 3575, "distM": 9.76}, {"dbId": 8579, "distM": 9.77}, {"dbId": 3761, "distM": 9.79}, {"dbId": 4670, "distM": 9.88}, {"dbId": 8567, "distM": 9.89}, {"dbId": 3248, "distM": 9.91}], "maxDistM": 9.91}, "ISSUE-004": {"targetDbId": 3942, "contextGlb": "assets/subsets/ISSUE-004-context.glb", "contextBytes": 5557848, "candidates": [{"dbId": 4067, "distM": 0}, {"dbId": 4068, "distM": 0}, {"dbId": 4065, "distM": 0}, {"dbId": 4066, "distM": 0}, {"dbId": 16, "distM": 0}, {"dbId": 5033, "distM": 0}, {"dbId": 5032, "distM": 0}, {"dbId": 5030, "distM": 0}, {"dbId": 5031, "distM": 0}, {"dbId": 20, "distM": 1.57}, {"dbId": 4738, "distM": 1.68}, {"dbId": 8, "distM": 1.75}, {"dbId": 3163, "distM": 1.83}, {"dbId": 3169, "distM": 1.83}, {"dbId": 3907, "distM": 3.21}, {"dbId": 3929, "distM": 3.36}, {"dbId": 3970, "distM": 3.4}, {"dbId": 3969, "distM": 3.41}, {"dbId": 3928, "distM": 3.68}, {"dbId": 3223, "distM": 3.78}, {"dbId": 3042, "distM": 3.95}, {"dbId": 3168, "distM": 4}, {"dbId": 3164, "distM": 4.56}, {"dbId": 3906, "distM": 4.63}, {"dbId": 3971, "distM": 4.94}, {"dbId": 3972, "distM": 4.98}, {"dbId": 12, "distM": 5.11}, {"dbId": 3261, "distM": 5.17}, {"dbId": 3262, "distM": 5.17}, {"dbId": 3224, "distM": 5.25}, {"dbId": 3239, "distM": 5.32}, {"dbId": 3273, "distM": 5.32}, {"dbId": 3172, "distM": 5.59}, {"dbId": 3844, "distM": 5.68}, {"dbId": 11, "distM": 5.85}, {"dbId": 3910, "distM": 5.86}, {"dbId": 3043, "distM": 5.93}, {"dbId": 3044, "distM": 5.93}, {"dbId": 3045, "distM": 5.93}, {"dbId": 3046, "distM": 5.93}, {"dbId": 3258, "distM": 6.19}, {"dbId": 3259, "distM": 6.19}, {"dbId": 3965, "distM": 6.33}, {"dbId": 3966, "distM": 6.4}, {"dbId": 8243, "distM": 6.55}, {"dbId": 3227, "distM": 6.61}, {"dbId": 3270, "distM": 6.66}, {"dbId": 8567, "distM": 6.68}, {"dbId": 3285, "distM": 6.82}, {"dbId": 2, "distM": 6.91}, {"dbId": 8225, "distM": 6.94}, {"dbId": 3293, "distM": 6.95}, {"dbId": 3232, "distM": 6.95}, {"dbId": 3967, "distM": 7.12}, {"dbId": 3264, "distM": 7.18}, {"dbId": 3265, "distM": 7.18}, {"dbId": 3302, "distM": 7.2}, {"dbId": 3968, "distM": 7.25}, {"dbId": 8242, "distM": 7.4}, {"dbId": 3228, "distM": 7.44}, {"dbId": 8226, "distM": 7.63}, {"dbId": 3284, "distM": 7.68}, {"dbId": 3276, "distM": 7.71}, {"dbId": 3240, "distM": 7.72}, {"dbId": 8230, "distM": 7.78}, {"dbId": 3296, "distM": 7.88}, {"dbId": 3963, "distM": 7.96}, {"dbId": 3301, "distM": 8.04}, {"dbId": 3964, "distM": 8.11}, {"dbId": 8231, "distM": 8.26}, {"dbId": 3226, "distM": 8.28}, {"dbId": 3277, "distM": 8.32}, {"dbId": 3278, "distM": 8.32}, {"dbId": 13, "distM": 8.43}, {"dbId": 3288, "distM": 8.52}, {"dbId": 14, "distM": 8.59}, {"dbId": 8227, "distM": 8.61}, {"dbId": 3260, "distM": 8.71}, {"dbId": 3352, "distM": 8.77}, {"dbId": 3351, "distM": 8.77}, {"dbId": 3365, "distM": 8.84}, {"dbId": 3304, "distM": 8.86}, {"dbId": 4705, "distM": 8.89}, {"dbId": 4722, "distM": 8.89}, {"dbId": 4725, "distM": 8.89}, {"dbId": 4724, "distM": 8.89}, {"dbId": 4723, "distM": 8.89}, {"dbId": 4706, "distM": 8.89}, {"dbId": 4707, "distM": 8.89}, {"dbId": 4726, "distM": 8.9}, {"dbId": 3334, "distM": 8.96}, {"dbId": 4721, "distM": 8.96}, {"dbId": 4995, "distM": 8.96}, {"dbId": 4704, "distM": 8.97}, {"dbId": 3166, "distM": 9}, {"dbId": 3335, "distM": 9.01}, {"dbId": 4727, "distM": 9.05}, {"dbId": 4720, "distM": 9.18}, {"dbId": 4703, "distM": 9.2}, {"dbId": 10, "distM": 9.22}, {"dbId": 3336, "distM": 9.29}, {"dbId": 4006, "distM": 9.3}, {"dbId": 5014, "distM": 9.31}, {"dbId": 5010, "distM": 9.31}, {"dbId": 3257, "distM": 9.35}, {"dbId": 4728, "distM": 9.35}, {"dbId": 3, "distM": 9.37}, {"dbId": 3359, "distM": 9.41}, {"dbId": 3360, "distM": 9.41}, {"dbId": 4719, "distM": 9.56}, {"dbId": 4702, "distM": 9.57}, {"dbId": 3350, "distM": 9.58}, {"dbId": 3061, "distM": 9.68}, {"dbId": 3354, "distM": 9.68}, {"dbId": 3355, "distM": 9.68}, {"dbId": 3337, "distM": 9.72}, {"dbId": 4729, "distM": 9.8}, {"dbId": 3993, "distM": 9.98}, {"dbId": 4837, "distM": 9.98}], "maxDistM": 9.98}, "ISSUE-005": {"targetDbId": 3237, "contextGlb": "assets/subsets/ISSUE-005-context.glb", "contextBytes": 9170376, "candidates": [{"dbId": 3923, "distM": 0}, {"dbId": 3924, "distM": 0}, {"dbId": 3246, "distM": 0}, {"dbId": 3271, "distM": 0}, {"dbId": 3247, "distM": 0}, {"dbId": 3831, "distM": 0}, {"dbId": 8216, "distM": 0.11}, {"dbId": 12, "distM": 0.18}, {"dbId": 3047, "distM": 0.25}, {"dbId": 3752, "distM": 0.33}, {"dbId": 3048, "distM": 0.4}, {"dbId": 3272, "distM": 0.61}, {"dbId": 11, "distM": 0.93}, {"dbId": 3034, "distM": 1.52}, {"dbId": 3031, "distM": 1.52}, {"dbId": 3932, "distM": 1.53}, {"dbId": 3030, "distM": 1.55}, {"dbId": 5711, "distM": 1.55}, {"dbId": 2, "distM": 1.98}, {"dbId": 8, "distM": 2.67}, {"dbId": 3163, "distM": 2.74}, {"dbId": 4738, "distM": 2.74}, {"dbId": 3173, "distM": 2.76}, {"dbId": 4825, "distM": 2.76}, {"dbId": 20, "distM": 2.84}, {"dbId": 3977, "distM": 2.92}, {"dbId": 3198, "distM": 3.01}, {"dbId": 5710, "distM": 3.01}, {"dbId": 8628, "distM": 3.02}, {"dbId": 3348, "distM": 3.03}, {"dbId": 8625, "distM": 3.1}, {"dbId": 3347, "distM": 3.12}, {"dbId": 3774, "distM": 3.12}, {"dbId": 3753, "distM": 3.13}, {"dbId": 8511, "distM": 3.18}, {"dbId": 8304, "distM": 3.2}, {"dbId": 8303, "distM": 3.24}, {"dbId": 3051, "distM": 3.32}, {"dbId": 8300, "distM": 3.37}, {"dbId": 8481, "distM": 3.37}, {"dbId": 3757, "distM": 3.38}, {"dbId": 8578, "distM": 3.49}, {"dbId": 13, "distM": 3.51}, {"dbId": 3978, "distM": 3.53}, {"dbId": 3420, "distM": 3.58}, {"dbId": 14, "distM": 3.66}, {"dbId": 3758, "distM": 3.94}, {"dbId": 4614, "distM": 4.04}, {"dbId": 3029, "distM": 4.05}, {"dbId": 3901, "distM": 4.09}, {"dbId": 2731, "distM": 4.19}, {"dbId": 3049, "distM": 4.29}, {"dbId": 10, "distM": 4.29}, {"dbId": 3, "distM": 4.44}, {"dbId": 16, "distM": 4.5}, {"dbId": 3948, "distM": 4.57}, {"dbId": 3759, "distM": 4.71}, {"dbId": 8371, "distM": 5.16}, {"dbId": 8370, "distM": 5.17}, {"dbId": 3789, "distM": 5.23}, {"dbId": 8501, "distM": 5.31}, {"dbId": 3775, "distM": 5.32}, {"dbId": 8213, "distM": 5.48}, {"dbId": 5042, "distM": 5.49}, {"dbId": 3164, "distM": 5.52}, {"dbId": 3305, "distM": 5.58}, {"dbId": 3760, "distM": 5.59}, {"dbId": 5040, "distM": 5.64}, {"dbId": 5049, "distM": 5.79}, {"dbId": 8249, "distM": 6.23}, {"dbId": 5047, "distM": 6.24}, {"dbId": 3934, "distM": 6.26}, {"dbId": 3921, "distM": 6.28}, {"dbId": 3289, "distM": 6.3}, {"dbId": 3249, "distM": 6.34}, {"dbId": 3222, "distM": 6.34}, {"dbId": 5044, "distM": 6.37}, {"dbId": 3252, "distM": 6.41}, {"dbId": 8217, "distM": 6.45}, {"dbId": 3297, "distM": 6.52}, {"dbId": 3761, "distM": 6.54}, {"dbId": 3196, "distM": 6.57}, {"dbId": 5041, "distM": 6.74}, {"dbId": 3935, "distM": 6.77}, {"dbId": 3975, "distM": 6.84}, {"dbId": 3050, "distM": 6.88}, {"dbId": 3238, "distM": 6.95}, {"dbId": 8368, "distM": 6.99}, {"dbId": 3242, "distM": 7.01}, {"dbId": 3231, "distM": 7.01}, {"dbId": 8367, "distM": 7.01}, {"dbId": 3042, "distM": 7.03}, {"dbId": 8372, "distM": 7.03}, {"dbId": 5046, "distM": 7.03}, {"dbId": 3911, "distM": 7.05}, {"dbId": 8500, "distM": 7.06}, {"dbId": 3357, "distM": 7.07}, {"dbId": 8587, "distM": 7.08}, {"dbId": 3356, "distM": 7.1}, {"dbId": 8506, "distM": 7.11}, {"dbId": 8626, "distM": 7.12}, {"dbId": 8369, "distM": 7.16}, {"dbId": 3695, "distM": 7.18}, {"dbId": 3705, "distM": 7.18}, {"dbId": 3696, "distM": 7.18}, {"dbId": 3768, "distM": 7.19}, {"dbId": 3174, "distM": 7.19}, {"dbId": 3771, "distM": 7.19}, {"dbId": 3769, "distM": 7.19}, {"dbId": 8574, "distM": 7.21}, {"dbId": 8576, "distM": 7.24}, {"dbId": 8573, "distM": 7.24}, {"dbId": 3976, "distM": 7.25}, {"dbId": 3723, "distM": 7.26}, {"dbId": 8642, "distM": 7.26}, {"dbId": 8591, "distM": 7.26}, {"dbId": 8592, "distM": 7.27}, {"dbId": 8575, "distM": 7.3}, {"dbId": 3349, "distM": 7.41}, {"dbId": 8627, "distM": 7.42}, {"dbId": 3716, "distM": 7.44}, {"dbId": 3826, "distM": 7.45}, {"dbId": 8638, "distM": 7.45}, {"dbId": 3979, "distM": 7.45}, {"dbId": 6049, "distM": 7.46}, {"dbId": 3717, "distM": 7.49}, {"dbId": 5048, "distM": 7.5}, {"dbId": 8526, "distM": 7.51}, {"dbId": 8312, "distM": 7.51}, {"dbId": 3762, "distM": 7.54}, {"dbId": 15, "distM": 7.57}, {"dbId": 8475, "distM": 7.6}, {"dbId": 3245, "distM": 7.62}, {"dbId": 3792, "distM": 7.65}, {"dbId": 3871, "distM": 7.65}, {"dbId": 4, "distM": 7.72}, {"dbId": 6048, "distM": 7.75}, {"dbId": 3639, "distM": 7.77}, {"dbId": 3718, "distM": 7.77}, {"dbId": 8497, "distM": 7.79}, {"dbId": 8313, "distM": 7.79}, {"dbId": 3707, "distM": 7.8}, {"dbId": 3232, "distM": 7.81}, {"dbId": 8527, "distM": 7.81}, {"dbId": 8256, "distM": 7.82}, {"dbId": 8257, "distM": 7.85}, {"dbId": 3980, "distM": 7.85}, {"dbId": 8641, "distM": 7.89}, {"dbId": 3706, "distM": 7.9}, {"dbId": 8255, "distM": 7.92}, {"dbId": 8311, "distM": 7.94}, {"dbId": 8254, "distM": 7.98}, {"dbId": 8310, "distM": 8.09}, {"dbId": 8476, "distM": 8.13}, {"dbId": 8477, "distM": 8.15}, {"dbId": 8258, "distM": 8.17}, {"dbId": 6047, "distM": 8.2}, {"dbId": 8552, "distM": 8.24}, {"dbId": 8374, "distM": 8.24}, {"dbId": 8571, "distM": 8.24}, {"dbId": 8528, "distM": 8.25}, {"dbId": 8259, "distM": 8.27}, {"dbId": 3719, "distM": 8.3}, {"dbId": 3772, "distM": 8.32}, {"dbId": 8551, "distM": 8.32}, {"dbId": 8569, "distM": 8.32}, {"dbId": 8572, "distM": 8.34}, {"dbId": 8314, "distM": 8.36}, {"dbId": 8268, "distM": 8.38}, {"dbId": 8478, "distM": 8.39}, {"dbId": 8273, "distM": 8.43}, {"dbId": 8309, "distM": 8.54}, {"dbId": 3763, "distM": 8.56}, {"dbId": 8416, "distM": 8.68}, {"dbId": 3734, "distM": 8.73}, {"dbId": 5043, "distM": 8.73}, {"dbId": 8640, "distM": 8.75}, {"dbId": 8415, "distM": 8.75}, {"dbId": 6046, "distM": 8.77}, {"dbId": 3733, "distM": 8.8}, {"dbId": 3722, "distM": 8.82}, {"dbId": 8529, "distM": 8.83}, {"dbId": 8629, "distM": 8.84}, {"dbId": 3750, "distM": 8.85}, {"dbId": 8417, "distM": 8.9}, {"dbId": 8218, "distM": 8.93}, {"dbId": 8585, "distM": 8.93}, {"dbId": 3735, "distM": 8.94}, {"dbId": 3749, "distM": 8.99}, {"dbId": 3290, "distM": 9.02}, {"dbId": 3720, "distM": 9.03}, {"dbId": 8269, "distM": 9.05}, {"dbId": 8584, "distM": 9.07}, {"dbId": 8315, "distM": 9.18}, {"dbId": 8308, "distM": 9.24}, {"dbId": 8586, "distM": 9.3}, {"dbId": 5045, "distM": 9.31}, {"dbId": 8418, "distM": 9.38}, {"dbId": 3736, "distM": 9.41}, {"dbId": 8630, "distM": 9.43}], "maxDistM": 9.43}, "ISSUE-006": {"targetDbId": 3420, "contextGlb": "assets/subsets/ISSUE-006-context.glb", "contextBytes": 10186324, "candidates": [{"dbId": 3049, "distM": 0}, {"dbId": 3034, "distM": 0}, {"dbId": 3029, "distM": 0}, {"dbId": 3030, "distM": 0}, {"dbId": 5711, "distM": 0}, {"dbId": 3047, "distM": 0}, {"dbId": 3289, "distM": 0}, {"dbId": 3290, "distM": 0}, {"dbId": 13, "distM": 0}, {"dbId": 14, "distM": 0}, {"dbId": 3752, "distM": 0}, {"dbId": 3297, "distM": 0}, {"dbId": 3764, "distM": 0}, {"dbId": 3757, "distM": 0}, {"dbId": 3758, "distM": 0}, {"dbId": 3759, "distM": 0}, {"dbId": 3760, "distM": 0}, {"dbId": 3761, "distM": 0}, {"dbId": 3762, "distM": 0}, {"dbId": 3763, "distM": 0}, {"dbId": 3347, "distM": 0}, {"dbId": 3356, "distM": 0}, {"dbId": 3789, "distM": 0}, {"dbId": 3775, "distM": 0}, {"dbId": 3753, "distM": 0}, {"dbId": 3774, "distM": 0}, {"dbId": 8628, "distM": 0}, {"dbId": 8371, "distM": 0}, {"dbId": 8300, "distM": 0}, {"dbId": 8578, "distM": 0}, {"dbId": 8501, "distM": 0}, {"dbId": 8303, "distM": 0.04}, {"dbId": 8369, "distM": 0.04}, {"dbId": 8500, "distM": 0.06}, {"dbId": 8511, "distM": 0.06}, {"dbId": 8506, "distM": 0.07}, {"dbId": 8304, "distM": 0.08}, {"dbId": 8368, "distM": 0.08}, {"dbId": 4631, "distM": 0.13}, {"dbId": 3349, "distM": 0.13}, {"dbId": 3348, "distM": 0.13}, {"dbId": 3575, "distM": 0.13}, {"dbId": 3357, "distM": 0.13}, {"dbId": 8483, "distM": 0.17}, {"dbId": 8482, "distM": 0.17}, {"dbId": 8550, "distM": 0.18}, {"dbId": 8366, "distM": 0.18}, {"dbId": 8367, "distM": 0.18}, {"dbId": 8627, "distM": 0.2}, {"dbId": 8626, "distM": 0.2}, {"dbId": 8625, "distM": 0.2}, {"dbId": 3048, "distM": 0.3}, {"dbId": 3050, "distM": 0.35}, {"dbId": 8372, "distM": 0.45}, {"dbId": 8370, "distM": 0.45}, {"dbId": 8481, "distM": 0.45}, {"dbId": 10, "distM": 0.56}, {"dbId": 3, "distM": 0.71}, {"dbId": 2, "distM": 1.45}, {"dbId": 8484, "distM": 2.29}, {"dbId": 3054, "distM": 2.41}, {"dbId": 3060, "distM": 2.41}, {"dbId": 3053, "distM": 2.42}, {"dbId": 8580, "distM": 2.43}, {"dbId": 8485, "distM": 2.44}, {"dbId": 8579, "distM": 2.47}, {"dbId": 3386, "distM": 2.48}, {"dbId": 8607, "distM": 2.48}, {"dbId": 8487, "distM": 2.48}, {"dbId": 11, "distM": 2.5}, {"dbId": 4006, "distM": 2.53}, {"dbId": 3691, "distM": 2.61}, {"dbId": 4712, "distM": 3}, {"dbId": 12, "distM": 3.25}, {"dbId": 8218, "distM": 3.28}, {"dbId": 8249, "distM": 3.28}, {"dbId": 8216, "distM": 3.28}, {"dbId": 8217, "distM": 3.28}, {"dbId": 3051, "distM": 3.31}, {"dbId": 3923, "distM": 3.33}, {"dbId": 3932, "distM": 3.33}, {"dbId": 4614, "distM": 3.33}, {"dbId": 3031, "distM": 3.33}, {"dbId": 3924, "distM": 3.33}, {"dbId": 3271, "distM": 3.33}, {"dbId": 3222, "distM": 3.33}, {"dbId": 3831, "distM": 3.33}, {"dbId": 3196, "distM": 3.34}, {"dbId": 8587, "distM": 3.34}, {"dbId": 8574, "distM": 3.35}, {"dbId": 8573, "distM": 3.35}, {"dbId": 8552, "distM": 3.35}, {"dbId": 8373, "distM": 3.35}, {"dbId": 8374, "distM": 3.35}, {"dbId": 8571, "distM": 3.35}, {"dbId": 3062, "distM": 3.43}, {"dbId": 3256, "distM": 3.43}, {"dbId": 3695, "distM": 3.44}, {"dbId": 3722, "distM": 3.44}, {"dbId": 3739, "distM": 3.44}, {"dbId": 3723, "distM": 3.44}, {"dbId": 3705, "distM": 3.44}, {"dbId": 3768, "distM": 3.44}, {"dbId": 3697, "distM": 3.44}, {"dbId": 3696, "distM": 3.44}, {"dbId": 3766, "distM": 3.45}, {"dbId": 3765, "distM": 3.45}, {"dbId": 3770, "distM": 3.45}, {"dbId": 3772, "distM": 3.45}, {"dbId": 8551, "distM": 3.45}, {"dbId": 8569, "distM": 3.45}, {"dbId": 3771, "distM": 3.45}, {"dbId": 3769, "distM": 3.45}, {"dbId": 8572, "distM": 3.45}, {"dbId": 3649, "distM": 3.46}, {"dbId": 8360, "distM": 3.51}, {"dbId": 8359, "distM": 3.51}, {"dbId": 8361, "distM": 3.51}, {"dbId": 8362, "distM": 3.51}, {"dbId": 8576, "distM": 3.51}, {"dbId": 3659, "distM": 3.51}, {"dbId": 8642, "distM": 3.53}, {"dbId": 8615, "distM": 3.53}, {"dbId": 8641, "distM": 3.53}, {"dbId": 8640, "distM": 3.53}, {"dbId": 8594, "distM": 3.53}, {"dbId": 8593, "distM": 3.53}, {"dbId": 8592, "distM": 3.53}, {"dbId": 8591, "distM": 3.53}, {"dbId": 8570, "distM": 3.53}, {"dbId": 3661, "distM": 3.55}, {"dbId": 8575, "distM": 3.57}, {"dbId": 8502, "distM": 3.57}, {"dbId": 3934, "distM": 3.58}, {"dbId": 3272, "distM": 3.58}, {"dbId": 3238, "distM": 3.58}, {"dbId": 3252, "distM": 3.58}, {"dbId": 3237, "distM": 3.58}, {"dbId": 3247, "distM": 3.58}, {"dbId": 3246, "distM": 3.59}, {"dbId": 3249, "distM": 3.59}, {"dbId": 6045, "distM": 3.6}, {"dbId": 6046, "distM": 3.6}, {"dbId": 6047, "distM": 3.6}, {"dbId": 6042, "distM": 3.6}, {"dbId": 6048, "distM": 3.6}, {"dbId": 6043, "distM": 3.6}, {"dbId": 6049, "distM": 3.6}, {"dbId": 6044, "distM": 3.6}, {"dbId": 6041, "distM": 3.61}, {"dbId": 8527, "distM": 3.64}, {"dbId": 8529, "distM": 3.64}, {"dbId": 8533, "distM": 3.64}, {"dbId": 8528, "distM": 3.64}, {"dbId": 8532, "distM": 3.64}, {"dbId": 8526, "distM": 3.64}, {"dbId": 8531, "distM": 3.64}, {"dbId": 8530, "distM": 3.64}, {"dbId": 8522, "distM": 3.64}, {"dbId": 8505, "distM": 3.64}, {"dbId": 8523, "distM": 3.64}, {"dbId": 8521, "distM": 3.64}, {"dbId": 8520, "distM": 3.64}, {"dbId": 8519, "distM": 3.64}, {"dbId": 8518, "distM": 3.64}, {"dbId": 8517, "distM": 3.64}, {"dbId": 3844, "distM": 3.64}, {"dbId": 8534, "distM": 3.65}, {"dbId": 8524, "distM": 3.65}, {"dbId": 3658, "distM": 3.66}, {"dbId": 8614, "distM": 3.69}, {"dbId": 3660, "distM": 3.7}, {"dbId": 3716, "distM": 3.71}, {"dbId": 3732, "distM": 3.71}, {"dbId": 8639, "distM": 3.72}, {"dbId": 8638, "distM": 3.72}, {"dbId": 3826, "distM": 3.73}, {"dbId": 3208, "distM": 3.75}, {"dbId": 3717, "distM": 3.83}, {"dbId": 3733, "distM": 3.83}, {"dbId": 15, "distM": 3.84}, {"dbId": 6040, "distM": 3.84}, {"dbId": 8415, "distM": 3.85}, {"dbId": 8312, "distM": 3.85}, {"dbId": 8344, "distM": 3.86}, {"dbId": 8535, "distM": 3.89}, {"dbId": 8525, "distM": 3.89}, {"dbId": 3810, "distM": 3.91}, {"dbId": 3792, "distM": 3.91}, {"dbId": 3871, "distM": 3.91}, {"dbId": 3993, "distM": 3.93}, {"dbId": 8616, "distM": 3.94}, {"dbId": 8311, "distM": 3.95}, {"dbId": 4, "distM": 3.99}, {"dbId": 8581, "distM": 4.02}, {"dbId": 8475, "distM": 4.08}, {"dbId": 4713, "distM": 4.21}, {"dbId": 3463, "distM": 4.24}, {"dbId": 8345, "distM": 4.32}, {"dbId": 3811, "distM": 4.37}], "maxDistM": 4.37}}};
-const issuesEl = document.getElementById('issues');
-const rangeEl = document.getElementById('range');
-const rangeLabel = document.getElementById('rangeLabel');
-let selected = null;
-let rangeM = 3.0;
-for (const iss of DATA.issues) {
-  const e = DATA.elements[iss.id];
-  const b = document.createElement('button');
-  b.className = 'issue'; b.id = 'btn-' + iss.id;
-  b.innerHTML = '<div class="t">' + iss.id + '：' + iss.title + '</div><div class="e">📌 ' + e.name + '（' + e.category + '）<br>' + (e.level ?? '') + (e.locationMark ? ' ／ 通り芯 ' + e.locationMark : '') + '</div>';
-  b.addEventListener('click', () => selectIssue(iss.id));
-  issuesEl.appendChild(b);
-}
-function fmtBytes(n) { return n >= 1048576 ? (n / 1048576).toFixed(2) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB'; }
-function includedNeighbors(id) {
-  return DATA.subsets[id].candidates.filter(c => c.distM <= rangeM);
-}
+let DATA = null, selected = null, pct = 5;
+const $ = id => document.getElementById(id);
+const fmtBytes = b => b >= 1048576 ? (b / 1048576).toFixed(2) + ' MB' : Math.round(b / 1024) + ' KB';
+const fmtSec = ms => (ms / 1000).toFixed(1) + ' 秒';
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function issue() { return DATA.issues.find(i => i.id === selected); }
+function shownCount() { const i = issue(); return Math.round(pct / 100 * i.candidates.length); }
+function includedIds() { const i = issue(); return [i.targetDbId, ...i.candidates.slice(0, shownCount()).map(c => c.dbId)]; }
 function updateRangeLabel() {
-  if (!selected) return;
-  const sub = DATA.subsets[selected];
-  rangeLabel.innerHTML = '対象から <b>' + rangeM.toFixed(1) + ' m</b> 以内 ・ 周辺 <b>' + includedNeighbors(selected).length + ' 件</b>を表示中（候補 ' + sub.candidates.length + ' 件・最大 ' + sub.maxDistM.toFixed(1) + ' m まで用意）';
+  const i = issue(); if (!i) return;
+  const n = shownCount();
+  const maxD = n > 0 ? i.candidates[n - 1].distM : 0;
+  $('rangeLabel').textContent = pct === 0
+    ? '表示範囲 0% ・ ピンの要素のみ'
+    : `表示範囲 ${pct}% ・ 周辺 ${n.toLocaleString()} 件を表示中（対象から最大 ${maxD} m）`;
 }
-rangeEl.addEventListener('input', () => {
-  rangeM = parseFloat(rangeEl.value);
-  updateRangeLabel();
-  if (selected) { applyRangeThree(); applyRangeViewer(); }
-});
-function selectIssue(id) {
+function buildTable() {
+  const stClass = s => s === '未対応' ? 'st-open' : s === '対応中' ? 'st-doing' : 'st-wait';
+  $('issueRows').innerHTML = DATA.issues.map(i => `
+    <tr data-id="${i.id}" class="${i.id === selected ? 'sel' : ''}">
+      <td class="mono">${i.id.replace('ISSUE-', '')}</td>
+      <td><b>${esc(i.title)}</b></td>
+      <td><span class="pill ${stClass(i.status)}">${i.status}</span></td>
+      <td><span class="pill tp">${i.type}</span></td>
+      <td>${esc(i.assignee)}</td>
+      <td class="mono">${i.due}</td>
+      <td>📌 ${esc(i.elemName)} [${i.revitId}]<br><span style="color:#68798a">${esc(i.category)} / ${esc(i.typeName)}</span></td>
+      <td>${esc(i.level)}<br><span style="color:#68798a">${esc(i.loc)}</span></td>
+    </tr>`).join('');
+  for (const tr of $('issueRows').children) tr.addEventListener('click', () => selectIssue(tr.dataset.id));
+}
+async function selectIssue(id) {
   selected = id;
-  document.querySelectorAll('.issue').forEach(el => el.classList.toggle('sel', el.id === 'btn-' + id));
-  const iss = DATA.issues.find(i => i.id === id);
-  const e = DATA.elements[id];
-  document.getElementById('detail').innerHTML = '<b>' + iss.id + '：' + iss.title + '</b> ／ 対象要素：' + e.name + '（' + e.category + ' / ' + e.typeName + '）' + (e.locationMark ? ' ／ 位置：通り芯 ' + e.locationMark : '') + (e.level ? ' ／ 階：' + e.level : '');
-  const sub = DATA.subsets[id];
-  rangeEl.max = Math.max(0.1, Math.ceil(sub.maxDistM * 10) / 10).toFixed(1);
-  if (rangeM > parseFloat(rangeEl.max)) { rangeM = parseFloat(rangeEl.max); rangeEl.value = rangeM; }
-  rangeEl.disabled = false;
+  const i = issue();
+  buildTable();
+  $('selInfo').innerHTML = `<b>${i.id}：${esc(i.title)}</b> ／ 対象要素：${esc(i.elemName)} [${i.revitId}]（${esc(i.category)} / ${esc(i.typeName)}） ／ 階：${esc(i.level)} ／ ${esc(i.loc)}`;
   updateRangeLabel();
-  showInViewer(id);
-  showInThree(id);
+  showInViewer();
+  callConvert();
 }
+function callConvert() {
+  if (window.convertAndShow) { window.convertAndShow(); return; }
+  let n = 0;
+  const t = setInterval(() => {
+    if (window.convertAndShow || ++n > 100) { clearInterval(t); window.convertAndShow?.(); }
+  }, 300);
+}
+$('range').addEventListener('input', () => {
+  pct = Number($('range').value);
+  updateRangeLabel();
+  applyRangeViewer();
+  window.__applyRangeThree?.();
+});
+fetch('/api/issues').then(r => r.json()).then(d => { DATA = d; selectIssue(DATA.issues[0].id); })
+  .catch(() => { $('selInfo').textContent = 'データの読み込みに失敗しました（サーバー経由で開いてください）'; });
 </script>
+
 <script>
-// ===== ① APS Viewer =====
-let viewer = null, viewerReady = null, viewerFirstLoadMs = null, viewerSwitchMs = null, isolateTimer = null;
-function initViewer() {
-  if (viewerReady) return viewerReady;
-  viewerReady = new Promise((resolve, reject) => {
-    const opts = {
-      env: 'AutodeskProduction',
-      getAccessToken: async (cb) => {
-        try {
-          const r = await fetch('/api/token');
-          const j = await r.json();
-          if (!j.access_token) throw new Error('no token');
-          cb(j.access_token, j.expires_in);
-        } catch (err) { reject(new Error('トークンを取得できませんでした。①は同梱サーバー（node server.mjs）経由でのみ動作します。')); }
-      },
-    };
-    Autodesk.Viewing.Initializer(opts, () => {
-      viewer = new Autodesk.Viewing.GuiViewer3D(document.getElementById('viewer'));
-      viewer.start();
-      Autodesk.Viewing.Document.load('urn:' + DATA.urn, (doc) => {
-        const node = doc.getRoot().getDefaultGeometry();
-        viewer.loadDocumentNode(doc, node).then(() => resolve()).catch(reject);
-      }, reject);
-    });
-  });
-  return viewerReady;
-}
-function renderStatA() {
-  if (!selected) return;
-  const ids = 1 + includedNeighbors(selected).length;
-  document.getElementById('statA').innerHTML =
-    (viewerFirstLoadMs ? '<span>モデル初回読み込み：<b>' + (viewerFirstLoadMs / 1000).toFixed(1) + ' 秒</b></span>' : '') +
-    (viewerSwitchMs != null ? '<span>表示切替：<b>' + viewerSwitchMs + ' ms</b></span>' : '') +
-    '<span>分離表示中：<b>' + ids + ' 件</b>（対象1＋周辺' + (ids - 1) + '）</span>' +
-    '<span>転送：モデル全体の変換データを逐次配信</span>';
-}
-async function showInViewer(id) {
-  const stat = document.getElementById('statA');
-  const ph = document.getElementById('viewerPh');
-  if (typeof Autodesk === 'undefined') {
-    stat.innerHTML = '<span>Viewer ライブラリ（Autodesk CDN）を読み込めませんでした。ネットワーク環境によっては CDN への接続が必要です。</span>';
-    return;
-  }
-  const t0 = performance.now();
-  stat.innerHTML = '<span>読み込み中…</span>';
-  try {
-    const first = !viewerFirstLoadMs;
-    await initViewer();
-    if (first) {
-      await new Promise(res => {
-        const h = () => { viewer.removeEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, h); res(); };
-        viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, h);
-        setTimeout(res, 15000);
-      });
-      viewerFirstLoadMs = Math.round(performance.now() - t0);
-    }
-    if (viewer.setGhosting) viewer.setGhosting(false);
-    const sub = DATA.subsets[id];
-    const ids = [sub.targetDbId, ...includedNeighbors(id).map(c => c.dbId)];
-    viewer.isolate(ids);
-    viewer.fitToView(ids);
-    viewerSwitchMs = Math.round(performance.now() - t0);
-    ph.style.display = 'none';
-    renderStatA();
-    updateCompare();
-  } catch (err) {
-    stat.innerHTML = '<span>' + err.message + '</span>';
-  }
+/* ===== ① APS Viewer ===== */
+let viewer = null, viewerModel = null, viewerReady = false, viewerLoading = false;
+function setStatA(html) { $('statA').innerHTML = html; }
+async function ensureViewer() {
+  if (viewerReady || viewerLoading) return;
+  viewerLoading = true;
+  if (!window.Autodesk) { setStatA('Viewer ライブラリ（Autodesk CDN）を読み込めませんでした。ネットワーク環境によっては CDN への接続が必要です。'); return; }
+  const tk = await (await fetch('/api/token')).json();
+  if (!tk.access_token) { setStatA('トークンの取得に失敗しました'); return; }
+  await new Promise(resolve => Autodesk.Viewing.Initializer({ accessToken: tk.access_token, env: 'AutodeskProduction2', api: 'streamingV2' }, resolve));
+  viewer = new Autodesk.Viewing.GuiViewer3D($('viewerWrap'));
+  viewer.start();
+  const doc = await Autodesk.Viewing.Document.loadPromise('urn:' + DATA.model.urn, { accessToken: tk.access_token });
+  let node = null;
+  try { node = doc.getRoot().findByGuid(DATA.model.guid); } catch {}
+  if (!node) node = doc.getRoot().getDefaultGeometry();
+  viewerModel = await viewer.loadDocumentNode(doc, node);
+  viewerReady = true;
+  $('viewerMsg')?.remove();
+  showInViewer();
 }
 function applyRangeViewer() {
-  if (!viewer || !selected) return;
-  clearTimeout(isolateTimer);
-  isolateTimer = setTimeout(() => {
-    const sub = DATA.subsets[selected];
-    const ids = [sub.targetDbId, ...includedNeighbors(selected).map(c => c.dbId)];
-    viewer.isolate(ids);
-    renderStatA();
+  if (!viewerReady || !selected) return;
+  clearTimeout(window.__isoT);
+  window.__isoT = setTimeout(() => {
+    const i = issue();
+    viewer.isolate(includedIds(), viewerModel);
+    highlightTarget();
   }, 180);
 }
+function highlightTarget() {
+  if (!viewerReady || !selected) return;
+  const i = issue();
+  const V4 = window.THREE?.Vector4 ?? window.Autodesk?.Viewing?.Private?.THREE?.Vector4;
+  viewer.clearThemingColors(viewerModel);
+  if (V4) viewer.setThemingColor(i.targetDbId, new V4(1, 0.32, 0.05, 1), viewerModel, true);
+}
+function focusTarget() {
+  if (!viewerReady || !selected) return;
+  viewer.fitToView([issue().targetDbId], viewerModel);
+}
+$('btnFocus').addEventListener('click', focusTarget);
+async function showInViewer() {
+  if (!viewerReady) { ensureViewer(); return; }
+  const i = issue();
+  viewer.isolate(includedIds(), viewerModel);
+  highlightTarget();
+  focusTarget();
+  setStatA(`分離表示：<b>${(shownCount() + 1).toLocaleString()} 件</b>（対象1＋周辺${shownCount().toLocaleString()}）／ 対象要素を<b>橙色にハイライト</b>し、カメラを対象へフォーカス済み`);
+}
+</script>
+
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three.module.js",
+  "three/addons/": "./vendor/addons/"
+} }
 </script>
 <script type="module">
-// ===== ③ three.js（部分GLB・要素単位で表示切替） =====
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-const container = document.getElementById('three');
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-container.appendChild(renderer.domElement);
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xe9eff4);
-const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 5000);
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-scene.add(new THREE.HemisphereLight(0xffffff, 0x8a97a5, 1.1));
-const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(60, 80, 40); scene.add(sun);
-const sun2 = new THREE.DirectionalLight(0xdfeaf5, 0.5); sun2.position.set(-50, -30, -60); scene.add(sun2);
-const targetMat = new THREE.MeshStandardMaterial({ color: 0xff4400, roughness: 0.7, metalness: 0.05, emissive: 0x7a1e00, emissiveIntensity: 0.9 });
-const ghostMat = new THREE.MeshStandardMaterial({ color: 0x9fb4c6, roughness: 0.75, metalness: 0.05, transparent: true, opacity: 0.45, depthWrite: false });
-function resize() {
-  const w = container.clientWidth, h = container.clientHeight;
-  renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+let renderer, scene, camera, controls, current = null, convertSeq = 0, timerId = null;
+function initThree() {
+  const wrap = document.getElementById('threeWrap');
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(wrap.clientWidth, wrap.clientHeight);
+  wrap.appendChild(renderer.domElement);
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xe9eff4);
+  camera = new THREE.PerspectiveCamera(45, wrap.clientWidth / wrap.clientHeight, 0.1, 5000);
+  controls = new OrbitControls(camera, renderer.domElement);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x8fa3b8, 1.1));
+  const dir = new THREE.DirectionalLight(0xffffff, 1.6);
+  dir.position.set(60, 120, 80);
+  scene.add(dir);
+  renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
 }
-new ResizeObserver(resize).observe(container); resize();
-renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
-const loader = new GLTFLoader();
-const cache = new Map(); // id -> { group, elems: [{obj, dbId, distM}] }
-let current = null;
-let loadMs = null;
-function renderStatB() {
-  if (!selected || !current) return;
-  const sub = DATA.subsets[selected];
-  const shown = includedNeighbors(selected).length;
-  document.getElementById('statB').innerHTML =
-    (loadMs != null ? '<span>部分ファイル読み込み：<b class="big">' + loadMs + ' ms</b></span>' : '') +
-    '<span>同梱ファイル：<b class="big">' + fmtBytes(sub.contextBytes) + '</b>（候補 ' + sub.candidates.length + ' 件・最大 ' + sub.maxDistM.toFixed(1) + ' m）</span>' +
-    '<span>表示中：<b>' + (1 + shown) + ' 件</b>（対象1＋周辺' + shown + '）</span>';
-}
-window.__applyRangeThree = () => {
-  if (!current || !selected) return;
-  const sub = DATA.subsets[selected];
-  for (const el of current.elems) {
-    el.obj.visible = el.dbId === sub.targetDbId || el.distM <= rangeM;
-  }
-  renderStatB();
+window.__threeState = function () {
+  if (!current) return { ready: false };
+  let vis = 0, meshes = 0, ghost = 0;
+  for (const el of current.elems) { if (el.obj.visible) vis++; el.obj.traverse(m => { if (m.isMesh) { meshes++; if (m.material && m.material.transparent) ghost++; } }); }
+  let allMesh = 0, allNodes = 0, namedMesh = 0;
+  current.group.traverse(o => { allNodes++; if (o.isMesh) { allMesh++; if (/^\d+/.test(o.name)) namedMesh++; } });
+  return { ready: true, elems: current.elems.length, visibleElems: vis, meshes, ghostMeshes: ghost, allMesh, allNodes, namedMesh };
 };
-window.__showThree = async (id) => {
-  const stat = document.getElementById('statB');
-  const ph = document.getElementById('threePh');
-  const sub = DATA.subsets[id];
+window.__applyRangeThree = function () {
+  if (!current) return;
+  const n = shownCount();
+  const visible = new Set([issue().targetDbId, ...issue().candidates.slice(0, n).map(c => c.dbId)]);
+  for (const el of current.elems) el.obj.visible = visible.has(el.dbId);
+  if (current.stats) renderStatB(current.stats);
+};
+window.convertAndShow = async function () {
+  const i = issue(); if (!i) return;
+  const seq = ++convertSeq;
+  const msg = document.getElementById('threeMsg');
+  if (msg) msg.remove();
+  if (!renderer) initThree();
+  if (current) { scene.remove(current.group); current = null; }
+  const t0 = performance.now();
+  const statEl = document.getElementById('statB');
+  clearInterval(timerId);
+  timerId = setInterval(() => { statEl.innerHTML = `都度変換中… 経過 <b>${((performance.now() - t0) / 1000).toFixed(1)} 秒</b>（サーバーが変換データをダウンロードして変換しています）`; }, 200);
+  let buf, stages;
   try {
-    if (current) current.group.visible = false;
-    if (!cache.has(id)) {
-      stat.innerHTML = '<span>読み込み中…</span>';
-      const t0 = performance.now();
-      const gltf = await loader.loadAsync(sub.contextGlb);
-      const elems = [];
-      const distOf = new Map(sub.candidates.map(c => [c.dbId, c.distM]));
-      gltf.scene.traverse(o => {
-        const dbId = /^\d+$/.test(o.name) ? parseInt(o.name, 10) : null;
-        if (dbId != null) {
-          o.userData.dbId = dbId;
-          if (o.isMesh) o.material = dbId === sub.targetDbId ? targetMat : ghostMat;
-          elems.push({ obj: o, dbId, distM: distOf.get(dbId) ?? 0 });
-        }
-      });
-      cache.set(id, { group: gltf.scene, elems });
-      loadMs = Math.round(performance.now() - t0);
-    } else {
-      loadMs = 0;
-    }
-    current = cache.get(id);
-    current.group.visible = true;
-    if (!scene.children.includes(current.group)) scene.add(current.group);
-    current.group.updateWorldMatrix(true, true);
-    // カメラは対象要素を中心に合わせる（周辺は範囲を広げると画面の外へ広がっていく）
+    const res = await fetch('/api/convert');
+    if (!res.ok) throw new Error('convert API ' + res.status);
+    stages = { read: Number(res.headers.get('X-Read-Ms')), write: Number(res.headers.get('X-Write-Ms')), pack: Number(res.headers.get('X-Pack-Ms')) };
+    buf = await res.arrayBuffer();
+  } catch (e) {
+    clearInterval(timerId);
+    statEl.textContent = '都度変換に失敗しました：' + String(e?.message ?? e);
+    return;
+  }
+  if (seq !== convertSeq) { clearInterval(timerId); return; }
+  const tParse = performance.now();
+  new GLTFLoader().parse(buf, '', gltf => {
+    clearInterval(timerId);
+    if (seq !== convertSeq) return;
+    const parseMs = performance.now() - tParse;
+    const targetMat = new THREE.MeshStandardMaterial({ color: 0xff5a1f, emissive: 0x903000, roughness: 0.55 });
+    const ghostMat = new THREE.MeshStandardMaterial({ color: 0x9db4c6, transparent: true, opacity: 0.45, roughness: 0.9, depthWrite: false });
+    const elems = [];
+    gltf.scene.traverse(o => {
+      // three.js の GLTFLoader は同名ノードに接尾辞を付けて一意化するため、先頭の数字列を dbId として読む
+      const nm = /^(\d+)/.exec(o.name ?? '');
+      const dbId = nm ? Number(nm[1]) : NaN;
+      if (Number.isInteger(dbId) && dbId > 0) {
+        const isTarget = dbId === i.targetDbId;
+        o.traverse(m => { if (m.isMesh) m.material = isTarget ? targetMat : ghostMat; });
+        elems.push({ dbId, obj: o });
+      }
+    });
+    scene.add(gltf.scene);
+    gltf.scene.updateWorldMatrix(true, true);
+    current = { group: gltf.scene, elems, stats: null };
     window.__applyRangeThree();
     const box = new THREE.Box3();
-    for (const el of current.elems) if (el.dbId === sub.targetDbId) box.expandByObject(el.obj);
+    for (const el of elems) if (el.dbId === i.targetDbId) box.expandByObject(el.obj);
     if (!box.isEmpty()) {
-      const ts = box.getSize(new THREE.Vector3());
-      box.expandByVector(new THREE.Vector3(Math.max(3, ts.x * 0.6), Math.max(3, ts.y * 0.6), Math.max(3, ts.z * 0.6)));
-    }
-    if (!box.isEmpty()) {
+      box.expandByVector(new THREE.Vector3(8, 8, 3));
       const center = box.getCenter(new THREE.Vector3());
       const size = box.getSize(new THREE.Vector3()).length();
-      camera.position.set(center.x + size * 0.75, center.y + size * 0.55, center.z + size * 0.75);
-      camera.near = Math.max(0.1, size / 100); camera.far = size * 30; camera.updateProjectionMatrix();
-      controls.target.copy(center); controls.update();
+      const d = Math.max(size * 0.75, 10);
+      camera.position.set(center.x + d * 0.75, center.y + d * 0.55, center.z + d * 0.75);
+      controls.target.copy(center);
+      camera.near = Math.max(size / 100, 0.05); camera.far = size * 60 + 2000;
+      camera.updateProjectionMatrix();
+      controls.update();
     }
-    ph.style.display = 'none';
-    renderStatB();
-    window.__threeMs = loadMs; window.__threeBytes = sub.contextBytes;
-    updateCompare();
-  } catch (err) {
-    stat.innerHTML = '<span>読み込みに失敗しました（' + err.message + '）</span>';
-  }
+    const serverMs = stages.read + stages.write + stages.pack;
+    current.stats = { serverMs, stages, bytes: buf.byteLength, parseMs, totalMs: performance.now() - t0 };
+    renderStatB(current.stats);
+    updateCompare(current.stats);
+  }, err => {
+    clearInterval(timerId);
+    statEl.textContent = 'GLB の読み込みに失敗しました：' + String(err?.message ?? err);
+  });
 };
-</script>
-<script>
-function showInThree(id) { if (window.__showThree) window.__showThree(id); else setTimeout(() => showInThree(id), 300); }
-function applyRangeThree() { if (window.__applyRangeThree) window.__applyRangeThree(); }
-function updateCompare() {
-  if (!selected || window.__threeMs == null) return;
-  const sub = DATA.subsets[selected];
-  document.getElementById('compare').innerHTML = '【比較】' + selected + '：③部分切り出しは候補 ' + sub.candidates.length + ' 件（最大 ' + sub.maxDistM.toFixed(1) + ' m・' + fmtBytes(sub.contextBytes) + '）を一度だけ読み、バーの範囲内の増減は転送なしで即時に切り替わる。' +
-    '①Viewer はモデル全体の変換データを配信しつつ分離表示するため、初回読み込みに時間がかかる代わりに、モデル全体へそのまま広げて見ることもできる。' +
-    '「Issue の箇所だけを行き来する」用途では③の転送量・応答性が効く。';
+function renderStatB(s) {
+  if (!s) return;
+  const n = shownCount();
+  document.getElementById('statB').innerHTML =
+    `都度変換（事前変換なし）：サーバー変換 <b>${fmtSec(s.serverMs)}</b>（読込 ${fmtSec(s.stages.read)} ＋ 書出 ${fmtSec(s.stages.write)} ＋ GLB化 ${fmtSec(s.stages.pack)}）<br>` +
+    `GLB：<b>${fmtBytes(s.bytes)}</b>（モデル全要素）／ 描画まで ${Math.round(s.parseMs)} ms ／ クリックから表示まで <b>${fmtSec(s.totalMs)}</b><br>` +
+    `表示中：<b>${(n + 1).toLocaleString()} 件</b>（対象1＋周辺${n.toLocaleString()}）`;
+}
+function updateCompare(s) {
+  const i = issue();
+  document.getElementById('compare').innerHTML =
+    `【比較】${i.id}：③都度変換はサーバー変換 <b>${fmtSec(s.serverMs)}</b>（うち変換データの読込 ${fmtSec(s.stages.read)} が大半で、変換そのもの＝書出＋GLB化は ${fmtSec(s.stages.write + s.stages.pack)}）＋ GLB ${fmtBytes(s.bytes)} の転送・描画で、合計 <b>${fmtSec(s.totalMs)}</b>。` +
+    `事前に切り出しておく方式（前回）では同じ箇所が 0.1 秒台で出たのと対照的に、「都度」は毎回このコストがかかる。①Viewer はモデル全体の変換データを配信しつつ分離表示するため初回読込に時間がかかる代わりに、対象のハイライトやフォーカス、モデル全体への展開ができる。`;
 }
 </script>
 </body>
