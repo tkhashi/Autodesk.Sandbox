@@ -36,7 +36,7 @@ table.issues tbody tr.na { cursor: default; opacity: .75; }
 .pager button:disabled { opacity: .45; cursor: default; }
 .view { position: relative; height: 560px; background: #e9eff4; border-radius: 8px; overflow: hidden; }
 .viewbox { position: relative; }
-.subset-overlay { position: absolute; inset: 0; z-index: 4; display: none; background: #eef2f5; border-radius: 8px; overflow: hidden; }
+.subset-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 60px; z-index: 4; display: none; background: #eef2f5; border-radius: 8px 8px 0 0; overflow: hidden; }
 .legend { margin-top: 8px; font-size: 12px; color: #41586c; }
 .chip { display: inline-flex; align-items: center; gap: 5px; margin: 0 10px 4px 0; white-space: nowrap; }
 .sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; border: 1px solid rgba(0,0,0,.18); }
@@ -242,12 +242,26 @@ function applySelection() {
     if (typeof viewer.setGhosting === 'function') viewer.setGhosting(true); // 範囲外は消さずゴーストにして位置関係を残す
     viewer.isolate(range);
     viewer.clearThemingColors();
+    if (i.targetBbox) {
+      const V3 = Autodesk.Viewing.Private.THREE.Vector3;
+      const b = i.targetBbox;
+      const c = new V3((b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2);
+      const diag = Math.hypot(b[3] - b[0], b[4] - b[1], b[5] - b[2]) || 10;
+      setObliqueView(c, Math.max(diag * 3, 14));
+    }
     viewer.fitToView(range);
   } catch (e) { return; }
   startBlink(i.targetDbId);
   if (geoLoaded) setStatV(`<b>#${i.displayId}</b> の対象要素＋周辺を表示中（読み込み済みのため即時）。`);
 }
 
+// モデル座標（Z-up）で斜め上から見る視点にする。ビューワブル既定の平面ビューを引き継がないため
+function setObliqueView(center, dist) {
+  const V3 = Autodesk.Viewing.Private.THREE.Vector3;
+  const dir = new V3(1, 1, 0.55).normalize();
+  const pos = center.clone().add(dir.multiplyScalar(dist));
+  viewer.navigation.setView(pos, center);
+}
 // 選択中 Issue の対象 bbox からカメラ位置を読み込み前に決め、完了時にカメラが動かないようにする
 function aimCameraAtTarget() {
   const i = issue();
@@ -257,9 +271,7 @@ function aimCameraAtTarget() {
     const b = i.targetBbox;
     const c = new V3((b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2);
     const diag = Math.hypot(b[3] - b[0], b[4] - b[1], b[5] - b[2]) || 10;
-    const dir = new V3(0.95, 0.75, 0.95).normalize();
-    const pos = c.clone().add(dir.multiplyScalar(diag * 1.6 + 6));
-    viewer.navigation.setView(pos, c);
+    setObliqueView(c, diag * 1.6 + 6);
     return true;
   } catch (e) { return false; }
 }
@@ -277,6 +289,14 @@ function setupViewer(modelKey) {
   aimCameraAtTarget();
   viewer.addEventListener(Autodesk.Viewing.MODEL_ROOT_LOADED_EVENT, () => {
     rootLoaded = true;
+    const cur = issue();
+    if (!cur?.targetDbId || cur.modelKey !== viewerModelKey) {
+      try {
+        const V3 = Autodesk.Viewing.Private.THREE.Vector3;
+        const bb = viewer.model.getBoundingBox();
+        setObliqueView(bb.getCenter(new V3()), bb.getSize(new V3()).length() * 0.72);
+      } catch (e) {}
+    }
     applySelection();
     setStatV(`モデル（${esc(m.short)}）の読み込み中… 骨格は表示可能になりました（選択から ${((performance.now() - tSelect) / 1000).toFixed(1)} 秒）。`);
   });
@@ -461,8 +481,8 @@ document.addEventListener('issue-selected', async (ev) => {
     const box = new THREE.Box3().setFromObject(targetMesh ?? current);
     const c = box.getCenter(new THREE.Vector3());
     const diag = box.getSize(new THREE.Vector3()).length() || 3;
-    const dist = Math.max(diag * 2.2, 7);
-    camera.position.set(c.x + dist * 0.64, c.y + dist * 0.47, c.z + dist * 0.64);
+    const dist = Math.max(diag * 2.4, 8);
+    camera.position.set(c.x + dist * 0.72, c.y + dist * 0.38, c.z + dist * 0.72);
     controls.target.copy(c);
     renderer.render(scene, camera);
     const ms = Math.round(performance.now() - t0);
