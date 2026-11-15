@@ -16,5 +16,23 @@
   "derivativeUrn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLlpSRjFpamFyWFJTN1gzbWk3QllpRmc_dmVyc2lvbj0x",
   "viewableGuid": "0caacd2f-a9c4-7da9-8b99-d5762178b1de",
   "projectId": "b.031a6e68-ccdf-4a29-b8a5-50a2a3ecac25"
+ },
+ {
+  "key": "snowdonarch",
+  "name": "Snowdon Towers Sample Architectural.rvt",
+  "short": "Snowdon 建築（95MB）",
+  "lineage": "urn:adsk.wipprod:dm.lineage:VwJ57NkiQ-Gy0nHLR3UmAA",
+  "derivativeUrn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLlZ3SjU3TmtpUS1HeTBuSExSM1VtQUE_dmVyc2lvbj0x",
+  "viewableGuid": "7738212f-d458-662f-cb9c-cf7c761af18d",
+  "projectId": "b.031a6e68-ccdf-4a29-b8a5-50a2a3ecac25"
+ },
+ {
+  "key": "snowdonfacades",
+  "name": "Snowdon Towers Sample Facades.rvt",
+  "short": "Snowdon ファサード（53MB）",
+  "lineage": "urn:adsk.wipprod:dm.lineage:KoiFueUiTT20F5KPOHkRDg",
+  "derivativeUrn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLktvaUZ1ZVVpVFQyMEY1S1BPSGtSRGc_dmVyc2lvbj0x",
+  "viewableGuid": "ee468dd8-59ee-b79b-2203-df43b89fb561",
+  "projectId": "b.031a6e68-ccdf-4a29-b8a5-50a2a3ecac25"
  }
 ]
