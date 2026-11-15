@@ -216,16 +216,14 @@ function startBlink(dbId) {
   stopBlink();
   if (!viewer) return;
   const V4 = window.THREE?.Vector4 ?? Autodesk.Viewing.Private.THREE.Vector4;
-  const paint = () => { try { viewer.setThemingColor(dbId, new V4(1, 0.05, 0.05, 1)); } catch (e) {} };
-  paint(); blinkOn = true;
+  const paint = (r, g, b) => { try { viewer.setThemingColor(dbId, new V4(r, g, b, 1)); } catch (e) {} };
+  paint(1, 0.05, 0.05); blinkOn = true;
   blinkTimer = setInterval(() => {
     if (!viewer) { stopBlink(); return; }
     blinkOn = !blinkOn;
-    try {
-      if (blinkOn) paint();
-      else viewer.clearThemingColors();
-    } catch (e) {}
-  }, 550);
+    if (blinkOn) paint(1, 0.05, 0.05);
+    else paint(1, 0.78, 0.78);
+  }, 650);
 }
 
 // 選択中の Issue を Viewer に反映：対象＋周辺を残してゴースト表示にし、対象を赤点滅＋カメラを寄せる
@@ -249,7 +247,7 @@ function applySelection() {
       const diag = Math.hypot(b[3] - b[0], b[4] - b[1], b[5] - b[2]) || 10;
       setObliqueView(c, Math.max(diag * 3, 14));
     }
-    viewer.fitToView(range);
+    viewer.fitToView([i.targetDbId]); // フレーミングは対象のみ（周辺は表示範囲に含めつつ、全体俯瞰にしない）
   } catch (e) { return; }
   startBlink(i.targetDbId);
   if (geoLoaded) setStatV(`<b>#${i.displayId}</b> の対象要素＋周辺を表示中（読み込み済みのため即時）。`);
@@ -289,6 +287,7 @@ function setupViewer(modelKey) {
   aimCameraAtTarget();
   viewer.addEventListener(Autodesk.Viewing.MODEL_ROOT_LOADED_EVENT, () => {
     rootLoaded = true;
+    aimCameraAtTarget(); // 既定カメラが適用された直後に対象視点へ戻す
     const cur = issue();
     if (!cur?.targetDbId || cur.modelKey !== viewerModelKey) {
       try {
