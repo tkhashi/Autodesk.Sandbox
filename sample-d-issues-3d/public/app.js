@@ -761,7 +761,6 @@ let occluderRange = (() => {
 let hiddenOccluders = new Set(); // この機能が消した要素（戻す時に使う）
 let occHiddenCount = 0;          // 直近の消去件数（ステータス表示用）
 let occTargetDbId = null;        // 消去の対象要素
-let occCamPos = null;            // 前回計算時のカメラ位置
 let streamingNow = false;        // 逐次配信中か（エッジ制御用）
 
 // エッジ（部材の輪郭線）は逐次配信中だけ切る（描画負荷の軽減）。
@@ -882,8 +881,6 @@ function applyOccluderClearing() {
     const occ = computeOccluders(i.targetDbId);
     applyOccluderSet(new Set(occ));
     occTargetDbId = i.targetDbId;
-    const p = viewer.navigation.getPosition();
-    occCamPos = { x: p.x, y: p.y, z: p.z };
     if (overviewOn) setStatV(`<b>#${i.displayId}</b> の見通しのため、手前の部材 <b>${occ.length} 件</b>を透明にしています（フレームのみ表示・範囲 ${occluderRange}%）。`);
     return occ.length;
   } catch (e) {
@@ -893,20 +890,13 @@ function applyOccluderClearing() {
   }
 }
 
-// カメラ移動後に見通しを追随させる（デバウンス＋移動量のしきい値）
-let occTimer = 0;
-function scheduleOccluderRecompute() {
-  if (!occTargetDbId || occluderRange <= 0 || viewerMode !== 'aps') return;
-  clearTimeout(occTimer);
-  occTimer = setTimeout(() => {
-    if (!viewer) return;
-    if (focusAnim) { scheduleOccluderRecompute(); return; } // 移動アニメーション中は終わるまで待つ
-    try {
-      const p = viewer.navigation.getPosition();
-      if (!occCamPos || Math.hypot(p.x - occCamPos.x, p.y - occCamPos.y, p.z - occCamPos.z) > 2.0) applyOccluderClearing();
-    } catch (e) {}
-  }, 600);
-}
+// 透明セットは Issue を選んだ時点（フォーカス視点）で1回だけ決めて固定する。
+// 以前はカメラが止まるたびに再計算して付け替えていたが、その付け替えのたびに
+// 半透明の部材が一瞬ちらついた（実機報告）。カメラ移動では再計算しない
+// （2026-11-16、ユーザーが「付け替えをやめる案」を選択）。再計算するのは
+// Issue の切替・範囲スライダの変更・モデルの読み込み完了の時だけ。
+// フォーカス移動中に保留した分は、到着時（fitToElement の完了処理）か、
+// ユーザーが移動を中断した時に1回だけ適用する。
 
 function syncGhostBtn() {
   const p = $('ghostPanel');
@@ -975,7 +965,7 @@ function fitToElement(dbId) {
       const e = ease(t);
       viewer.navigation.setView(fromPos.clone().lerp(dest, e), fromTgt.clone().lerp(c, e), new T.Vector3(0, 0, 1));
       if (t < 1) anim.raf = requestAnimationFrame(step);
-      else focusAnim = null;
+      else { focusAnim = null; if (occTargetDbId) applyOccluderClearing(); } // 到着した視点で透明セットを1回だけ確定する
     };
     anim.raf = requestAnimationFrame(step);
     return true;
@@ -1007,8 +997,9 @@ function applySelection() {
     }
     if (focusAnim) {
       // フォーカスの移動アニメーション中：透明化はまだ適用しない。
-      // 移動開始時点の視点で計算すると、到着後の再計算でもう一度付け替わり、
-      // 半透明の部材が一瞬ちらつく（実機報告）。到着後の再計算に1回で済ませる。
+      // 移動開始時点の視点で計算すると、到着時にもう一度付け替わり、
+      // 半透明の部材が一瞬ちらつく（実機報告）。到着時に1回だけ適用する
+      // （fitToElement の完了処理が occTargetDbId を見て適用する）。
       occTargetDbId = i.targetDbId;
     } else {
       applyOccluderClearing(); // 対象の手前の部材だけを透明にする（材質には触らない）
@@ -1042,7 +1033,6 @@ function setupViewer(modelKey) {
     markersRaf = requestAnimationFrame(() => { markersRaf = 0; if (overviewOn) updateMarkers(); updateFocusPin(); });
   };
   viewer.addEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, updMarkers);
-  viewer.addEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, scheduleOccluderRecompute);
   viewer.addEventListener(Autodesk.Viewing.ISOLATE_EVENT, updMarkers);
   viewer.addEventListener(Autodesk.Viewing.HIDE_EVENT, updMarkers);
   viewer.addEventListener(Autodesk.Viewing.SHOW_EVENT, updMarkers);
@@ -1140,7 +1130,11 @@ window.addEventListener('demo-toggle-overview', () => toggleOverview());
 window.addEventListener('demo-toggle-ghost-panel', () => toggleGhostPanel());
 // フォーカスの移動中にユーザーがビューアを操作したら、アニメーションを譲る
 for (const ev of ['pointerdown', 'wheel']) {
-  document.getElementById('viewerWrap')?.addEventListener(ev, () => cancelFocusAnim(), { passive: true });
+  document.getElementById('viewerWrap')?.addEventListener(ev, () => {
+    const wasAnim = !!focusAnim;
+    cancelFocusAnim();
+    if (wasAnim && occTargetDbId) applyOccluderClearing(); // 中断した視点で保留中の透明セットを1回だけ確定する
+  }, { passive: true });
 }
 
 async function initViewer() {
