@@ -526,11 +526,35 @@ function buildMarkers() {
   }
   updateMarkers();
 }
+// ラベルの配置（2026-11-16 ユーザー仕様）：ラベルは対象の直上には置かず、画面中央の
+// 「青エリア」（ラベル禁止域）の外周＝赤エリアに散らす。中心点は、表示中の指摘箇所の
+// 2D 座標の重心（ただし X は必ず画面中央）で動的に決め、中心点から指摘箇所を通る
+// 放射線が青エリアの境界を出る位置にラベルを置き、引き出し線で結ぶ。
+const BLUE_ZONE = { l: 0.125, r: 0.875, t: 0.18, b: 0.74 }; // 青エリア（画面に対する割合）
+function rayExitRect(C, P, R) {
+  const dx = P.x - C.x, dy = P.y - C.y;
+  if (Math.hypot(dx, dy) < 1e-6) return { x: (R.l + R.r) / 2, y: R.t, side: 'top' };
+  let t0 = 0, t1 = Infinity;
+  if (Math.abs(dx) < 1e-9) { if (C.x < R.l || C.x > R.r) return null; }
+  else { let ta = (R.l - C.x) / dx, tb = (R.r - C.x) / dx; if (ta > tb) { const s = ta; ta = tb; tb = s; } t0 = Math.max(t0, ta); t1 = Math.min(t1, tb); }
+  if (Math.abs(dy) < 1e-9) { if (C.y < R.t || C.y > R.b) return null; }
+  else { let ta = (R.t - C.y) / dy, tb = (R.b - C.y) / dy; if (ta > tb) { const s = ta; ta = tb; tb = s; } t0 = Math.max(t0, ta); t1 = Math.min(t1, tb); }
+  if (!Number.isFinite(t1) || t1 < 0 || t0 > t1) return null;
+  const x = C.x + dx * t1, y = C.y + dy * t1;
+  const dl = Math.abs(x - R.l), dr = Math.abs(x - R.r), dt = Math.abs(y - R.t), db = Math.abs(y - R.b);
+  const m = Math.min(dl, dr, dt, db);
+  const side = m === dt ? 'top' : m === db ? 'bottom' : m === dl ? 'left' : 'right';
+  return { x, y, side };
+}
 function updateMarkers() {
   if (!viewer || !markerItems.length) return;
   const T = THREE;
   let cam = null, dir = null;
   try { cam = viewer.impl.camera; dir = new T.Vector3(); cam.getWorldDirection(dir); } catch (e) {}
+  const layer = $('markers');
+  const W = layer?.clientWidth ?? 0, H = layer?.clientHeight ?? 0;
+  // まず表示中の指摘箇所の 2D 座標を集める
+  const vis = [];
   for (const it of markerItems) {
     try {
       const p = new T.Vector3(it.pos.x, it.pos.y, it.pos.z);
@@ -540,17 +564,52 @@ function updateMarkers() {
       const visible = !behind && (typeof viewer.isNodeVisible === 'function' ? viewer.isNodeVisible(it.dbId) : true);
       const disp = visible ? '' : 'none';
       it.el.style.display = disp; it.line.style.display = disp; it.dot.style.display = disp;
-      if (!visible) continue;
-      const w = it.el.offsetWidth, h = it.el.offsetHeight;
-      const gap = 26 + it.stack * (h + 8); // ラベルはピン位置の上に浮かせ、間を引き出し線でつなぐ
-      it.el.style.left = Math.floor(v.x - w / 2) + 'px';
-      it.el.style.top = Math.floor(v.y - gap - h) + 'px';
-      it.line.setAttribute('points', `${v.x},${v.y - 5} ${v.x},${v.y - gap + 2}`);
-      it.dot.setAttribute('cx', v.x);
-      it.dot.setAttribute('cy', v.y);
+      if (visible) vis.push({ it, v });
     } catch (e) {
       it.el.style.display = 'none'; it.line.style.display = 'none'; it.dot.style.display = 'none';
     }
+  }
+  if (!vis.length || !W || !H) return;
+  // 中心点：X は画面中央、Y は指摘箇所の重心
+  const C = { x: W / 2, y: vis.reduce((s, o) => s + o.v.y, 0) / vis.length };
+  const R = { l: BLUE_ZONE.l * W, r: BLUE_ZONE.r * W, t: BLUE_ZONE.t * H, b: BLUE_ZONE.b * H };
+  // 各ラベルの置き場所（放射線と青エリア境界の交点→外側へ少し押し出す）
+  for (const o of vis) {
+    const ex = rayExitRect(C, o.v, R) ?? { x: Math.min(Math.max(o.v.x, 8), W - 8), y: R.t, side: 'top' };
+    o.side = ex.side;
+    o.lx = ex.x; o.ly = ex.y;
+    const w = o.it.el.offsetWidth, h = o.it.el.offsetHeight;
+    if (ex.side === 'top') o.ly -= h / 2 + 4;
+    else if (ex.side === 'bottom') o.ly += h / 2 + 4;
+    else if (ex.side === 'left') o.lx -= w / 2 + 4;
+    else o.lx += w / 2 + 4;
+  }
+  // 同じ辺のラベル同士の重なりを解く（辺に沿ってずらす）
+  for (const side of ['top', 'bottom', 'left', 'right']) {
+    const g = vis.filter(o => o.side === side);
+    if (g.length < 2) continue;
+    const horiz = side === 'top' || side === 'bottom';
+    g.sort((a, b) => (horiz ? a.lx - b.lx : a.ly - b.ly));
+    for (let k = 1; k < g.length; k++) {
+      const prev = g[k - 1], cur = g[k];
+      const need = horiz
+        ? (prev.it.el.offsetWidth + cur.it.el.offsetWidth) / 2 + 6
+        : (prev.it.el.offsetHeight + cur.it.el.offsetHeight) / 2 + 5;
+      if (horiz) { if (cur.lx < prev.lx + need) cur.lx = prev.lx + need; }
+      else if (cur.ly < prev.ly + need) cur.ly = prev.ly + need;
+    }
+  }
+  // 画面内に収めて配置し、引き出し線を結ぶ
+  for (const o of vis) {
+    const { it, v } = o;
+    const w = it.el.offsetWidth, h = it.el.offsetHeight;
+    o.lx = Math.min(Math.max(o.lx, w / 2 + 6), W - w / 2 - 6);
+    o.ly = Math.min(Math.max(o.ly, h / 2 + 6), H - h / 2 - 6);
+    it.el.style.left = Math.floor(o.lx - w / 2) + 'px';
+    it.el.style.top = Math.floor(o.ly - h / 2) + 'px';
+    it.line.setAttribute('points', `${v.x},${v.y} ${o.lx},${o.ly}`);
+    it.dot.setAttribute('cx', v.x);
+    it.dot.setAttribute('cy', v.y);
   }
 }
 function enterOverview() {
