@@ -511,10 +511,6 @@ function nodeWorldBox(dbId) {
   } catch (e) {}
   return null;
 }
-function nodeWorldCenter(dbId) {
-  const b = nodeWorldBox(dbId);
-  return b ? { x: (b.min.x + b.max.x) / 2, y: (b.min.y + b.max.y) / 2, z: (b.min.z + b.max.z) / 2 } : null;
-}
 // 引き出し線の先端は、ハイライトされる部材そのものの中心にする。
 // ピンの保存座標は使わない：Forma で付けたピンの座標は、デモの Viewer のワールド座標と
 // 原点がずれた別空間で記録されていることが数値照合で判明したため（2026-11-16 調査。
