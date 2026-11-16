@@ -418,7 +418,7 @@ function scheduleCapture(i) {
 // ---- 指摘事項一覧をモデルに表示（一覧モード。Autodesk 公式 IconMarkupExtension サンプルの方式） ----
 // 該当要素を status 色でハイライトし、要素位置に title の HTML ラベルを重ねる。ラベルの位置は
 // カメラ変更などのイベントで worldToClient により更新する。ラベルをクリックすると詳細に表示する。
-let overviewOn = false;
+let overviewOn = true; // 既定で一覧モード ON（2026-11-16 ユーザー指示）
 const STATUS3D = { // 3D ハイライト色（表のステータス色に合わせる。pending だけ区別のため紫）
   draft: [0.54, 0.60, 0.66], open: [0.91, 0.64, 0.24], pending: [0.55, 0.36, 0.96],
   in_review: [0.23, 0.51, 0.77], closed: [0.30, 0.69, 0.49], void: [0.54, 0.60, 0.66],
@@ -606,6 +606,25 @@ function updateEdges() {
   try { viewer.setDisplayEdges(!streamingNow && !fadedMats); } catch (e) {}
 }
 
+// 材質の変更を描画へ反映させるための「再描画キック」。
+// LMV は材質プロパティを変えただけでは描画リストを作り直さず、画面が古いままに
+// なる（ローカル Viewer リグで実測：invalidate だけでは不変、カメラを動かすと
+// 初めて反映される）。同じ位置・注視点で setView すると描画リストが再構築され、
+// カメラは実質動かずに変更が反映される。
+let kickTimer = 0;
+function kickRender(immediate = false) {
+  if (!viewer) return;
+  const run = () => {
+    try {
+      const nav = viewer.navigation;
+      nav.setView(nav.getPosition(), nav.getTarget());
+    } catch (e) { try { viewer.impl.invalidate(false, true, false); } catch (e2) {} }
+  };
+  if (immediate) { run(); return; }
+  clearTimeout(kickTimer);
+  kickTimer = setTimeout(run, 120);
+}
+
 async function restoreContextFade() {
   if (fadedMats) {
     for (const [m, orig] of fadedMats) { m.transparent = orig.t; m.opacity = orig.o; m.depthWrite = orig.d; }
@@ -617,7 +636,7 @@ async function restoreContextFade() {
     fadedTargetFrags = null;
   }
   updateEdges();
-  if (viewer) viewer.impl.invalidate(false, true, false);
+  kickRender(true);
 }
 
 // keepDbIds 以外の部材を透明化する。keepDbIds が空なら何もしない。
@@ -629,6 +648,7 @@ async function restoreContextFade() {
 // 専用材質に付け替えてから周囲を書き換える（対象は元の見た目のまま残る）。
 async function applyContextFade(keepDbIds) {
   const run = ++fadeRunId;
+  try {
   await restoreContextFade();
   if (!viewer || !geoLoaded || !keepDbIds.length || contextTransparency <= 0) { updateEdges(); return; }
   const frags = viewer.model.getFragmentList();
@@ -642,9 +662,13 @@ async function applyContextFade(keepDbIds) {
   for (const fid of keepFrags) {
     const orig = frags.getMaterial(fid);
     if (!orig) continue;
-    if (!targetClones.has(orig)) targetClones.set(orig, orig.clone());
+    if (!targetClones.has(orig)) {
+      let c = orig;
+      try { c = orig.clone(); } catch (e) { /* 写しが作れない材質は保護なしで続行 */ }
+      targetClones.set(orig, c);
+    }
     fadedTargetFrags.set(fid, orig);
-    frags.setMaterial(fid, targetClones.get(orig));
+    try { frags.setMaterial(fid, targetClones.get(orig)); } catch (e) {}
   }
   fadedMats = new Map();
   const total = frags.getCount();
@@ -662,7 +686,11 @@ async function applyContextFade(keepDbIds) {
     if (end < total) await new Promise(r => setTimeout(r, 0));
   }
   updateEdges();
-  viewer.impl.invalidate(false, true, false);
+  kickRender(true);
+  } catch (e) {
+    console.error('透明化に失敗しました', e);
+    setStatV('透明化に失敗しました：' + esc(e?.message ?? e));
+  }
 }
 
 // スライダ変更時：書き換え済み材質の opacity だけを更新する（軽い）
@@ -670,7 +698,7 @@ function updateFadeOpacity() {
   if (!fadedMats) return;
   const opacity = 1 - contextTransparency / 100;
   for (const m of fadedMats.keys()) m.opacity = opacity;
-  if (viewer) viewer.impl.invalidate(false, true, false);
+  kickRender(); // デバウンスして反映（材質変更だけでは画面が変わらないため）
 }
 
 
@@ -767,7 +795,7 @@ function setupViewer(modelKey) {
   viewerModelKey = modelKey; rootLoaded = false; geoLoaded = false; fittedFor = null; fadedMats = null; fadedTargetFrags = null; streamingNow = true; fadeRunId++;
   viewer = new Autodesk.Viewing.GuiViewer3D($('viewerWrap'));
   viewer.start();
-  viewer.loadExtension('DemoToolbarExtension').catch(() => {});
+  viewer.loadExtension('DemoToolbarExtension').then(() => syncOverviewBtn()).catch(() => {});
   const updMarkers = () => { if (overviewOn) updateMarkers(); updateFocusPin(); };
   viewer.addEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, updMarkers);
   viewer.addEventListener(Autodesk.Viewing.ISOLATE_EVENT, updMarkers);
