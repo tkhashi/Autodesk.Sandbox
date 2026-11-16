@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- Autodesk.DataExchange 8.x は Windows 向け TFM のみ提供されるため net8.0-windows7.0 を指定する。
+         Linux 上では EnableWindowsTargeting によりビルド（コンパイル検証）まで可能。実行は Windows が必要。 -->
+    <TargetFramework>net8.0-windows7.0</TargetFramework>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Autodesk.DataExchange" Version="8.1.0" />
+  </ItemGroup>
+
+</Project>

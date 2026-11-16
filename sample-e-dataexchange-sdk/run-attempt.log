@@ -1,0 +1,19 @@
+Unhandled exception. System.IO.FileNotFoundException: netsh.exe not found
+File name: 'System32/netsh.exe'
+   at Autodesk.DataExchange.Authentication.ThreeLeggedAPI.AddCallBackAddressToMachine(String address)
+   at Autodesk.DataExchange.Authentication.ThreeLeggedAPI.StartHttpListener(String callbackUrl)
+   at Autodesk.DataExchange.Authentication.ThreeLeggedAPI.<StartAuthAsync>b__18_0()
+   at System.Threading.ExecutionContext.RunFromThreadPoolDispatchLoop(Thread threadPoolThread, ExecutionContext executionContext, ContextCallback callback, Object state)
+--- End of stack trace from previous location ---
+   at System.Threading.ExecutionContext.RunFromThreadPoolDispatchLoop(Thread threadPoolThread, ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+--- End of stack trace from previous location ---
+   at Autodesk.DataExchange.Authentication.ForgeAuthentication.GetToken(Boolean isForceRefresh)
+   at Autodesk.DataExchange.Authentication.Auth.GetAuthToken(Boolean isForceRefresh)
+   at Autodesk.DataExchange.Client.GetToken()
+   at Autodesk.DataExchange.Client.GetHashedUserId()
+   at Autodesk.DataExchange.Client.CreateDefaultFolders(String defaultPath)
+   at Autodesk.DataExchange.Client.Initialize()
+   at Autodesk.DataExchange.Client..ctor(SDKOptions sdkOptions)
+   at Program.<Main>$(String[] args) in /home/hatch/workspace/forma-hands-on/sample-e-dataexchange-sdk/Program.cs:line 51
+   at Program.<Main>(String[] args)
