@@ -4,9 +4,18 @@ Autodesk Forma（ACC）の Issue について、「同じ指摘がモデル更�
 
 ## app/ — 実アプリ v1
 
-実 Issue（Snowdon Towers）＋アプリ側スナップショット履歴＋実測 diff を表示する HTML/JS アプリ。
+実 Issue（Snowdon Towers）＋アプリ側スナップショット履歴＋実 API 取得の diff を表示する HTML/JS アプリ。
+**データは全て実行時に API から取得します（モックデータ・事前投入データは使いません）。**
+diff はアプリ自身が Model Properties API の index＋diff ジョブを実行して取得し、結果だけを
+実行時キャッシュ（`data/diff-cache/`、ジョブ実行日時つき）に保存します。
+差分は APS Viewer の 3D 表示（2版を集約ロードし、追加=緑／削除=赤ゴースト／変更=黄に色分け）で確認できます。
 起動は `cd app && node server.mjs`（http://localhost:3100）。前提・設計・API の詳細は `app/README.md` を参照。
 `.env` / `.token.json` / `data/`（実行時状態）はリポジトリに含めていない。
+
+### 実データの制約（app）
+
+- 対象プロジェクト（Snowdon Towers）の実 Issue はコメントが全件 0 件のため、実データのタイムラインは起票・モデル更新・スナップショットで検出した変化イベントが主になります。コメントが付いた Issue が現れれば自動的にタイムラインに表示されます。
+- ピン時点のサムネイル（Issues API の `snapshotUrn`）が取得できるのは実 Issue のうち 3 件のみです（2026-11-17 時点）。無い Issue ではタイムライン上の表示を省略します。
 
 ## 設計の要点（設計 v2）
 

@@ -155,6 +155,17 @@ async function buildTimeline() {
     `<span>起票: ${esc(i.createdByName ?? i.createdBy ?? '—')}</span>`,
     i.pin ? `<span>ピン: ${esc(i.pin.viewName ?? 'あり')}</span>` : '<span>ピンなし</span>',
   ].join('');
+  // ピン時点のサムネイル（Forma が Issue 作成時に保存したビュー画像）。
+  // snapshotUrn が無い Issue では表示自体を省略する（プレースホルダは出さない）
+  const tw = $('tlThumbWrap'), timg = $('tlThumb');
+  if (i.snapshotUrn) {
+    tw.hidden = false;
+    timg.onerror = () => { tw.hidden = true; };
+    timg.src = `/api/issues/${encodeURIComponent(i.id)}/thumbnail`;
+  } else {
+    tw.hidden = true;
+    timg.removeAttribute('src');
+  }
   const comments = await loadComments(i.id);
   const evs = [];
   evs.push({ t: i.createdAt, cls: 'open', html: `<b>起票</b> — ${esc(i.createdByName ?? '')} が Open` });
@@ -189,49 +200,20 @@ async function buildTimeline() {
   for (const b of $('tlBody').querySelectorAll('button.ev-row')) {
     b.addEventListener('click', () => {
       const e = evs[Number(b.dataset.ev)];
-      if (e?.pair) { selectedPair = { ...e.pair, version: e.version }; buildTimeline(); loadDiff(); updateViewerButton(); }
+      if (e?.pair) { selectedPair = { ...e.pair, version: e.version }; buildTimeline(); loadDiff(true); updateViewerButton(); }
     });
   }
 }
 
 // ============ 差分ビュー ============
+let diffMode = 'geometry';   // 3D 表示の「変更」の範囲: 'geometry'（形状のみ・既定）| 'all'（プロパティのみも含む）
+let diffGhostOld = true;     // 変更前の形状をゴースト表示するか
 function countsChips(stats, geom) {
   let s = `<span class="dc a">追加 ${stats.added}</span><span class="dc d">削除 ${stats.removed}</span><span class="dc c">変更 ${stats.modified}</span>`;
   if (geom) s += `<span class="dc g">うち形状シグナル 追加 ${geom.added}／削除 ${geom.removed}／変更 ${geom.modified}</span>`;
   return s;
 }
-function plotSVG(d) {
-  const np = d.nearPin;
-  if (!np || !np.rows.length) return '';
-  const rows = np.rows.slice(0, 120);
-  const cx = np.anchorCenter.x, cy = np.anchorCenter.y;
-  const R = 34; // 表示範囲（ft）
-  const W = 400, H = 260, scale = (W / 2) / R;
-  const X = v => W / 2 + (v - cx) * scale;
-  const Y = v => H / 2 - (v - cy) * scale;
-  const rect = (mn, mx, fill, stroke, dash) => {
-    if (!mn || !mx) return '';
-    const x = X(mn.x), y = Y(mx.y), w = Math.max(1.5, (mx.x - mn.x) * scale), h = Math.max(1.5, (mx.y - mn.y) * scale);
-    if (x > W || y > H || x + w < 0 || y + h < 0) return '';
-    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}" fill-opacity="0.55" stroke="${stroke}" stroke-width="1"${dash ? ' stroke-dasharray="3 2"' : ''}/>`;
-  };
-  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="ピン周辺の差分（上面図・bbox）">`;
-  s += `<rect x="0" y="0" width="${W}" height="${H}" fill="#fbfcfb"/>`;
-  s += `<circle cx="${W / 2}" cy="${H / 2}" r="${30 * scale}" fill="none" stroke="#b9c9d6" stroke-dasharray="4 3"/>`;
-  for (const r of rows) {
-    if (r.type === 'added') s += rect(r.bboxMin, r.bboxMax, '#1e9e57', '#1e9e57');
-    else if (r.type === 'removed') s += rect(r.prevBboxMin, r.prevBboxMax, '#d43a2f', '#d43a2f', true);
-    else {
-      s += rect(r.prevBboxMin, r.prevBboxMax, 'none', '#b8860b', true);
-      s += rect(r.bboxMin, r.bboxMax, '#b8860b', '#b8860b');
-    }
-  }
-  if (np.anchorBbox) s += rect(np.anchorBbox.min, np.anchorBbox.max, 'none', '#b91c1c');
-  s += `<circle cx="${W / 2}" cy="${H / 2}" r="4" fill="#b91c1c" stroke="#fff" stroke-width="1.5"/>`;
-  s += `<text x="${W / 2 + 8}" y="${H / 2 - 8}" font-size="11" font-weight="700" fill="#b91c1c">対象要素</text>`;
-  return s + '</svg>';
-}
-async function loadDiff() {
+async function loadDiff(auto3d) {
   const i = issue();
   if (!i || !selectedPair) {
     $('diffTitle').textContent = '差分ビュー';
@@ -248,7 +230,7 @@ async function loadDiff() {
     d = await r.json();
     if (r.status === 202) {
       $('diffBody').innerHTML = `<div class="diff-empty">実 API で diff ジョブを実行中です（${esc(d.status ?? '')}）。10 秒後に自動で再取得します。</div>`;
-      setTimeout(() => { if (selectedPair && selectedPair.from === from && selectedPair.to === to) loadDiff(); }, 10000);
+      setTimeout(() => { if (selectedPair && selectedPair.from === from && selectedPair.to === to) loadDiff(auto3d); }, 10000);
       return;
     }
     if (!r.ok) throw new Error(d.error ?? ('HTTP ' + r.status));
@@ -269,21 +251,55 @@ async function loadDiff() {
     }).join('');
     side = `
       <p class="diff-near">ピン周辺（対象要素「${esc(np.anchorName ?? '')}」の中心から水平 ${np.radiusFt}ft／上下 ±${np.dzFt}ft）: 追加 ${np.counts.added}／削除 ${np.counts.removed}／変更 ${np.counts.modified} 件（bbox を持つ行のみ）</p>
-      <div class="legend"><span><i class="la"></i>追加</span><span><i class="ld"></i>削除（旧位置）</span><span><i class="lc"></i>変更</span></div>
       <ul>${listItems || '<li>周辺に bbox を持つ変更はありません</li>'}</ul>
       ${np.rowsTruncated ? `<p class="diff-note">周辺 ${np.rowsTotal} 件中、形状シグナルのある行を優先して ${np.rows.length} 件まで表示しています。</p>` : ''}
       <p class="diff-note">「変更」件数には Revit の再保存に伴うプロパティ表記の揺れ（ロケール差など）が大量に含まれます。実際に形が変わった目安は「形状シグナル」（形状ハッシュ変化・bbox 移動）の件数です。近傍の判定はヒューリスティクスであり、この Issue の修正そのものとは限りません。</p>`;
   }
-  $('diffBody').innerHTML = `<div class="diff-body"><div class="diff-flex">
-    <div class="plan-box"><header><span>V${from} → V${to}（上面図・bbox）</span><span>${d.source === 'seed' ? '実測キャッシュ' : d.source}</span></header>${plotSVG(d) || '<div class="diff-empty">描画できる周辺要素がありません</div>'}</div>
+  if (d.jobRunAt) side += `<p class="diff-note">diff データはこのアプリが ${esc(fmtDateTime(d.jobRunAt))} に Model Properties API のジョブで取得しました。</p>`;
+  $('diffBody').innerHTML = `<div class="diff-body">
+    <div class="diff-controls">
+      <div class="dc-group" role="group" aria-label="3D表示の対象">
+        <span class="dc-label">3D表示の「変更」:</span>
+        <button type="button" class="dc-btn${diffMode === 'geometry' ? ' active' : ''}" data-dmode="geometry">形状が変わったもののみ（既定）</button>
+        <button type="button" class="dc-btn${diffMode === 'all' ? ' active' : ''}" data-dmode="all">プロパティのみの変更も含める</button>
+      </div>
+      <label class="dc-check"><input type="checkbox" id="diffGhostOld" ${diffGhostOld ? 'checked' : ''}> 変更前の形状をゴースト表示</label>
+      <button type="button" class="btn primary" id="btnDiff3d">差分を 3D で表示</button>
+      <span class="dc-status" id="diff3dStatus"></span>
+    </div>
+    <div class="legend"><span><i class="la"></i>追加（新版のみ・緑）</span><span><i class="ld"></i>削除（旧版のみ・赤ゴースト）</span><span><i class="lc"></i>変更（新版・黄／旧版はゴースト）</span><span>変更なしは新版のみ表示</span></div>
     <div class="diff-side">${side}</div>
-  </div></div>`;
+  </div>`;
+  for (const b of $('diffBody').querySelectorAll('[data-dmode]')) {
+    b.addEventListener('click', () => {
+      if (diffMode === b.dataset.dmode) return;
+      diffMode = b.dataset.dmode;
+      for (const x of $('diffBody').querySelectorAll('[data-dmode]')) x.classList.toggle('active', x.dataset.dmode === diffMode);
+      reapplyDiff3D();
+    });
+  }
+  $('diffGhostOld').addEventListener('change', () => { diffGhostOld = $('diffGhostOld').checked; reapplyDiff3D(); });
+  $('btnDiff3d').addEventListener('click', () => showDiff3D());
+  if (auto3d) showDiff3D();
 }
 
-// ============ APS Viewer（sample-d の初期化を移植。CDN 不達の環境では注記のみ） ============
+// ============ APS Viewer による 3D 差分表示（sample-d の初期化を移植。CDN 不達の環境では注記のみ） ============
+// 版ペアの2モデルを1つの Viewer に集約ロードし、diff の要素リストで表示を振り分ける:
+//   変更なし: 新版のみ（旧版の同要素は隠す）／追加: 新版のみ・緑／削除: 旧版のみ・赤ゴースト
+//   変更: 新版・黄、旧版はトグルでゴースト
+// 要素の対応付けは diff 行の externalId → Viewer の dbId（モデルの externalId マッピング）で行う。
 let viewer = null, viewerInitStarted = false;
+const diffModelByVersion = new Map(); // versionNumber -> model（読み込み済みは再利用する）
+let diffPairShown = null;             // { from, to } 3D 差分を表示中のペア
+let diffElements = null;              // /api/diff/elements の応答（現在のモード）
+let diffBusy = false;
 function updateViewerButton() {
   $('btnViewer').disabled = !(issue() && selectedPair);
+}
+function diffStatus(msg) {
+  const el = $('diff3dStatus');
+  if (el) el.textContent = msg;
+  $('viewerNote').textContent = msg;
 }
 function focusPin() {
   const i = issue();
@@ -297,39 +313,153 @@ function focusPin() {
     viewer.navigation.setView(pos, tgt);
   } catch (e) { /* フィット失敗は致命的ではない */ }
 }
-function openViewer() {
-  const i = issue();
-  if (!i || !selectedPair) return;
-  const ver = DATA.versions.find(v => v.versionNumber === selectedPair.version);
-  if (!ver) return;
-  if (!window.Autodesk?.Viewing) {
-    $('viewerNote').textContent = 'Viewer の CDN に到達できないため、この環境では 3D を表示できません（実機ブラウザで開いてください）。';
-    return;
-  }
-  $('viewerNote').textContent = `V${ver.versionNumber} を読み込み中…`;
-  const start = () => {
-    Autodesk.Viewing.Document.load('urn:' + ver.derivativeUrn, (doc) => {
-      viewer.loadDocumentNode(doc, doc.getRoot().getDefaultGeometry()).then(() => {
-        $('viewerNote').textContent = `V${ver.versionNumber} を表示中${i.pin ? '（ピン位置にフィット）' : ''}`;
-        focusPin();
-      }).catch(e => { $('viewerNote').textContent = 'モデルの読み込みに失敗しました: ' + e; });
-    }, (code, msg) => { $('viewerNote').textContent = `ドキュメントの読み込みに失敗しました（${code}）`; });
-  };
-  if (viewer) { start(); return; }
-  if (viewerInitStarted) return;
-  viewerInitStarted = true;
-  const options = {
-    env: 'AutodeskProduction', api: 'derivativeV2',
-    getAccessToken: async (cb) => {
-      const t = await (await fetch('/api/token')).json();
-      cb(t.access_token, t.expires_in);
-    },
-  };
-  Autodesk.Viewing.Initializer(options, () => {
-    viewer = new Autodesk.Viewing.GuiViewer3D($('viewerEl'));
-    viewer.start();
-    start();
+function ensureViewer() {
+  return new Promise((resolve, reject) => {
+    if (viewer) return resolve(viewer);
+    if (!window.Autodesk?.Viewing) {
+      return reject(new Error('Viewer の CDN に到達できないため、この環境では 3D を表示できません（実機ブラウザで開いてください）'));
+    }
+    if (viewerInitStarted) { // 初期化の完了待ち
+      const iv = setInterval(() => { if (viewer) { clearInterval(iv); resolve(viewer); } }, 300);
+      setTimeout(() => { clearInterval(iv); if (!viewer) reject(new Error('Viewer の初期化がタイムアウトしました')); }, 30000);
+      return;
+    }
+    viewerInitStarted = true;
+    const options = {
+      env: 'AutodeskProduction', api: 'derivativeV2',
+      getAccessToken: async (cb) => {
+        const t = await (await fetch('/api/token')).json();
+        cb(t.access_token, t.expires_in);
+      },
+    };
+    Autodesk.Viewing.Initializer(options, () => {
+      viewer = new Autodesk.Viewing.GuiViewer3D($('viewerEl'));
+      viewer.start();
+      resolve(viewer);
+    });
   });
+}
+function waitGeometry(model) {
+  return new Promise(resolve => {
+    let tree = null;
+    try { tree = model.getInstanceTree(); } catch (e) {}
+    if (tree) return resolve();
+    const onGeo = (e) => {
+      if (e.model === model) { viewer.removeEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, onGeo); resolve(); }
+    };
+    viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, onGeo);
+    setTimeout(() => { viewer.removeEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, onGeo); resolve(); }, 90000);
+  });
+}
+function loadVersionModel(vnum) {
+  if (diffModelByVersion.has(vnum)) return Promise.resolve(diffModelByVersion.get(vnum));
+  const ver = DATA.versions.find(v => v.versionNumber === vnum);
+  if (!ver) return Promise.reject(new Error('版 V' + vnum + ' が見つかりません'));
+  return new Promise((resolve, reject) => {
+    Autodesk.Viewing.Document.load('urn:' + ver.derivativeUrn, (doc) => {
+      // keepCurrentModels: もう一方の版を残したまま集約ロードする
+      viewer.loadDocumentNode(doc, doc.getRoot().getDefaultGeometry(), { keepCurrentModels: true })
+        .then(model => { diffModelByVersion.set(vnum, model); waitGeometry(model).then(() => resolve(model)); })
+        .catch(reject);
+    }, (code) => reject(new Error(`V${vnum} のドキュメント読み込みに失敗しました（${code}）`)));
+  });
+}
+function extMapping(model) { // externalId -> dbId（モデルごと）
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const ok = m => { if (!done) { done = true; resolve(m ?? {}); } };
+    const ng = e => { if (!done) { done = true; reject(e instanceof Error ? e : new Error('externalId マッピングの取得に失敗しました')); } };
+    try {
+      const r = model.getExternalIdMapping(ok, ng);
+      if (r && typeof r.then === 'function') r.then(ok, ng);
+    } catch (e) { ng(e); }
+  });
+}
+function allDbIds(model) {
+  const tree = model.getInstanceTree();
+  if (!tree) return [];
+  const ids = [];
+  const walk = (id) => { ids.push(id); tree.enumNodeChildren(id, c => walk(c)); };
+  walk(tree.getRootId());
+  return ids;
+}
+async function fetchDiffElements() {
+  const { from, to } = selectedPair;
+  for (let n = 0; n < 90; n++) {
+    const r = await fetch(`/api/diff/elements?from=${from}&to=${to}&mode=${diffMode}`);
+    const d = await r.json();
+    if (r.status === 202) {
+      diffStatus(`diff ジョブ実行中です（${d.status ?? ''}）。完了を待っています…`);
+      await new Promise(s => setTimeout(s, 10000));
+      if (!selectedPair || selectedPair.from !== from || selectedPair.to !== to) throw new Error('ペアが切り替わりました');
+      continue;
+    }
+    if (!r.ok) throw new Error(d.error ?? ('HTTP ' + r.status));
+    diffElements = d;
+    return d;
+  }
+  throw new Error('diff ジョブが時間内に完了しませんでした');
+}
+async function applyDiffClassification() {
+  const fromM = diffModelByVersion.get(selectedPair.from);
+  const toM = diffModelByVersion.get(selectedPair.to);
+  if (!fromM || !toM || !diffElements) return;
+  const THREE = window.THREE;
+  if (!THREE) return;
+  const V4 = (r, g, b, a) => new THREE.Vector4(r, g, b, a);
+  const [mapFrom, mapTo] = await Promise.all([extMapping(fromM), extMapping(toM)]);
+  const dbOf = (map, e) => { const db = map[e.externalId]; return db != null ? db : null; };
+  // 旧版: 削除（＋トグル時は変更の旧形状）だけを残し、残りは全て隠す
+  const removedDb = diffElements.removed.map(e => dbOf(mapFrom, e)).filter(db => db != null);
+  const changedFromDb = diffElements.changed.map(e => dbOf(mapFrom, e)).filter(db => db != null);
+  const keepFrom = diffGhostOld ? [...removedDb, ...changedFromDb] : [...removedDb];
+  try { viewer.clearThemingColors(fromM); } catch (e) {}
+  try {
+    if (keepFrom.length) viewer.isolate(keepFrom, fromM);
+    else viewer.hide(allDbIds(fromM), fromM);
+  } catch (e) {}
+  for (const db of removedDb) { try { viewer.setThemingColor(db, V4(0.85, 0.16, 0.1, 0.45), fromM); } catch (e) {} }
+  if (diffGhostOld) for (const db of changedFromDb) { try { viewer.setThemingColor(db, V4(0.9, 0.7, 0.15, 0.35), fromM); } catch (e) {} }
+  // 新版: 追加=緑、変更=黄（変更なし・追加・変更はそのまま表示）
+  try { viewer.clearThemingColors(toM); } catch (e) {}
+  for (const e of diffElements.added) { const db = dbOf(mapTo, e); if (db != null) { try { viewer.setThemingColor(db, V4(0.1, 0.65, 0.3, 1), toM); } catch (err) {} } }
+  for (const e of diffElements.changed) { const db = dbOf(mapTo, e); if (db != null) { try { viewer.setThemingColor(db, V4(0.95, 0.72, 0.08, 1), toM); } catch (err) {} } }
+  // ピン対象要素があればそこへフィット（無ければピン座標へ）
+  const i = issue();
+  let fitted = false;
+  const ext = i?.pin?.externalId;
+  if (ext) {
+    if (mapTo[ext] != null) { try { viewer.fitToView([mapTo[ext]], toM); fitted = true; } catch (e) {} }
+    else if (mapFrom[ext] != null) { try { viewer.fitToView([mapFrom[ext]], fromM); fitted = true; } catch (e) {} }
+  }
+  if (!fitted) focusPin();
+  diffStatus(`3D 差分を表示中: V${selectedPair.from} → V${selectedPair.to}（追加 ${diffElements.counts.added}／削除 ${diffElements.counts.removed}／変更 ${diffElements.counts.changed}${diffMode === 'geometry' ? '・形状のみ' : '・プロパティのみ含む'}）`);
+}
+async function showDiff3D() {
+  if (!issue() || !selectedPair || diffBusy) return;
+  diffBusy = true;
+  try {
+    await ensureViewer();
+    const { from, to } = selectedPair;
+    // このペアに不要な版のモデルは破棄し、必要な2版は読み込み済みを再利用する
+    for (const [v, m] of [...diffModelByVersion]) {
+      if (v !== from && v !== to) { try { viewer.unloadModel(m); } catch (e) {} diffModelByVersion.delete(v); }
+    }
+    if (!diffModelByVersion.has(from)) { diffStatus(`V${from}（旧版）を読み込み中…`); await loadVersionModel(from); }
+    if (!diffModelByVersion.has(to)) { diffStatus(`V${to}（新版）を読み込み中…`); await loadVersionModel(to); }
+    diffPairShown = { from, to };
+    diffStatus('要素リストを取得中…');
+    await fetchDiffElements();
+    await applyDiffClassification();
+  } catch (e) {
+    diffStatus('3D 差分を表示できませんでした: ' + e.message);
+  } finally { diffBusy = false; }
+}
+function reapplyDiff3D() {
+  // モード／ゴーストの切替: 表示中のペアが現在の選択と同じなら、モデルは再利用して分類だけやり直す
+  if (diffPairShown && selectedPair && diffPairShown.from === selectedPair.from && diffPairShown.to === selectedPair.to) {
+    showDiff3D();
+  }
 }
 
 // ============ 選択・初期化 ============
@@ -357,7 +487,7 @@ $('fltQ').addEventListener('input', () => { flt.q = $('fltQ').value.trim(); flt.
 $('pageSize').addEventListener('change', () => { flt.pageSize = Number($('pageSize').value); flt.page = 1; buildTable(); });
 $('btnPrev').addEventListener('click', () => { if (flt.page > 1) { flt.page--; buildTable(); } });
 $('btnNext').addEventListener('click', () => { flt.page++; buildTable(); });
-$('btnViewer').addEventListener('click', openViewer);
+$('btnViewer').addEventListener('click', () => showDiff3D());
 $('btnRefresh').addEventListener('click', async () => {
   $('btnRefresh').disabled = true;
   try {

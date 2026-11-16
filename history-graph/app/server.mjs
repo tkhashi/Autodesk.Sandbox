@@ -1,12 +1,13 @@
 // server.mjs — 履歴グラフ実アプリ v1: 実 Issue（APS Issues API）＋アプリ側スナップショット履歴
-//             ＋ モデル版一覧（DM API）＋ Model Properties Diff（種キャッシュ／実 API ジョブ）
+//             ＋ モデル版一覧（DM API）＋ Model Properties Diff（実行時に実 API ジョブで取得）
 // 起動: node server.mjs（.env に APS_CLIENT_ID / APS_CLIENT_SECRET、.token.json に 3-legged トークンが必要。
 //       認証情報の探索順: ①アプリ自身のフォルダ ②clone 配置で隣の sample-d（../../sample-d-issues-3d）
 //       ③ワークスペース内の demo-issues-3d/app と sample-a-http-client。どれにも無ければ案内を出して終了する）
 //
+// データは全て実行時に API から取得する（事前投入データは使わない）。
 // アプリ側で持つ状態は data/ のみ:
 //   data/snapshots.json — Issue の status／担当者のスナップショットと変化イベント（追記型）
-//   data/diff-cache/    — 種キャッシュに無い版ペアの diff を実 API で実行した結果の正規化キャッシュ
+//   data/diff-cache/    — このアプリ自身が実 API ジョブで取得した diff 結果のキャッシュ（出所＝ジョブ実行日時つき）
 // 現在値は常に Forma から取得する（このアプリは「履歴の記録者」であり、状態の管理者ではない）。
 import http from 'node:http';
 import fs from 'node:fs';
@@ -19,7 +20,6 @@ import { fileURLToPath } from 'node:url';
 const root = path.dirname(fileURLToPath(import.meta.url));
 const pub = path.join(root, 'public');
 const dataDir = path.join(root, 'data');
-const seedDir = path.join(root, 'seed');
 const diffCacheDir = path.join(dataDir, 'diff-cache');
 fs.mkdirSync(diffCacheDir, { recursive: true });
 const BASE = 'https://developer.api.autodesk.com';
@@ -184,6 +184,7 @@ function enrichIssue(issue, types, users) {
     openedAt: issue.openedAt ?? null,
     typeLabel: st ? `${st.typeTitle} > ${st.subtypeTitle}` : null,
     commentCount: issue.commentCount ?? 0, attachmentCount: issue.attachmentCount ?? 0,
+    snapshotUrn: issue.snapshotUrn ?? null, snapshotHasMarkups: issue.snapshotHasMarkups ?? false,
     pin: null,
   };
   const ld = (issue.linkedDocuments ?? [])[0];
@@ -228,6 +229,27 @@ async function fetchComments(issueId) {
     createdBy: c.createdBy ?? null,
     createdByName: c.createdBy ? (users.get(c.createdBy) ?? null) : null,
   })).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+}
+
+// ============ Issue サムネイル（ピン時点のスナップショット画像。sample-d から移植） ============
+// Issues API の issue.snapshotUrn（OSS オブジェクト）を、署名付き S3 URL 経由で取得する。
+// snapshotUrn が無い Issue（API 経由で作ったピン等、Forma 側で画像が生成されていないもの）には画像が存在しない。
+const snapImgCache = new Map();
+async function getSnapshotImage(urn) {
+  if (!snapImgCache.has(urn)) {
+    const rest = urn.slice('urn:adsk.objects:os.object:'.length);
+    const slash = rest.indexOf('/');
+    const bucket = rest.slice(0, slash), object = rest.slice(slash + 1);
+    const t = await getToken3();
+    const sr = await fetch(`${BASE}/oss/v2/buckets/${bucket}/objects/${encodeURIComponent(object)}/signeds3download`, { headers: { Authorization: 'Bearer ' + t } });
+    if (!sr.ok) throw new Error('snapshot sign failed: ' + sr.status);
+    const r = await fetch((await sr.json()).url);
+    if (!r.ok) throw new Error('snapshot download failed: ' + r.status);
+    const s3type = r.headers.get('content-type') ?? '';
+    const type = s3type.startsWith('image/') ? s3type : (object.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg');
+    snapImgCache.set(urn, { buf: Buffer.from(await r.arrayBuffer()), type });
+  }
+  return snapImgCache.get(urn);
 }
 
 // ============ モデル版一覧（DM API） ============
@@ -315,14 +337,14 @@ function buildHistory(issue, snap, versions) {
   return { events, modelUpdates, stats: { closeCount, reopenCount, modelUpdateCount: modelUpdates.length } };
 }
 
-// ============ Diff（種キャッシュ → 実行時キャッシュ → 実 API ジョブ） ============
+// ============ Diff（実行時キャッシュ → 実 API ジョブ） ============
+// 実行時キャッシュは「このアプリ自身が実 API ジョブで取得した結果」だけを保存する（format 2、
+// ジョブ実行日時つき）。事前に用意されたダンプファイル等を読む経路は持たない。
 function loadDiffCache(from, to) {
-  for (const f of [path.join(seedDir, `diff-${from}-${to}.json`), path.join(diffCacheDir, `diff-${from}-${to}.json`)]) {
-    try {
-      const d = JSON.parse(fs.readFileSync(f, 'utf8'));
-      return { ...d, source: f.startsWith(seedDir) ? 'seed' : 'cache' };
-    } catch (e) {}
-  }
+  try {
+    const d = JSON.parse(fs.readFileSync(path.join(diffCacheDir, `diff-${from}-${to}.json`), 'utf8'));
+    if (d && d.format === 2 && d.source === 'live') return d;
+  } catch (e) {}
   return null;
 }
 const TYPE_MAP = { OBJECT_ADDED: 'added', OBJECT_REMOVED: 'removed', OBJECT_CHANGED: 'modified' };
@@ -339,13 +361,22 @@ function normalizeLiveRows(rows, fieldsText) {
   }
   const bboxRows = [];
   const byCategory = {};
+  const elements = { added: [], removed: [], modified: [] }; // 3D 差分表示用の全要素リスト（bbox の有無によらない）
   for (const r of rows) {
     const type = TYPE_MAP[r.type] ?? r.type;
     const cur = r.props ?? {}, prev = r.prev?.props ?? {};
     const category = cur[catKey] ?? prev[catKey] ?? null;
+    const name = cur[nameKey] ?? prev[nameKey] ?? null;
     if (category) {
       byCategory[category] ??= { added: 0, removed: 0, modified: 0 };
       if (byCategory[category][type] !== undefined) byCategory[category][type]++;
+    }
+    const entry = { externalId: r.externalId ?? null, svf2Id: r.svf2Id ?? null, name };
+    if (type === 'added') elements.added.push(entry);
+    else if (type === 'removed') elements.removed.push(entry);
+    else if (type === 'modified') {
+      const geomChanged = !!(r.geomHash && r.prev?.geomHash && r.geomHash !== r.prev.geomHash);
+      elements.modified.push({ ...entry, geomChanged, moved: isMoved(r) });
     }
     if (!r.bboxMin && !r.prev?.bboxMin) continue;
     let changedProps = [];
@@ -360,14 +391,14 @@ function normalizeLiveRows(rows, fieldsText) {
       changedProps = [...new Set(changedProps)].slice(0, 12);
     }
     bboxRows.push({
-      type, externalId: r.externalId ?? null, name: cur[nameKey] ?? prev[nameKey] ?? null, category,
+      type, externalId: r.externalId ?? null, name, category,
       bboxMin: r.bboxMin ?? null, bboxMax: r.bboxMax ?? null,
       prevBboxMin: r.prev?.bboxMin ?? null, prevBboxMax: r.prev?.bboxMax ?? null,
       geomChanged: !!(r.geomHash && r.prev?.geomHash && r.geomHash !== r.prev.geomHash),
       changedProps,
     });
   }
-  return { bboxRows, byCategory };
+  return { bboxRows, byCategory, elements };
 }
 // 実 API の index + diff ジョブ（research/diff-generic.mjs から移植。非同期に進め、状態を diffJobs に持つ）
 const diffJobs = new Map();
@@ -439,10 +470,10 @@ async function runLiveDiff(from, to) {
       for (const line of text.split('\n')) if (line.trim()) rows.push(JSON.parse(line));
       if (!text.trim()) { emptyStreak++; if (emptyStreak >= 2 && a > 36000) break; } else emptyStreak = 0;
     }
-    const { bboxRows, byCategory } = normalizeLiveRows(rows, fieldsText);
+    const { bboxRows, byCategory, elements } = normalizeLiveRows(rows, fieldsText);
     const out = {
-      from, to, source: 'live', stats, totalRows: rows.length,
-      bboxRowCount: bboxRows.length, byCategory, bboxRows,
+      format: 2, from, to, source: 'live', jobRunAt: new Date().toISOString(), stats, totalRows: rows.length,
+      bboxRowCount: bboxRows.length, byCategory, bboxRows, elements,
     };
     fs.writeFileSync(path.join(diffCacheDir, `diff-${from}-${to}.json`), JSON.stringify(out));
     job.state = 'ready';
@@ -472,11 +503,8 @@ function findPinAnchor(issue, primaryDiff) {
   };
   const a = fromRow(primaryDiff);
   if (a) return a;
-  // 対象要素がこのペアの diff に現れない（無変更）場合は、他のペアの実測 bbox で代用する
-  for (const f of fs.readdirSync(seedDir)) {
-    if (!f.startsWith('diff-')) continue;
-    try { const a2 = fromRow(JSON.parse(fs.readFileSync(path.join(seedDir, f), 'utf8'))); if (a2) return a2; } catch (e) {}
-  }
+  // 対象要素がこのペアの diff に現れない（無変更）場合は、このアプリが取得済みの
+  // 他ペアの diff（実行時キャッシュ）の bbox で代用する
   for (const f of fs.readdirSync(diffCacheDir)) {
     if (!f.startsWith('diff-')) continue;
     try { const a3 = fromRow(JSON.parse(fs.readFileSync(path.join(diffCacheDir, f), 'utf8'))); if (a3) return a3; } catch (e) {}
@@ -513,6 +541,23 @@ function nearPinRows(diff, anchor) {
   };
 }
 
+// diff が実行時キャッシュにあればそれを返し、無ければ実 API ジョブを開始（または継続）して状態を返す
+function getDiffOrStart(from, to) {
+  const diff = loadDiffCache(from, to);
+  if (diff) return { diff };
+  const key = `${from}-${to}`;
+  const job = diffJobs.get(key);
+  if (!job) { runLiveDiff(from, to).catch(() => {}); return { status: 'indexing' }; }
+  if (job.state === 'failed') { // 失敗していたら再試行する
+    const error = job.error;
+    runLiveDiff(from, to).catch(() => {});
+    return { status: 'indexing', error };
+  }
+  if (job.state !== 'ready') return { status: job.state };
+  const d2 = loadDiffCache(from, to);
+  return d2 ? { diff: d2 } : { status: 'dumping' };
+}
+
 // ============ HTTP ルーティング ============
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -539,6 +584,17 @@ const server = http.createServer(async (req, res) => {
       const comments = await fetchComments(decodeURIComponent(cm[1]));
       return sendJson(res, 200, { comments });
     }
+    const tm = url.pathname.match(/^\/api\/issues\/([^/]+)\/thumbnail$/);
+    if (tm) {
+      // ピン時点のサムネイル（issue.snapshotUrn）をサーバ側でプロキシ配信する。
+      // snapshotUrn が無い Issue には画像が存在しないので 404（画面側は表示自体を省略する）
+      const issues = await fetchIssues();
+      const issue = issues.find(i => i.id === decodeURIComponent(tm[1]));
+      if (!issue?.snapshotUrn) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('no thumbnail'); }
+      const img = await getSnapshotImage(issue.snapshotUrn);
+      res.writeHead(200, { 'Content-Type': img.type, 'Cache-Control': 'max-age=3600' });
+      return res.end(img.buf);
+    }
     if (url.pathname === '/api/versions') {
       const versions = await fetchVersions();
       return sendJson(res, 200, { model: ARCH.name, versions });
@@ -554,18 +610,11 @@ const server = http.createServer(async (req, res) => {
       if (!Number.isInteger(from) || !Number.isInteger(to) || from === to) {
         return sendJson(res, 400, { error: 'from / to には異なる版番号が必要です' });
       }
-      let diff = loadDiffCache(from, to);
-      if (!diff) {
-        const key = `${from}-${to}`;
-        const job = diffJobs.get(key);
-        if (!job || job.state === 'failed') {
-          if (!job) runLiveDiff(from, to).catch(() => {});
-          return sendJson(res, 202, { status: job?.state ?? 'indexing', from, to, error: job?.error ?? null, note: '実 API で diff ジョブを実行中です。しばらくして再取得してください' });
-        }
-        if (job.state !== 'ready') return sendJson(res, 202, { status: job.state, from, to });
-        diff = loadDiffCache(from, to);
-        if (!diff) return sendJson(res, 202, { status: 'dumping', from, to });
+      const got = getDiffOrStart(from, to);
+      if (!got.diff) {
+        return sendJson(res, 202, { status: got.status, from, to, error: got.error ?? null, note: '実 API で diff ジョブを実行中です。しばらくして再取得してください' });
       }
+      const diff = got.diff;
       let nearPin = null, pinNote = null;
       if (issueId) {
         const issues = await fetchIssues();
@@ -579,9 +628,33 @@ const server = http.createServer(async (req, res) => {
         }
       }
       return sendJson(res, 200, {
-        from, to, source: diff.source, stats: diff.stats,
+        from, to, source: diff.source, jobRunAt: diff.jobRunAt ?? null, stats: diff.stats,
         totalRows: diff.totalRows, bboxRowCount: diff.bboxRowCount,
         byCategory: diff.byCategory, nearPin, pinNote,
+      });
+    }
+    if (url.pathname === '/api/diff/elements') {
+      // 3D 差分表示用の要素 ID リスト（ライブ diff ジョブの結果からのみ組み立てる）
+      // mode=geometry（既定）: 「変更」は形状シグナル（geomHash 変化・bbox 移動）のある要素のみ。
+      //   「変更」の生件数はロケールノイズが支配的（V1→V2 で 34,718 件）なため、既定では形状分だけに絞る。
+      // mode=all: プロパティのみの変更を含む全「変更」。
+      const from = Number(url.searchParams.get('from'));
+      const to = Number(url.searchParams.get('to'));
+      const mode = url.searchParams.get('mode') === 'all' ? 'all' : 'geometry';
+      if (!Number.isInteger(from) || !Number.isInteger(to) || from === to) {
+        return sendJson(res, 400, { error: 'from / to には異なる版番号が必要です' });
+      }
+      const got = getDiffOrStart(from, to);
+      if (!got.diff) {
+        return sendJson(res, 202, { status: got.status, from, to, error: got.error ?? null, note: '実 API で diff ジョブを実行中です。しばらくして再取得してください' });
+      }
+      const diff = got.diff;
+      const el = diff.elements ?? { added: [], removed: [], modified: [] };
+      const changed = mode === 'all' ? el.modified : el.modified.filter(e => e.geomChanged || e.moved);
+      return sendJson(res, 200, {
+        from, to, mode, source: diff.source, jobRunAt: diff.jobRunAt ?? null, stats: diff.stats,
+        counts: { added: el.added.length, removed: el.removed.length, changed: changed.length, modifiedTotal: el.modified.length },
+        added: el.added, removed: el.removed, changed,
       });
     }
   } catch (e) {
