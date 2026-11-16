@@ -35,6 +35,8 @@ const PROP_LABELS = {
   'Family Name': 'ファミリ名', 'Length': '長さ', 'Area': '面積', 'Volume': '体積', 'Elevation from Level': 'レベルからの標高',
 };
 let COLUMNS = [];
+let sortCol = null;
+try { sortCol = JSON.parse(localStorage.getItem('sampled-sort') ?? 'null'); } catch (e) { sortCol = null; }
 let visibleCols = new Set(JSON.parse(localStorage.getItem(LS_COLS) ?? 'null') ?? ['title', 'status', 'type', 'assignee', 'due', 'start', 'placement']);
 function buildColumns() {
   const cols = [
@@ -111,6 +113,32 @@ $('pageSize').value = String(PAGE_SIZE);
 $('pageSize').addEventListener('change', () => { PAGE_SIZE = Number($('pageSize').value); localStorage.setItem(LS_PAGE, String(PAGE_SIZE)); page = 1; buildTable(); });
 let page = 1;
 const flt = { q: '', status: 'all', sort: 'id' };
+// 列ヘッダクリック用の汎用ソート：数値・日付・文字列（日本語、数値混じり対応）。
+// 空値（''／'—'／null）は昇順・降順どちらでも常に最後。
+function sortByColumn(list, col, dir) {
+  const val = (i) => {
+    try {
+      let v = col.get(i);
+      if (col.id === 'status') v = FSTATUS[v]?.[0] ?? v;
+      return v;
+    } catch (e) { return null; }
+  };
+  return list.sort((x, y) => {
+    const a = val(x), b = val(y);
+    const ea = a == null || a === '' || a === '—' || a === '-';
+    const eb = b == null || b === '' || b === '—' || b === '-';
+    if (ea || eb) return ea === eb ? 0 : ea ? 1 : -1;
+    let c;
+    if (typeof a === 'number' && typeof b === 'number') c = a - b;
+    else {
+      const sa = String(a), sb = String(b);
+      const na = parseFloat(sa.replace(/,/g, '')), nb = parseFloat(sb.replace(/,/g, ''));
+      if (!Number.isNaN(na) && !Number.isNaN(nb) && /^[\d.,\s+\-/]+/.test(sa) && /^[\d.,\s+\-/]+/.test(sb)) c = na - nb;
+      else c = sa.localeCompare(sb, 'ja', { numeric: true });
+    }
+    return c * dir;
+  });
+}
 function visibleIssues() {
   const q = flt.q.trim().toLowerCase();
   const list = DATA.issues.filter(i => {
@@ -121,6 +149,10 @@ function visibleIssues() {
     }
     return true;
   });
+  if (sortCol) {
+    const col = COLUMNS.find(c => c.id === sortCol.id);
+    if (col) return sortByColumn(list, col, sortCol.dir);
+  }
   const by = {
     'id': (a, b) => a.displayId - b.displayId,
     'id-desc': (a, b) => b.displayId - a.displayId,
@@ -143,7 +175,22 @@ function cellHtml(c, i) {
 }
 function buildTable() {
   const cols = COLUMNS.filter(c => visibleCols.has(c.id));
-  $('issueHead').innerHTML = '<tr>' + cols.map(c => `<th>${esc(c.label)}</th>`).join('') + '</tr>';
+  $('issueHead').innerHTML = '<tr>' + cols.map(c => {
+    const active = sortCol?.id === c.id;
+    const arrow = active ? ` <span class="arr">${sortCol.dir === 1 ? '▲' : '▼'}</span>` : '';
+    return `<th class="sortable${active ? ' sorted' : ''}" data-col="${esc(c.id)}" title="クリックでソート（昇順→降順→解除）">${esc(c.label)}${arrow}</th>`;
+  }).join('') + '</tr>';
+  for (const th of $('issueHead').querySelectorAll('th[data-col]')) {
+    th.addEventListener('click', () => {
+      const id = th.dataset.col;
+      if (sortCol?.id !== id) sortCol = { id, dir: 1 };
+      else if (sortCol.dir === 1) sortCol = { id, dir: -1 };
+      else sortCol = null;
+      localStorage.setItem('sampled-sort', JSON.stringify(sortCol));
+      page = 1;
+      buildTable();
+    });
+  }
   const list = visibleIssues();
   const pages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
   page = Math.min(Math.max(1, page), pages);
@@ -166,7 +213,7 @@ function markSelectedRow() {
 }
 $('fltQ').addEventListener('input', () => { flt.q = $('fltQ').value; page = 1; buildTable(); });
 $('fltStatus').addEventListener('change', () => { flt.status = $('fltStatus').value; page = 1; buildTable(); });
-$('fltSort').addEventListener('change', () => { flt.sort = $('fltSort').value; page = 1; buildTable(); });
+$('fltSort').addEventListener('change', () => { flt.sort = $('fltSort').value; sortCol = null; localStorage.setItem('sampled-sort', 'null'); page = 1; buildTable(); });
 $('btnPrev').addEventListener('click', () => { page--; buildTable(); });
 $('btnNext').addEventListener('click', () => { page++; buildTable(); });
 

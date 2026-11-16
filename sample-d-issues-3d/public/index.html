@@ -17,6 +17,10 @@ h1 { font-size: 18px; margin: 0 0 10px; }
 /* ---- Issue 表（Forma の Issues 一覧に寄せた見た目） ---- */
 table.issues { width: 100%; border-collapse: collapse; font-size: 13px; }
 table.issues th { background: #fff; color: #3c4a57; text-align: left; padding: 7px 10px; font-weight: 600; white-space: nowrap; border-bottom: 2px solid #d9e2ea; }
+table.issues th.sortable { cursor: pointer; user-select: none; }
+table.issues th.sortable:hover { background: #eef4f9; }
+table.issues th.sorted { color: #0696d7; }
+table.issues th .arr { font-size: 10px; color: #0696d7; }
 table.issues td { padding: 8px 10px; border-top: 1px solid #e7edf2; vertical-align: middle; }
 table.issues tbody tr { cursor: pointer; }
 table.issues tbody tr:hover { background: #f5f9fc; }
