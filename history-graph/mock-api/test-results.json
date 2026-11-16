@@ -1,0 +1,186 @@
+{
+ "at": "2026-11-16T18:20:25.041Z",
+ "base": "http://localhost:4517",
+ "results": [
+  {
+   "name": "neg: storage missing attributes.name -> 400",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "neg: storage data.type != objects -> 400",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "neg: storage missing relationships.target -> 400",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "neg: version missing relationships.item -> 400",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "neg: version with unknown storage object -> 400",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "neg: version bad extension.type -> 400",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "neg: complete upload missing uploadKey -> 400",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "neg: complete upload unknown uploadKey -> 404",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "neg: signeds3upload parts=0 -> 400",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "neg: no Authorization header -> 401",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "neg: old route POST items/{id}/versions -> 404",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "neg: old route POST items/{id}/storage -> 404",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "neg: old route POST folders/{id}/storage -> 404",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "neg: MP app-only token -> 403",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "neg: indexes:batch-status empty body -> 400",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "neg: indexes:batch-status entry without versionUrn -> 400",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "neg: diffs:batch-status missing curVersionUrn -> 400",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "neg: GET indexes collection (undocumented) -> 404",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "neg: query create without query -> 400",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "neg: query create unsupported operator -> 400",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "client upload (original items route) fails at version creation",
+   "ok": true,
+   "detail": "exit=1"
+  },
+  {
+   "name": "client upload (documented projects route) succeeds",
+   "ok": true,
+   "detail": "exit=0 v2Urn=urn:adsk.wipprod:fs.file:vf.VwJ57NkiQ-Gy0nHLR3UmAA?version=2"
+  },
+  {
+   "name": "client diff-measure succeeds",
+   "ok": true,
+   "detail": "exit=0"
+  },
+  {
+   "name": "diff stats = added 1 / removed 1 / modified 3",
+   "ok": true,
+   "detail": "{\"added\":1,\"removed\":1,\"modified\":3}"
+  },
+  {
+   "name": "diff rows: added=1 removed=1 changed=3",
+   "ok": true,
+   "detail": "added=1 removed=1 changed=3"
+  },
+  {
+   "name": "client probe succeeds",
+   "ok": true,
+   "detail": "exit=0"
+  },
+  {
+   "name": "probe: index reaches FINISHED",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "probe: index query returns 50 rows ($between SVF2Id 1..50)",
+   "ok": true,
+   "detail": "rows=50 (filter s.SVF2Id 1..50)"
+  },
+  {
+   "name": "probe: 2-legged batch-status -> 403 (matches real API)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "probe: undocumented GET indexes -> 404 (matches real API)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "probe: V1-vs-V1 diff FINISHED with 0/0/0",
+   "ok": true,
+   "detail": "state=FINISHED stats={\"added\":0,\"removed\":0,\"modified\":0}"
+  },
+  {
+   "name": "v3 registration succeeds (?version=3)",
+   "ok": true,
+   "detail": "status=201 id=urn:adsk.wipprod:fs.file:vf.VwJ57NkiQ-Gy0nHLR3UmAA?version=3"
+  },
+  {
+   "name": "diff V2->V3 stats = added 51 / removed 33 / modified 374 (実測)",
+   "ok": true,
+   "detail": "{\"added\":51,\"removed\":33,\"modified\":374}"
+  },
+  {
+   "name": "diff V2->V3 changed rows = 374",
+   "ok": true,
+   "detail": "rows=374"
+  },
+  {
+   "name": "diff V2->V3 room rename representative row (Studio Unit -> Main Unit)",
+   "ok": true,
+   "detail": "rows=1"
+  },
+  {
+   "name": "diff V2->V3 wall move representative row [748873] Position X 500 -> 500.14",
+   "ok": true,
+   "detail": "rows=1 posx=500.14"
+  }
+ ]
+}

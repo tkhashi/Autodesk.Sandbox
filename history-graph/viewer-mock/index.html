@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>履歴グラフ ビューア・スタンドイン（bbox モック）</title>
+<style>
+  html, body { margin:0; height:100%; font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif; background:#1c2126; color:#e8ecef; }
+  #app { display:flex; flex-direction:column; height:100%; }
+  header { padding:10px 14px; background:#262d33; border-bottom:1px solid #3a434a; }
+  header h1 { font-size:15px; margin:0 0 2px; font-weight:600; }
+  header .sub { font-size:11.5px; color:#9fb0bc; }
+  #toolbar { display:flex; flex-wrap:wrap; gap:6px; padding:8px 14px; background:#22282d; border-bottom:1px solid #3a434a; align-items:center; }
+  #toolbar .label { font-size:12px; color:#9fb0bc; margin-right:2px; }
+  button { background:#39424a; color:#e8ecef; border:1px solid #525e66; border-radius:4px; padding:5px 10px; font-size:12.5px; cursor:pointer; }
+  button:hover { background:#46525c; }
+  button.active { background:#0f6cbd; border-color:#0f6cbd; }
+  button.seg.active { background:#5b6b76; }
+  #stage { flex:1; position:relative; min-height:0; }
+  #view { position:absolute; inset:0; }
+  #view canvas { display:block; }
+  #legend { position:absolute; left:10px; bottom:10px; background:rgba(20,24,28,.85); border:1px solid #3a434a; border-radius:6px; padding:8px 10px; font-size:12px; line-height:1.7; }
+  .sw { display:inline-block; width:11px; height:11px; border-radius:2px; margin-right:6px; vertical-align:-1px; }
+  #status { position:absolute; right:10px; bottom:10px; max-width:46%; background:rgba(20,24,28,.85); border:1px solid #3a434a; border-radius:6px; padding:8px 10px; font-size:12px; line-height:1.6; }
+  #hint { position:absolute; left:10px; top:10px; font-size:11.5px; color:#c7d2da; background:rgba(20,24,28,.6); padding:4px 8px; border-radius:4px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>履歴グラフ ビューア・スタンドイン（モック）</h1>
+    <div class="sub">Snowdon Towers Sample Architectural — Model Properties の bbox だけで描く箱モデル。本番は SVF＋APS Viewer（README 参照）。データ: V1→V2 実測 diff 由来（壁の移動デモは V2→V3 実測、ACC 上の V2→V4 diff）。</div>
+  </header>
+  <div id="toolbar">
+    <span class="label">デモ:</span>
+    <button id="mode-v12" class="seg active">V1→V2 実変更</button>
+    <button id="mode-v23" class="seg">V2→V3 壁の移動（実測）</button>
+    <span class="label" style="margin-left:10px;">版:</span>
+    <button id="btn-v2" class="seg active">V2 を表示</button>
+    <button id="btn-v1" class="seg">V1 を表示</button>
+    <span class="label" id="changes-label" style="margin-left:10px;">実変更（V1→V2）:</span>
+    <button data-change="shrub">植栽の追加</button>
+    <button data-change="pergola">藤棚の削除</button>
+    <button data-change="bollard">外灯の移動 ×2</button>
+    <button data-change="door">ドアのプロパティ変更</button>
+    <button data-change="wall" style="display:none">壁の移動（標準壁 [748873]、≈47mm）</button>
+    <button id="btn-all">全体＋色分け</button>
+    <button id="btn-clear">色分け解除</button>
+  </div>
+  <div id="stage">
+    <div id="view"></div>
+    <div id="hint">ドラッグ: 回転 / ホイール: ズーム / 右ドラッグ・Shift+ドラッグ: パン</div>
+    <div id="legend">
+      <div><span class="sw" style="background:#9aa7b1"></span>周辺要素（文脈）</div>
+      <div><span class="sw" style="background:#2fbf71"></span>追加</div>
+      <div><span class="sw" style="background:#e5484d"></span>削除（半透明ゴースト）</div>
+      <div><span class="sw" style="background:#f5c518"></span>変更</div>
+      <div><span class="sw" style="background:#8a8f98"></span>移動前の旧位置（ゴースト）</div>
+    </div>
+    <div id="status">読み込み中…</div>
+  </div>
+</div>
+
+<script src="./data.js"></script>
+<script src="./data-v3.js"></script>
+<script src="./vendor/three.min.js"></script>
+<script>
+let DATA = window.MOCK_DATA;
+let byKey = new Map(DATA.elements.map(e => [e.key, e]));
+const versionLabel = (v) => (DATA.versions ? (v === 'V1' ? DATA.versions[0] : DATA.versions[1]) : v);
+
+// model coords (x, y, z-up) -> three coords (x, z-up as Y, -y)
+const toThree = (x, y, z) => new THREE.Vector3(x, z, -y);
+const bboxCenterT = b => toThree((b[0]+b[3])/2, (b[1]+b[4])/2, (b[2]+b[5])/2);
+
+const container = document.getElementById('view');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+container.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1c2126);
+scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+sun.position.set(60, 90, 30);
+scene.add(sun);
+const grid = new THREE.GridHelper(120, 24, 0x44505a, 0x30383f);
+scene.add(grid);
+
+const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 2000);
+
+// ---- minimal orbit control (OrbitControls is not in the vendored core build)
+const orbit = { target: new THREE.Vector3(18, 7, -16), radius: 55, theta: -0.7, phi: 1.05 };
+let camAnim = null;
+function applyCam() {
+  const t = camAnim ? camAnim.target : orbit.target;
+  const r = camAnim ? camAnim.radius : orbit.radius;
+  const th = camAnim ? camAnim.theta : orbit.theta;
+  const ph = camAnim ? camAnim.phi : orbit.phi;
+  camera.position.set(
+    t.x + r * Math.sin(ph) * Math.sin(th),
+    t.y + r * Math.cos(ph),
+    t.z + r * Math.sin(ph) * Math.cos(th));
+  camera.lookAt(t);
+}
+{
+  const el = renderer.domElement;
+  let drag = null;
+  el.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, pan: e.button === 2 || e.shiftKey }; el.setPointerCapture(e.pointerId); camAnim = null; });
+  el.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY;
+    if (drag.pan) {
+      const s = orbit.radius * 0.0016;
+      const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd);
+      const right = new THREE.Vector3().crossVectors(fwd, camera.up).normalize();
+      const up2 = new THREE.Vector3().crossVectors(right, fwd).normalize();
+      orbit.target.addScaledVector(right, -dx * s).addScaledVector(up2, dy * s);
+    } else {
+      orbit.theta -= dx * 0.005;
+      orbit.phi = Math.min(1.5, Math.max(0.12, orbit.phi - dy * 0.005));
+    }
+  });
+  el.addEventListener('pointerup', () => drag = null);
+  el.addEventListener('contextmenu', e => e.preventDefault());
+  el.addEventListener('wheel', e => { e.preventDefault(); orbit.radius = Math.min(300, Math.max(3, orbit.radius * (e.deltaY > 0 ? 1.12 : 0.9))); }, { passive: false });
+}
+
+// ---- box building
+const COLORS = { context: 0x9aa7b1, added: 0x2fbf71, removed: 0xe5484d, changed: 0xf5c518, ghostOld: 0x8a8f98 };
+let group = null;          // current version boxes
+let ghostGroup = null;     // diff ghosts (removed / old positions)
+let meshes = new Map();    // key -> mesh (current version)
+let currentVersion = 'V2';
+let diffState = null;
+
+function makeBox(b, color, opacity) {
+  const size = new THREE.Vector3(Math.max(b[3]-b[0], 0.02), Math.max(b[5]-b[2], 0.02), Math.max(b[4]-b[1], 0.02));
+  const geo = new THREE.BoxGeometry(size.x, size.y, size.z);
+  const mat = new THREE.MeshLambertMaterial({ color, transparent: opacity < 1, opacity });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.copy(bboxCenterT(b));
+  const edges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(geo),
+    new THREE.LineBasicMaterial({ color: 0x14181c, transparent: true, opacity: 0.35 }));
+  mesh.add(edges);
+  return mesh;
+}
+
+function disposeGroup(g) { if (!g) return; g.traverse(o => { o.geometry?.dispose?.(); if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m.dispose()); }); scene.remove(g); }
+
+// ---- HistoryViewer: the interface the history-graph app will call.
+// Method names/semantics mirror what the production APS Viewer adapter will expose.
+const HistoryViewer = {
+  /** Load one version's box model. versionData: {version:'V1'|'V2'} or a MOCK_DATA-shaped object. */
+  load(versionData) {
+    const version = typeof versionData === 'string' ? versionData : (versionData?.version ?? 'V2');
+    currentVersion = version;
+    disposeGroup(group); disposeGroup(ghostGroup); ghostGroup = null; meshes = new Map(); diffState = null;
+    group = new THREE.Group();
+    const field = version === 'V1' ? 'b1' : 'b2';
+    for (const e of DATA.elements) {
+      const b = e[field]; if (!b) continue;
+      const m = makeBox(b, COLORS.context, e.role === 'context' ? 0.5 : 0.85);
+      m.userData.key = e.key;
+      group.add(m); meshes.set(e.key, m);
+    }
+    scene.add(group);
+    setStatus(`版 ${versionLabel(version)} を表示中（${meshes.size} 要素）。色分けは未適用。`);
+    document.getElementById('btn-v1').classList.toggle('active', version === 'V1');
+    document.getElementById('btn-v2').classList.toggle('active', version === 'V2');
+  },
+
+  /** Colour the diff: added=green, removed=red ghost, changed=yellow.
+      Moved elements also get an old-position ghost. Lists are element keys. */
+  showDiff(diff) {
+    if (!group) this.load(currentVersion);
+    this.clearDiff(true);
+    diffState = diff;
+    ghostGroup = new THREE.Group();
+    const paint = (key, color, opacity) => { const m = meshes.get(key); if (m) { m.material.color.setHex(color); m.material.opacity = opacity; m.material.transparent = opacity < 1; } };
+    for (const k of diff.added ?? []) paint(k, COLORS.added, 0.95);
+    for (const k of diff.changed ?? []) {
+      paint(k, COLORS.changed, 0.95);
+      const e = byKey.get(k);
+      if (e?.b1 && e?.b2 && e.b1.some((v, i) => Math.abs(v - e.b2[i]) > 0.01)) {
+        const g = makeBox(e.b1, COLORS.ghostOld, 0.3); g.userData.ghostOf = k; ghostGroup.add(g);
+      }
+    }
+    for (const k of diff.removed ?? []) {
+      const e = byKey.get(k);
+      if (e?.b1) { const g = makeBox(e.b1, COLORS.removed, 0.35); g.userData.ghostOf = k; ghostGroup.add(g); }
+      paint(k, COLORS.removed, 0.35); // visible when V1 is loaded
+    }
+    scene.add(ghostGroup);
+    setStatus(`色分け表示中： 追加 ${(diff.added ?? []).length} / 削除 ${(diff.removed ?? []).length} / 変更 ${(diff.changed ?? []).length}`);
+  },
+
+  /** Move the camera to look at an element's bbox centre (pin-open substitute). */
+  focusOn(elementKey) {
+    const e = byKey.get(elementKey); if (!e) return;
+    const b = (currentVersion === 'V2' ? e.b2 : e.b1) ?? e.b2 ?? e.b1; if (!b) return;
+    const c = bboxCenterT(b);
+    const size = Math.max(b[3]-b[0], b[4]-b[1], b[5]-b[2]);
+    camAnim = { target: c.clone(), radius: Math.max(9, size * 4), theta: orbit.theta, phi: 1.02 };
+    setStatus(`フォーカス: ${e.label ?? e.name}（${e.category ?? ''}）`);
+  },
+
+  /** Remove diff colouring and ghosts. */
+  clearDiff(silent) {
+    disposeGroup(ghostGroup); ghostGroup = null; diffState = null;
+    for (const [k, m] of meshes) {
+      const e = byKey.get(k);
+      m.material.color.setHex(COLORS.context);
+      m.material.opacity = e?.role === 'context' ? 0.5 : 0.85;
+      m.material.transparent = true;
+    }
+    if (!silent) setStatus('色分けを解除しました。');
+  },
+
+  getState() { return { version: currentVersion, elements: meshes.size, diff: diffState }; },
+};
+window.HistoryViewer = HistoryViewer;
+
+// ---- demo wiring
+const statusEl = document.getElementById('status');
+function setStatus(t) { statusEl.textContent = t; }
+
+function computeAllDiff() {
+  return {
+    added: DATA.elements.filter(e => e.role === 'added').map(e => e.key),
+    removed: DATA.elements.filter(e => e.role === 'removed').map(e => e.key),
+    changed: DATA.elements.filter(e => e.role === 'changed').map(e => e.key),
+  };
+}
+let allDiff = computeAllDiff();
+
+function focusChange(name) {
+  const ch = DATA.changes[name]; if (!ch) return;
+  HistoryViewer.showDiff(allDiff);
+  const keys = [...(ch.added ?? []), ...(ch.removed ?? []), ...(ch.changed ?? [])];
+  if (name === 'wall' && keys[0]) {
+    HistoryViewer.focusOn(keys[0]);
+    if (camAnim) camAnim.radius = 16; // 47mm の移動なので寄り気味に
+    setStatus('フォーカス: 壁の移動（標準壁 [748873]、V2→V3 実測。黄=移動後、灰ゴースト=移動前。bbox 平行移動 (+0.14, +0.068, 0) ft ≈ 47mm）');
+  } else if (name === 'bollard' && keys.length === 2) {
+    // focus the midpoint of the two moved lights
+    const c1 = bboxCenterT(byKey.get(keys[0]).b2), c2 = bboxCenterT(byKey.get(keys[1]).b2);
+    camAnim = { target: c1.add(c2).multiplyScalar(0.5), radius: 14, theta: orbit.theta, phi: 1.02 };
+    setStatus('フォーカス: 外灯の移動 ×2（Bollard Light [2053768] / [2053808]、同一ベクトルで移動）');
+  } else if (keys[0]) {
+    HistoryViewer.focusOn(keys[0]);
+  }
+  document.querySelectorAll('[data-change]').forEach(b => b.classList.toggle('active', b.dataset.change === name));
+}
+
+// ---- dataset mode switch: V1->V2 demo (data.js) / V2->V3 wall demo (data-v3.js)
+function setMode(m) {
+  DATA = m === 'v23' ? window.MOCK_DATA_V3 : window.MOCK_DATA;
+  byKey = new Map(DATA.elements.map(e => [e.key, e]));
+  allDiff = computeAllDiff();
+  document.getElementById('mode-v12').classList.toggle('active', m === 'v12');
+  document.getElementById('mode-v23').classList.toggle('active', m === 'v23');
+  document.getElementById('btn-v1').textContent = m === 'v23' ? 'V2（移動前）を表示' : 'V1 を表示';
+  document.getElementById('btn-v2').textContent = m === 'v23' ? 'V3（移動後）を表示' : 'V2 を表示';
+  document.getElementById('changes-label').textContent = m === 'v23' ? '実変更（V2→V3）:' : '実変更（V1→V2）:';
+  document.querySelectorAll('[data-change]').forEach(b => {
+    b.style.display = (b.dataset.change === 'wall') === (m === 'v23') ? '' : 'none';
+    b.classList.remove('active');
+  });
+  HistoryViewer.load('V2');
+  HistoryViewer.showDiff(allDiff);
+  if (m === 'v23') focusChange('wall');
+  else camAnim = { target: new THREE.Vector3(17, 6, -15), radius: 55, theta: -0.7, phi: 1.05 };
+}
+document.getElementById('mode-v12').addEventListener('click', () => setMode('v12'));
+document.getElementById('mode-v23').addEventListener('click', () => setMode('v23'));
+
+document.querySelectorAll('[data-change]').forEach(b => b.addEventListener('click', () => focusChange(b.dataset.change)));
+document.getElementById('btn-v1').addEventListener('click', () => { HistoryViewer.load('V1'); if (diffState) HistoryViewer.showDiff(allDiff); });
+document.getElementById('btn-v2').addEventListener('click', () => { HistoryViewer.load('V2'); HistoryViewer.showDiff(allDiff); });
+document.getElementById('btn-clear').addEventListener('click', () => { HistoryViewer.clearDiff(); document.querySelectorAll('[data-change]').forEach(b => b.classList.remove('active')); });
+document.getElementById('btn-all').addEventListener('click', () => {
+  HistoryViewer.showDiff(allDiff);
+  camAnim = { target: new THREE.Vector3(17, 6, -15), radius: 55, theta: -0.7, phi: 1.05 };
+  document.querySelectorAll('[data-change]').forEach(b => b.classList.remove('active'));
+});
+
+// click a box to focus it
+const ray = new THREE.Raycaster(); const ptr = new THREE.Vector2();
+renderer.domElement.addEventListener('dblclick', e => {
+  const r = renderer.domElement.getBoundingClientRect();
+  ptr.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(ptr, camera);
+  const hit = ray.intersectObjects(group.children, false)[0];
+  if (hit?.object?.userData?.key) HistoryViewer.focusOn(hit.object.userData.key);
+});
+
+function resize() {
+  const w = container.clientWidth, h = container.clientHeight;
+  renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(container);
+resize();
+
+function tick() {
+  requestAnimationFrame(tick);
+  if (camAnim) {
+    orbit.target.lerp(camAnim.target, 0.12);
+    orbit.radius += (camAnim.radius - orbit.radius) * 0.12;
+    if (orbit.target.distanceTo(camAnim.target) < 0.05) camAnim = null;
+  }
+  applyCam();
+  renderer.render(scene, camera);
+}
+HistoryViewer.load('V2');
+HistoryViewer.showDiff(allDiff);
+applyCam();
+tick();
+window.__viewerReady = true;
+
+// deep-link for tests/demos: index.html?focus=shrub|pergola|bollard|door|wall
+const focusParam = new URLSearchParams(location.search).get('focus');
+if (focusParam === 'wall') setMode('v23');
+else if (focusParam && DATA.changes[focusParam]) focusChange(focusParam);
+</script>
+</body>
+</html>

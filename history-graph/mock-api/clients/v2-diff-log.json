@@ -1,0 +1,156 @@
+[
+ {
+  "step": "token-refresh",
+  "method": "POST",
+  "url": "/authentication/v2/token",
+  "status": 200,
+  "note": "refreshed; wrote back to BOTH .token.json files"
+ },
+ {
+  "step": "token-refresh",
+  "method": "-",
+  "url": "-",
+  "status": 0,
+  "note": "token ready"
+ },
+ {
+  "step": "index-batch-v1",
+  "method": "POST",
+  "url": "/construction/index/v2/projects/{pid}/indexes:batch-status",
+  "status": 200,
+  "note": "state=PROCESSING indexId=k2nJIT1mH2IwxXLVaNn8YW"
+ },
+ {
+  "step": "index-poll-v1",
+  "method": "GET",
+  "url": ".../indexes/{indexId}",
+  "status": 200,
+  "note": "state=PROCESSING objects=-"
+ },
+ {
+  "step": "index-poll-v1",
+  "method": "GET",
+  "url": ".../indexes/{indexId}",
+  "status": 200,
+  "note": "state=FINISHED objects=534"
+ },
+ {
+  "step": "index-batch-v2",
+  "method": "POST",
+  "url": "/construction/index/v2/projects/{pid}/indexes:batch-status",
+  "status": 200,
+  "note": "state=PROCESSING indexId=rPU8CXfxyv_Q22HXmF0i-C"
+ },
+ {
+  "step": "index-poll-v2",
+  "method": "GET",
+  "url": ".../indexes/{indexId}",
+  "status": 200,
+  "note": "state=PROCESSING objects=-"
+ },
+ {
+  "step": "index-poll-v2",
+  "method": "GET",
+  "url": ".../indexes/{indexId}",
+  "status": 200,
+  "note": "state=FINISHED objects=534"
+ },
+ {
+  "step": "diff-batch-status",
+  "method": "POST",
+  "url": "/construction/index/v2/projects/{pid}/diffs:batch-status",
+  "status": 200,
+  "note": "state=PROCESSING diffId=R6c-YbmL5WHDIBMGXOomsv"
+ },
+ {
+  "step": "diff-poll",
+  "method": "GET",
+  "url": ".../diffs/{diffId}",
+  "status": 200,
+  "note": "state=PROCESSING stats=null errors=null"
+ },
+ {
+  "step": "diff-poll",
+  "method": "GET",
+  "url": ".../diffs/{diffId}",
+  "status": 200,
+  "note": "state=FINISHED stats={\"added\":1,\"removed\":1,\"modified\":3} errors=null"
+ },
+ {
+  "step": "diff-fields",
+  "method": "GET",
+  "url": ".../diffs/{diffId}/fields",
+  "status": 200,
+  "note": "bytes=350"
+ },
+ {
+  "step": "diff-fields-keys",
+  "method": "-",
+  "url": "-",
+  "status": 0,
+  "note": "keys=p153cb174,p93e93af5,p2f4a91c0,p3aa77b10"
+ },
+ {
+  "step": "diff-query-create-added",
+  "method": "POST",
+  "url": ".../diffs/{diffId}/queries",
+  "status": 200,
+  "note": "query={\"$eq\":[\"s.changeType\",\"'OBJECT_ADDED'\"]} state=PROCESSING queryId=pJmRmLFcfamLTZSOFYsJy-"
+ },
+ {
+  "step": "diff-query-poll-added",
+  "method": "GET",
+  "url": ".../queries/{queryId}",
+  "status": 200,
+  "note": "state=FINISHED"
+ },
+ {
+  "step": "diff-query-properties-added",
+  "method": "GET",
+  "url": ".../queries/{queryId}/properties",
+  "status": 200,
+  "note": "rows=1"
+ },
+ {
+  "step": "diff-query-create-removed",
+  "method": "POST",
+  "url": ".../diffs/{diffId}/queries",
+  "status": 200,
+  "note": "query={\"$eq\":[\"s.changeType\",\"'OBJECT_REMOVED'\"]} state=PROCESSING queryId=9XyKvrKj3ylUmoM43QQsxk"
+ },
+ {
+  "step": "diff-query-poll-removed",
+  "method": "GET",
+  "url": ".../queries/{queryId}",
+  "status": 200,
+  "note": "state=FINISHED"
+ },
+ {
+  "step": "diff-query-properties-removed",
+  "method": "GET",
+  "url": ".../queries/{queryId}/properties",
+  "status": 200,
+  "note": "rows=1"
+ },
+ {
+  "step": "diff-query-create-changed",
+  "method": "POST",
+  "url": ".../diffs/{diffId}/queries",
+  "status": 200,
+  "note": "query={\"$eq\":[\"s.changeType\",\"'OBJECT_CHANGED'\"]} state=PROCESSING queryId=YyxrWmsoQH4R-nCoZoI0Kp"
+ },
+ {
+  "step": "diff-query-poll-changed",
+  "method": "GET",
+  "url": ".../queries/{queryId}",
+  "status": 200,
+  "note": "state=FINISHED"
+ },
+ {
+  "step": "diff-query-properties-changed",
+  "method": "GET",
+  "url": ".../queries/{queryId}/properties",
+  "status": 200,
+  "note": "rows=3"
+ }
+]

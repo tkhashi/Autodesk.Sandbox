@@ -1,0 +1,196 @@
+[
+ {
+  "step": "token-refresh",
+  "method": "POST",
+  "url": "/authentication/v2/token",
+  "status": 200,
+  "note": "refreshed; wrote back to BOTH .token.json files"
+ },
+ {
+  "step": "token-scope",
+  "method": "-",
+  "url": "-",
+  "status": 0,
+  "note": "could not decode JWT payload"
+ },
+ {
+  "step": "token-2legged",
+  "method": "POST",
+  "url": "/authentication/v2/token",
+  "status": 200,
+  "note": "client_credentials scope=data:read"
+ },
+ {
+  "step": "dm-versions",
+  "method": "GET",
+  "url": "/data/v1/projects/.../items/{snowdon lineage}/versions",
+  "status": 200,
+  "note": "versions=1; numbers=1"
+ },
+ {
+  "step": "index-batch-status-3legged",
+  "method": "POST",
+  "url": "/construction/index/v2/projects/{pid}/indexes:batch-status",
+  "status": 200,
+  "note": "state=PROCESSING indexId=ciu4Pwpzxm_vnlXzi0zeh7",
+  "body": {
+   "indexes": [
+    {
+     "projectId": "031a6e68-ccdf-4a29-b8a5-50a2a3ecac25",
+     "indexId": "ciu4Pwpzxm_vnlXzi0zeh7",
+     "type": "INDEX",
+     "state": "PROCESSING",
+     "selfUrl": "http://localhost:4517/construction/index/v2/projects/031a6e68-ccdf-4a29-b8a5-50a2a3ecac25/indexes/ciu4Pwpzxm_vnlXzi0zeh7",
+     "versionUrns": [
+      "urn:adsk.wipprod:fs.file:vf.ZRF1ijarXRS7X3mi7BYiFg?version=1"
+     ],
+     "updatedAt": "2026-11-16T18:19:44.906Z"
+    }
+   ]
+  }
+ },
+ {
+  "step": "index-batch-status-2legged",
+  "method": "POST",
+  "url": "/construction/index/v2/projects/{pid}/indexes:batch-status",
+  "status": 403,
+  "note": "negative test: 2-legged token",
+  "body": {
+   "detail": "User is not authorized to access this resource with an explicit deny in an identity-based policy",
+   "title": "The caller does not have permission to execute the request.",
+   "type": "Unauthorized"
+  }
+ },
+ {
+  "step": "index-collection-get",
+  "method": "GET",
+  "url": "/construction/index/v2/projects/{pid}/indexes",
+  "status": 404,
+  "note": "undocumented collection GET probe",
+  "body": {
+   "developerMessage": "The requested resource does not exist.",
+   "moreInfo": "https://aps.autodesk.com/en/docs/oauth/v2/developers_guide/error_handling/",
+   "errorCode": ""
+  }
+ },
+ {
+  "step": "index-poll",
+  "method": "GET",
+  "url": "/construction/index/v2/projects/{pid}/indexes/{indexId}",
+  "status": 200,
+  "note": "state=PROCESSING objects=-"
+ },
+ {
+  "step": "index-poll",
+  "method": "GET",
+  "url": "/construction/index/v2/projects/{pid}/indexes/{indexId}",
+  "status": 200,
+  "note": "state=FINISHED objects=60"
+ },
+ {
+  "step": "index-manifest",
+  "method": "GET",
+  "url": ".../indexes/{indexId}/manifest",
+  "status": 200,
+  "note": "manifest status=Succeeded seedFiles=1"
+ },
+ {
+  "step": "index-fields",
+  "method": "GET",
+  "url": ".../indexes/{indexId}/fields",
+  "status": 200,
+  "note": "fieldCount=4 firstKeys=p153cb174,p93e93af5,p2f4a91c0,p3aa77b10"
+ },
+ {
+  "step": "query-create",
+  "method": "POST",
+  "url": ".../indexes/{indexId}/queries",
+  "status": 200,
+  "note": "filter: s.SVF2Id between 1 and 50; state=PROCESSING queryId=4_4KXP_hDp9BZPaOLIzRMs"
+ },
+ {
+  "step": "query-poll",
+  "method": "GET",
+  "url": ".../indexes/{indexId}/queries/{queryId}",
+  "status": 200,
+  "note": "state=PROCESSING"
+ },
+ {
+  "step": "query-poll",
+  "method": "GET",
+  "url": ".../indexes/{indexId}/queries/{queryId}",
+  "status": 200,
+  "note": "state=FINISHED"
+ },
+ {
+  "step": "query-properties",
+  "method": "GET",
+  "url": ".../queries/{queryId}/properties",
+  "status": 200,
+  "note": "rows=50 (filter s.SVF2Id 1..50)"
+ },
+ {
+  "step": "diff-v1-vs-nonexistent-v2",
+  "method": "POST",
+  "url": "/construction/index/v2/projects/{pid}/diffs:batch-status",
+  "status": 200,
+  "note": "prev=V1 cur=V2(does not exist)",
+  "body": {
+   "diffs": [
+    {
+     "projectId": "031a6e68-ccdf-4a29-b8a5-50a2a3ecac25",
+     "diffId": "_y8yWGrFtLObinY4Q5NmOZ",
+     "type": "DIFF",
+     "state": "PROCESSING",
+     "selfUrl": "http://localhost:4517/construction/index/v2/projects/031a6e68-ccdf-4a29-b8a5-50a2a3ecac25/diffs/_y8yWGrFtLObinY4Q5NmOZ",
+     "prevVersionUrns": [
+      "urn:adsk.wipprod:fs.file:vf.ZRF1ijarXRS7X3mi7BYiFg?version=1"
+     ],
+     "curVersionUrns": [
+      "urn:adsk.wipprod:fs.file:vf.ZRF1ijarXRS7X3mi7BYiFg?version=2"
+     ],
+     "updatedAt": "2026-11-16T18:20:09.942Z"
+    }
+   ]
+  }
+ },
+ {
+  "step": "diff-v1-vs-v1",
+  "method": "POST",
+  "url": "/construction/index/v2/projects/{pid}/diffs:batch-status",
+  "status": 200,
+  "note": "state=PROCESSING diffId=QghTFVkhFbnAR-ygxfpmic",
+  "body": {
+   "diffs": [
+    {
+     "projectId": "031a6e68-ccdf-4a29-b8a5-50a2a3ecac25",
+     "diffId": "QghTFVkhFbnAR-ygxfpmic",
+     "type": "DIFF",
+     "state": "PROCESSING",
+     "selfUrl": "http://localhost:4517/construction/index/v2/projects/031a6e68-ccdf-4a29-b8a5-50a2a3ecac25/diffs/QghTFVkhFbnAR-ygxfpmic",
+     "prevVersionUrns": [
+      "urn:adsk.wipprod:fs.file:vf.ZRF1ijarXRS7X3mi7BYiFg?version=1"
+     ],
+     "curVersionUrns": [
+      "urn:adsk.wipprod:fs.file:vf.ZRF1ijarXRS7X3mi7BYiFg?version=1"
+     ],
+     "updatedAt": "2026-11-16T18:20:09.944Z"
+    }
+   ]
+  }
+ },
+ {
+  "step": "diff-poll",
+  "method": "GET",
+  "url": "/construction/index/v2/projects/{pid}/diffs/{diffId}",
+  "status": 200,
+  "note": "state=PROCESSING stats=null"
+ },
+ {
+  "step": "diff-poll",
+  "method": "GET",
+  "url": "/construction/index/v2/projects/{pid}/diffs/{diffId}",
+  "status": 200,
+  "note": "state=FINISHED stats={\"added\":0,\"removed\":0,\"modified\":0}"
+ }
+]

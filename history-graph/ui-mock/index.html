@@ -1,0 +1,837 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:,">
+<title>履歴グラフ UIモック</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=IBM+Plex+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#eceff1; --surface:#ffffff; --surface2:#f2f4f5; --ink:#232a2e; --muted:#68737a; --line:#d7dde1;
+  --blue:#0696d7; --blue-dark:#0578ad; --blue-soft:#e1f2fa;
+  --st-open-bg:#e1f2fa; --st-open:#0578ad;
+  --st-pend-bg:#ffedd5; --st-pend:#b45309;
+  --st-rev-bg:#ede9fe; --st-rev:#6d28d9;
+  --st-closed-bg:#e6f0e8; --st-closed:#4a6b52;
+  --add:#1e9e57; --add-bg:#d9f2e3; --del:#d43a2f; --del-bg:#fde3e1; --chg:#b8860b; --chg-bg:#fff3bf;
+  --red:#b91c1c; --red-bg:#fee2e2; --gold:#b45309; --gold-bg:#ffedd5;
+  /* sample-d（Issues 3D デモ）の Issue 表トーン */
+  --sd-head:#3c4a57; --sd-headline:#d9e2ea; --sd-rowline:#e7edf2; --sd-hover:#f5f9fc; --sd-sel:#e8f2fa;
+  --sd-chip-border:#b9c9d6; --sd-chip-bg:#f2f7fb; --sd-primary:#2b7bbb; --sd-accent:#0696d7;
+  --sd-pill-border:#c3d2de; --sd-pill-bg:#f2f6f9; --sd-pill-ink:#41586c; --sd-sub:#68798a; --sd-faint:#8a9aa8;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#14181b; --surface:#1d2327; --surface2:#262d32; --ink:#edf1f3; --muted:#9aa6ad; --line:#333d43;
+    --blue-soft:#0d2f42;
+    --st-open-bg:#0d2f42; --st-open:#7cc7ec;
+    --st-pend-bg:#3a2408; --st-pend:#f5b86b;
+    --st-rev-bg:#2a1e4d; --st-rev:#c4b0f5;
+    --st-closed-bg:#22301f; --st-closed:#a3c9ab;
+    --red-bg:#3a1515; --gold-bg:#3a2408;
+    --sd-head:#b9c7d1; --sd-headline:#3d4a54; --sd-rowline:#333d43; --sd-hover:#232d34; --sd-sel:#0d2f42;
+    --sd-chip-border:#3d4a54; --sd-chip-bg:#262d32; --sd-pill-border:#3d4a54; --sd-pill-bg:#262d32; --sd-pill-ink:#c7d3dd; --sd-sub:#9aa6ad; --sd-faint:#8a9aa8; }
+  .badge.reopen{background:#3a1515;color:#f0a3a3;border-color:#5a2b2b}
+  .mini-node.reopen .dot{background:#3a1515;color:#f0a3a3;border-color:#a02c2c}
+  .mini-node.status .dot,.mini-node.pending .dot{background:#3a2408}
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Noto Sans JP",system-ui,sans-serif;background:var(--bg);color:var(--ink);line-height:1.6}
+button{font:inherit;cursor:pointer;text-align:left}
+h1,h2,h3,p,ul{margin:0}
+ul{padding:0}
+
+/* ---------- レイアウト ---------- */
+.shell{max-width:1320px;margin:0 auto;padding:16px 16px 36px}
+.page-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px;margin-bottom:12px}
+.page-head h1{font-size:19px;font-weight:900}
+.page-head p{font-size:12.5px;color:var(--muted)}
+.app-grid{display:grid;grid-template-columns:minmax(0,1fr) 372px;gap:14px;align-items:start}
+@media(max-width:960px){.app-grid{grid-template-columns:1fr}}
+.left-col{display:flex;flex-direction:column;gap:14px;min-width:0}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px}
+.panel-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:11px 14px;border-bottom:1px solid var(--line)}
+.panel-head h2{font-size:14px;font-weight:900}
+.panel-head .ph-note{font-size:11.5px;color:var(--muted)}
+
+/* ---------- フィルタチップ（sample-d のツールバーボタン風） ---------- */
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto}
+.chip{border:1px solid var(--sd-chip-border);background:var(--sd-chip-bg);border-radius:6px;padding:5px 12px;font-size:12.5px;color:var(--ink)}
+.chip:hover{border-color:var(--sd-primary)}
+.chip.active{background:var(--sd-primary);border-color:var(--sd-primary);color:#fff;font-weight:700}
+.chip .n{font-variant-numeric:tabular-nums;opacity:.85}
+
+/* ---------- Issue 表パネル／ツールバー／ページャ（sample-d 風） ---------- */
+.panel.issues-panel{border:none;border-radius:10px;box-shadow:0 1px 3px rgba(20,40,60,.08)}
+.issues-panel .panel-head{border-bottom:none;padding:12px 16px 2px}
+.issues-panel .panel-head h2{font-size:15px;font-weight:700}
+.tbl-toolbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:6px 16px 6px}
+.tbl-toolbar input[type="text"]{flex:1 1 110px;min-width:90px;padding:5px 8px;border:1px solid var(--sd-chip-border);border-radius:6px;font-size:12.5px;background:var(--surface);color:var(--ink);font:inherit;font-size:12.5px}
+.pager{display:flex;align-items:center;gap:10px;padding:2px 16px 12px;font-size:12.5px;color:var(--sd-pill-ink)}
+.pager button{padding:5px 12px;border:1px solid var(--sd-chip-border);background:var(--sd-chip-bg);border-radius:6px;cursor:pointer;font-size:12.5px;color:var(--ink)}
+.pager button:disabled{opacity:.45;cursor:default}
+.pager select{padding:5px 6px;border:1px solid var(--sd-chip-border);border-radius:6px;font-size:12.5px;background:var(--surface);color:var(--ink)}
+
+/* ---------- Issue 表（sample-d の Forma 風テーブルに準拠） ---------- */
+.tbl-wrap{overflow-x:auto}
+table.issues{border-collapse:collapse;width:100%;min-width:640px;font-size:13px}
+table.issues th{background:var(--surface);color:var(--sd-head);text-align:left;padding:7px 10px;font-weight:600;white-space:nowrap;border-bottom:2px solid var(--sd-headline)}
+table.issues th.sortable{cursor:pointer;user-select:none}
+table.issues th.sortable:hover{background:var(--sd-hover)}
+table.issues th.sorted{color:var(--sd-accent)}
+table.issues th .arr{font-size:10px;color:var(--sd-accent)}
+table.issues td{padding:8px 10px;border-top:1px solid var(--sd-rowline);vertical-align:middle}
+table.issues tbody tr{cursor:pointer}
+table.issues tbody tr:hover{background:var(--sd-hover)}
+table.issues tbody tr.active{background:var(--sd-sel)}
+table.issues .c-num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.c-title{font-weight:600;line-height:1.45;min-width:180px}
+table.issues .c-assignee{white-space:nowrap}
+table.issues .c-due{font-variant-numeric:tabular-nums;white-space:nowrap}
+table.issues .c-due.overdue{color:var(--red);font-weight:700}
+table.issues .c-due .od{display:block;font-size:10px}
+.fst{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+.fst i{width:4px;height:16px;border-radius:2px;display:inline-block;flex:none}
+.tag{display:inline-block;font-size:10.5px;font-weight:900;padding:1px 7px;border-radius:999px;background:var(--surface2);color:var(--muted);border:1px solid var(--line);white-space:nowrap}
+.tag.real{background:var(--blue);color:#fff;border-color:var(--blue)}
+table.issues .tag{font-size:11px;font-weight:400;padding:0 7px;border-radius:9px;background:var(--sd-pill-bg);color:var(--sd-pill-ink);border:1px solid var(--sd-pill-border);line-height:1.7}
+table.issues .tag.real{background:var(--sd-sel);color:var(--sd-primary);border-color:var(--sd-accent);font-weight:700}
+.pill{display:inline-block;font-size:11px;font-weight:900;padding:2px 9px;border-radius:999px;white-space:nowrap}
+.pill.open{background:var(--st-open-bg);color:var(--st-open)}
+.pill.pending{background:var(--st-pend-bg);color:var(--st-pend)}
+.pill.review{background:var(--st-rev-bg);color:var(--st-rev)}
+.pill.closed{background:var(--st-closed-bg);color:var(--st-closed)}
+.tl-meta .c-num{font-family:"IBM Plex Mono",monospace;font-size:12px;font-weight:700;color:var(--muted);white-space:nowrap}
+.badges{display:flex;gap:4px;margin-top:4px;flex-wrap:wrap}
+.badge{font-size:11px;padding:0 7px;border-radius:9px;background:var(--sd-pill-bg);border:1px solid var(--sd-pill-border);color:var(--sd-pill-ink);white-space:nowrap;line-height:1.7}
+.badge.reopen{color:#a02c2c;border-color:#e3b7b7;background:#fdf1f1}
+
+/* ミニ履歴グラフ */
+.mini-track{display:flex;align-items:center;min-width:120px}
+.mini-node{display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.mini-node .dot{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:8.5px;font-weight:900;border:2px solid var(--sd-pill-border);background:var(--surface);color:var(--sd-sub)}
+.mini-node.start .dot{background:var(--ink);color:var(--surface);border-color:var(--ink);font-size:7px}
+.mini-node.goal .dot{border-radius:6px;font-size:11px;border-color:#4caf7d;color:#4caf7d}
+.mini-node.reopen .dot{background:#fdf1f1;border-color:#a02c2c;color:#a02c2c;font-size:11px}
+.mini-node.model .dot{font-variant-numeric:tabular-nums;background:var(--sd-pill-bg);color:var(--sd-pill-ink);border-color:var(--sd-pill-border)}
+.mini-node.status .dot{border-radius:4px;background:#fdf3e3;border-color:#d97706;color:#d97706;font-size:9px}
+.mini-node.pending .dot{background:#fdf3e3;border-color:#d97706;color:#d97706;font-size:7.5px}
+.mini-node.review .dot{background:var(--sd-sel);border-color:#3b82c4;color:#3b82c4;font-size:11px;animation:blink 1.6s ease-in-out infinite}
+.mini-node.now .dot{border-color:var(--sd-accent);background:var(--surface);position:relative}
+.mini-node.now .dot:after{content:"";width:8px;height:8px;border-radius:50%;background:var(--sd-accent);animation:blink 1.6s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
+@media (prefers-reduced-motion: reduce){ .mini-node.review .dot,.mini-node.now .dot:after{animation:none} }
+.mini-line{flex:1;height:2px;background:var(--sd-accent);min-width:8px;margin:0 2px;opacity:.45}
+.mini-line.open-end{background:repeating-linear-gradient(90deg,var(--sd-accent) 0 4px,transparent 4px 8px)}
+
+/* ---------- 差分ビュー ---------- */
+.diff-counts{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}
+.dc{font-size:11.5px;font-weight:900;padding:2px 9px;border-radius:999px;white-space:nowrap}
+.dc.a{background:var(--add-bg);color:var(--add)}
+.dc.d{background:var(--del-bg);color:var(--del)}
+.dc.c{background:var(--chg-bg);color:var(--chg)}
+.diff-body{padding:14px}
+.diff-flex{display:flex;gap:16px;flex-wrap:wrap}
+.plan-box{border:1px solid var(--line);border-radius:6px;overflow:hidden;width:400px;max-width:100%;flex-shrink:0}
+.plan-box header{display:flex;justify-content:space-between;gap:8px;padding:7px 12px;background:var(--surface2);font-size:12px;font-weight:900}
+.plan-box header span:last-child{font-family:"IBM Plex Mono",monospace}
+.plan-box header b{color:var(--blue-dark)}
+.plan-box svg{display:block;width:100%;height:auto;background:#fbfcfb}
+.diff-side{flex:1;min-width:220px;font-size:12.5px}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;font-weight:700;color:var(--muted);margin-bottom:10px}
+.legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.legend .la{background:var(--add-bg);border:1.5px solid var(--add)}
+.legend .ld{background:var(--del-bg);border:1.5px dashed var(--del)}
+.legend .lc{background:var(--chg-bg);border:1.5px solid var(--chg)}
+.diff-near{font-weight:700;font-size:13px}
+.diff-side ul{margin:6px 0 0 18px;line-height:1.6;color:var(--muted);font-size:12px}
+.diff-note{margin-top:8px;font-size:11.5px;color:var(--muted)}
+.diff-empty{padding:26px 14px;text-align:center;color:var(--muted);font-size:13px}
+
+/* ---------- 右カラム：タイムライン ---------- */
+.tl-panel{position:sticky;top:12px;max-height:calc(100vh - 24px);display:flex;flex-direction:column}
+@media(max-width:960px){.tl-panel{position:static;max-height:none}}
+.tl-head{padding:13px 16px 11px;border-bottom:1px solid var(--line)}
+.tl-head .kicker{font-size:11px;font-weight:900;color:var(--blue-dark);letter-spacing:.06em}
+.tl-head h2{font-size:16px;line-height:1.45;margin-top:3px}
+.tl-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;font-size:12px;color:var(--muted)}
+.tl-scroll{overflow-y:auto;padding:6px 16px 16px}
+.timeline{position:relative;margin:10px 0 0 6px;padding-left:26px}
+.timeline:before{content:"";position:absolute;left:6px;top:10px;bottom:10px;width:2px;background:var(--line)}
+.ev{position:relative;padding:7px 0}
+.ev-dot{position:absolute;left:-26px;top:11px;width:14px;height:14px;border-radius:50%;background:var(--surface);border:3px solid var(--muted);z-index:1}
+.ev.open .ev-dot{background:var(--ink);border-color:var(--ink)}
+.ev.goal .ev-dot{width:18px;height:18px;left:-28px;top:9px;border-radius:5px;background:var(--gold-bg);border-color:var(--gold)}
+.ev.reopen .ev-dot{background:var(--red-bg);border-color:var(--red)}
+.ev.model .ev-dot{background:var(--blue);border-color:var(--blue)}
+.ev.status .ev-dot{border-radius:4px;background:var(--st-rev-bg);border-color:var(--st-rev)}
+.ev.now .ev-dot{border-color:var(--blue)}
+.ev.now .ev-dot:after{content:"";position:absolute;inset:2px;border-radius:50%;background:var(--blue);animation:blink 1.6s ease-in-out infinite}
+@media (prefers-reduced-motion: reduce){ .ev.now .ev-dot:after{animation:none} }
+.ev-row{width:100%;background:none;border:none;padding:2px 4px;border-radius:6px;display:flex;gap:8px;flex-wrap:wrap;align-items:baseline;font-size:13px;line-height:1.55;color:var(--ink)}
+button.ev-row:hover{background:var(--surface2)}
+.ev.model.selected .ev-row{background:var(--blue-soft)}
+.ev-when{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--muted);font-weight:700;white-space:nowrap}
+.ev-text{flex:1;min-width:170px}
+.ev-text b{font-weight:700}
+.ev.model .ev-text{font-weight:700}
+.ev .st-arrow{font-weight:900}
+footer{margin-top:16px;font-size:11.5px;color:var(--muted);text-align:center}
+
+@media(max-width:720px){
+  .c-tag,.c-due{display:none}
+  table.issues{min-width:0}
+  .c-title{min-width:0}
+}
+</style>
+</head>
+<body>
+
+<div class="shell">
+  <div class="page-head">
+    <h1>Issues — 履歴グラフ</h1>
+    <p>Open がスタート、Close がゴール。Reopen で同じグラフが続きます。行を選ぶと右にタイムライン、下に差分ビューが出ます。</p>
+  </div>
+
+  <div class="app-grid">
+    <div class="left-col">
+      <section class="panel issues-panel" aria-label="Issue一覧">
+        <div class="panel-head">
+          <h2>Issue 一覧</h2>
+          <span class="ph-note" id="tblCount"></span>
+          <div class="chips" id="chips" role="group" aria-label="ステータスで絞り込み"></div>
+        </div>
+        <div class="tbl-toolbar">
+          <input type="text" id="fltQ" placeholder="Title, ID, or description" aria-label="タイトル、ID、担当などで検索">
+        </div>
+        <div class="tbl-wrap">
+          <table class="issues">
+            <thead id="issueHead"></thead>
+            <tbody id="issueRows"></tbody>
+          </table>
+        </div>
+        <div class="pager">
+          <button id="btnPrev" type="button">前へ</button>
+          <span id="pagerInfo">—</span>
+          <button id="btnNext" type="button">次へ</button>
+          <span style="flex:1"></span>
+          <label>表示件数
+            <select id="pageSize">
+              <option value="5">5</option>
+              <option value="10">10</option>
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section class="panel" aria-label="差分ビュー">
+        <div class="panel-head">
+          <h2 id="diffTitle">差分ビュー</h2>
+          <div class="diff-counts" id="diffCounts"></div>
+        </div>
+        <div id="diffBody"></div>
+      </section>
+    </div>
+
+    <aside class="panel tl-panel" aria-label="タイムライン">
+      <div class="tl-head">
+        <p class="kicker">タイムライン</p>
+        <h2 id="tlTitle"></h2>
+        <div class="tl-meta" id="tlMeta"></div>
+      </div>
+      <div class="tl-scroll"><div class="timeline" id="tlBody"></div></div>
+    </aside>
+  </div>
+
+  <footer>UI モックです。ISS-301〜305 は実モデル「Snowdon Towers Sample Architectural」の実変更に基づきます。</footer>
+</div>
+
+<script>
+/* ================= 平面図（差分ビュー用：1枚に新旧を重ねて色分け） ================= */
+var SLOT = [[52,58],[150,58],[248,58]];
+function planFrame(room){
+  return '<rect x="18" y="14" width="304" height="172" fill="none" stroke="#5b6b60" stroke-width="2.5"/>'
+    + '<text x="34" y="36" font-size="12" font-weight="700" fill="#18211c">'+room+'</text>';
+}
+function pin(x,y){ return '<circle cx="'+x+'" cy="'+y+'" r="6" fill="#b91c1c" stroke="#fff" stroke-width="2"/>'; }
+
+function deskDiffSVG(p){
+  var s = '<svg viewBox="0 0 340 200" role="img" aria-label="差分平面図">' + planFrame(p.room);
+  for(var i=0;i<3;i++){
+    var q = SLOT[i], cx = q[0]+36;
+    if(p.moved === i){
+      s += '<rect x="'+q[0]+'" y="'+q[1]+'" width="72" height="40" rx="4" fill="#fff3bf" stroke="#b8860b" stroke-width="2.5"/>';
+      s += '<text x="'+cx+'" y="'+(q[1]+19)+'" font-size="11" font-weight="700" text-anchor="middle" fill="#18211c">机 '+(i+1)+'</text>';
+      s += '<text x="'+cx+'" y="'+(q[1]+33)+'" font-size="8.5" font-weight="700" text-anchor="middle" fill="#b8860b">配置変更</text>';
+    } else if(i < p.desks && i < p.before){
+      s += '<rect x="'+q[0]+'" y="'+q[1]+'" width="72" height="40" rx="4" fill="#e8ece8" stroke="#5b6b60" stroke-width="2"/>';
+      s += '<text x="'+cx+'" y="'+(q[1]+24)+'" font-size="11" font-weight="700" text-anchor="middle" fill="#18211c">机 '+(i+1)+'</text>';
+    } else if(i < p.desks && i >= p.before){
+      s += '<rect x="'+q[0]+'" y="'+q[1]+'" width="72" height="40" rx="4" fill="#d9f2e3" stroke="#1e9e57" stroke-width="2.5"/>';
+      s += '<text x="'+cx+'" y="'+(q[1]+19)+'" font-size="11" font-weight="700" text-anchor="middle" fill="#14532d">机 '+(i+1)+'</text>';
+      s += '<text x="'+cx+'" y="'+(q[1]+33)+'" font-size="8.5" font-weight="700" text-anchor="middle" fill="#1e9e57">追加</text>';
+    } else if(i >= p.desks && i < p.before){
+      s += '<rect x="'+q[0]+'" y="'+q[1]+'" width="72" height="40" rx="4" fill="#fde3e1" stroke="#d43a2f" stroke-width="2" stroke-dasharray="5 4"/>';
+      s += '<text x="'+cx+'" y="'+(q[1]+19)+'" font-size="11" font-weight="700" text-anchor="middle" fill="#7f1d1d">机 '+(i+1)+'</text>';
+      s += '<text x="'+cx+'" y="'+(q[1]+33)+'" font-size="8.5" font-weight="700" text-anchor="middle" fill="#d43a2f">削除</text>';
+    } else {
+      s += '<rect x="'+q[0]+'" y="'+q[1]+'" width="72" height="40" rx="4" fill="none" stroke="#c3ccc5" stroke-width="1.5" stroke-dasharray="5 4"/>';
+      s += '<text x="'+cx+'" y="'+(q[1]+24)+'" font-size="9" text-anchor="middle" fill="#a7b3aa">空き</text>';
+    }
+  }
+  return s + pin(170,140) + '</svg>';
+}
+
+function roomDiffSVG(){
+  var s = '<svg viewBox="0 0 340 200" role="img" aria-label="差分平面図">' + planFrame('3F 会議室');
+  s += '<line x1="202" y1="14" x2="202" y2="186" stroke="#d43a2f" stroke-width="2" stroke-dasharray="6 4"/>';
+  s += '<text x="196" y="176" font-size="9" font-weight="700" text-anchor="end" fill="#d43a2f">旧・壁位置</text>';
+  s += '<line x1="262" y1="14" x2="262" y2="186" stroke="#b8860b" stroke-width="4"/>';
+  s += '<text x="268" y="36" font-size="11" fill="#66706a">廊下</text>';
+  s += '<text x="34" y="56" font-size="11" fill="#66706a">面積 28.4㎡ → 34.8㎡</text>';
+  s += '<rect x="52" y="96" width="110" height="44" rx="4" fill="#e8ece8" stroke="#5b6b60" stroke-width="2"/>';
+  s += '<text x="107" y="122" font-size="11" font-weight="700" text-anchor="middle" fill="#18211c">会議テーブル</text>';
+  s += '<text x="34" y="168" font-size="10" fill="#b8860b" font-weight="700">壁が 900mm 移動（変更）</text>';
+  return s + pin(170,80) + '</svg>';
+}
+
+function propDiffSVG(){
+  var s = '<svg viewBox="0 0 340 200" role="img" aria-label="差分平面図">';
+  s += '<rect x="18" y="14" width="304" height="172" fill="#fffbe8" stroke="#b8860b" stroke-width="3"/>';
+  s += '<text x="34" y="36" font-size="12" font-weight="700" fill="#18211c">2F 応接室</text>';
+  s += '<text x="34" y="56" font-size="11" fill="#66706a">面積 28.4㎡（変わらず）</text>';
+  s += '<rect x="52" y="96" width="110" height="44" rx="4" fill="#e8ece8" stroke="#5b6b60" stroke-width="2"/>';
+  s += '<text x="107" y="122" font-size="11" font-weight="700" text-anchor="middle" fill="#18211c">テーブル</text>';
+  s += '<circle cx="52" cy="70" r="10" fill="none" stroke="#5b6b60" stroke-width="2"/><circle cx="88" cy="70" r="10" fill="none" stroke="#5b6b60" stroke-width="2"/><circle cx="124" cy="70" r="10" fill="none" stroke="#5b6b60" stroke-width="2"/>';
+  s += '<text x="34" y="168" font-size="10" fill="#b8860b" font-weight="700">部屋の枠＝プロパティ変更（形状変化なし）</text>';
+  return s + pin(170,140) + '</svg>';
+}
+
+function beamDiffSVG(){
+  var s = '<svg viewBox="0 0 340 200" role="img" aria-label="差分平面図">' + planFrame('2F 執務室（天井伏図）');
+  s += '<rect x="40" y="76" width="260" height="12" fill="#fde3e1" stroke="#d43a2f" stroke-width="2" stroke-dasharray="5 4"/>';
+  s += '<rect x="40" y="122" width="260" height="12" fill="#fde3e1" stroke="#d43a2f" stroke-width="2" stroke-dasharray="5 4"/>';
+  s += '<text x="170" y="70" font-size="9" font-weight="700" text-anchor="middle" fill="#d43a2f">旧・梁 2本</text>';
+  s += '<rect x="40" y="92" width="260" height="26" fill="#fff3bf" stroke="#b8860b" stroke-width="2.5"/>';
+  s += '<text x="170" y="109" font-size="10" font-weight="700" text-anchor="middle" fill="#7c5a06">梁 1本（太く統合）</text>';
+  s += '<text x="170" y="162" font-size="11" text-anchor="middle" fill="#66706a">削除1／変更1 で 2本 → 1本</text>';
+  return s + pin(170,52) + '</svg>';
+}
+
+function fixtureDiffSVG(){
+  var s = '<svg viewBox="0 0 340 200" role="img" aria-label="差分平面図">' + planFrame('1F トイレ');
+  s += '<rect x="52" y="58" width="72" height="36" rx="6" fill="#e8ece8" stroke="#5b6b60" stroke-width="2"/>';
+  s += '<text x="88" y="80" font-size="10" text-anchor="middle" fill="#18211c">洗面台</text>';
+  s += '<rect x="150" y="52" width="64" height="22" fill="#fde3e1" stroke="#d43a2f" stroke-width="2" stroke-dasharray="5 4"/>';
+  s += '<rect x="156" y="74" width="52" height="52" rx="6" fill="#fde3e1" stroke="#d43a2f" stroke-width="2" stroke-dasharray="5 4"/>';
+  s += '<text x="182" y="146" font-size="9" font-weight="700" text-anchor="middle" fill="#d43a2f">削除：便器（A社・角形）</text>';
+  s += '<ellipse cx="232" cy="66" rx="30" ry="12" fill="#d9f2e3" stroke="#1e9e57" stroke-width="2.5"/>';
+  s += '<ellipse cx="232" cy="102" rx="26" ry="30" fill="#d9f2e3" stroke="#1e9e57" stroke-width="2.5"/>';
+  s += '<text x="232" y="168" font-size="9" font-weight="700" text-anchor="middle" fill="#1e9e57">追加：便器（B社・丸形）</text>';
+  return s + pin(292,150) + '</svg>';
+}
+
+function plantingDiffSVG(){
+  var s = '<svg viewBox="0 0 340 200" role="img" aria-label="差分平面図">' + planFrame('1F 外構・中庭');
+  s += '<rect x="52" y="120" width="236" height="18" fill="#e8ece8" stroke="#c3ccc5" stroke-width="1.5"/>';
+  s += '<text x="170" y="133" font-size="9" text-anchor="middle" fill="#66706a">通路</text>';
+  s += '<circle cx="84" cy="78" r="20" fill="#e8ece8" stroke="#5b6b60" stroke-width="2"/><text x="84" y="82" font-size="9" text-anchor="middle" fill="#18211c">植栽</text>';
+  s += '<circle cx="150" cy="78" r="20" fill="#e8ece8" stroke="#5b6b60" stroke-width="2"/><text x="150" y="82" font-size="9" text-anchor="middle" fill="#18211c">植栽</text>';
+  s += '<circle cx="216" cy="78" r="20" fill="#e8ece8" stroke="#5b6b60" stroke-width="2"/><text x="216" y="82" font-size="9" text-anchor="middle" fill="#18211c">植栽</text>';
+  s += '<circle cx="272" cy="78" r="22" fill="#d9f2e3" stroke="#1e9e57" stroke-width="2.5"/><text x="272" y="76" font-size="9" font-weight="700" text-anchor="middle" fill="#14532d">植栽</text><text x="272" y="88" font-size="8.5" font-weight="700" text-anchor="middle" fill="#1e9e57">追加</text>';
+  s += '<text x="34" y="168" font-size="10" fill="#1e9e57" font-weight="700">既存の植栽をコピーして 1つ追加</text>';
+  return s + pin(272,116) + '</svg>';
+}
+function pergolaDiffSVG(){
+  var s = '<svg viewBox="0 0 340 200" role="img" aria-label="差分平面図">' + planFrame('1F 外構・テラス');
+  s += '<rect x="52" y="120" width="236" height="18" fill="#e8ece8" stroke="#c3ccc5" stroke-width="1.5"/>';
+  s += '<text x="170" y="133" font-size="9" text-anchor="middle" fill="#66706a">通路</text>';
+  s += '<circle cx="76" cy="76" r="16" fill="#e8ece8" stroke="#5b6b60" stroke-width="2"/><text x="76" y="79" font-size="8.5" text-anchor="middle" fill="#18211c">植栽</text>';
+  s += '<rect x="130" y="56" width="110" height="44" rx="4" fill="#fde3e1" stroke="#d43a2f" stroke-width="2" stroke-dasharray="5 4"/>';
+  s += '<line x1="138" y1="56" x2="138" y2="100" stroke="#d43a2f" stroke-width="1.5" stroke-dasharray="4 3"/><line x1="168" y1="56" x2="168" y2="100" stroke="#d43a2f" stroke-width="1.5" stroke-dasharray="4 3"/><line x1="198" y1="56" x2="198" y2="100" stroke="#d43a2f" stroke-width="1.5" stroke-dasharray="4 3"/><line x1="228" y1="56" x2="228" y2="100" stroke="#d43a2f" stroke-width="1.5" stroke-dasharray="4 3"/>';
+  s += '<text x="185" y="82" font-size="10" font-weight="700" text-anchor="middle" fill="#7f1d1d">藤棚</text>';
+  s += '<text x="185" y="146" font-size="9" font-weight="700" text-anchor="middle" fill="#d43a2f">削除：藤棚 ×1（旧位置をゴースト表示）</text>';
+  s += '<text x="34" y="168" font-size="10" fill="#66706a">撤去後はテラスが開放される</text>';
+  return s + pin(262,76) + '</svg>';
+}
+function lightDiffSVG(){
+  var s = '<svg viewBox="0 0 340 200" role="img" aria-label="差分平面図">' + planFrame('外構・通路沿い');
+  s += '<rect x="34" y="96" width="272" height="22" fill="#e8ece8" stroke="#c3ccc5" stroke-width="1.5"/>';
+  s += '<text x="170" y="111" font-size="9" text-anchor="middle" fill="#66706a">通路</text>';
+  s += '<circle cx="92" cy="66" r="11" fill="none" stroke="#9aa6ad" stroke-width="2" stroke-dasharray="4 3"/><text x="92" y="50" font-size="8.5" text-anchor="middle" fill="#9aa6ad">旧</text>';
+  s += '<circle cx="228" cy="66" r="11" fill="none" stroke="#9aa6ad" stroke-width="2" stroke-dasharray="4 3"/><text x="228" y="50" font-size="8.5" text-anchor="middle" fill="#9aa6ad">旧</text>';
+  s += '<line x1="104" y1="70" x2="122" y2="82" stroke="#b8860b" stroke-width="2" marker-end="url(#arrL)"/><line x1="216" y1="70" x2="198" y2="82" stroke="#b8860b" stroke-width="2" marker-end="url(#arrL)"/>';
+  s += '<defs><marker id="arrL" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#b8860b"/></marker></defs>';
+  s += '<circle cx="130" cy="86" r="13" fill="#fff3bf" stroke="#b8860b" stroke-width="2.5"/><text x="130" y="90" font-size="9" font-weight="700" text-anchor="middle" fill="#7c5a06">外灯</text>';
+  s += '<circle cx="190" cy="86" r="13" fill="#fff3bf" stroke="#b8860b" stroke-width="2.5"/><text x="190" y="90" font-size="9" font-weight="700" text-anchor="middle" fill="#7c5a06">外灯</text>';
+  s += '<text x="34" y="152" font-size="10" fill="#b8860b" font-weight="700">小型外灯 2基を移動（ゴースト＝移動前）</text>';
+  s += '<text x="34" y="168" font-size="10" fill="#66706a">通路の照明バランスを調整</text>';
+  return s + pin(170,140) + '</svg>';
+}
+function doorPropDiffSVG(){
+  var s = '<svg viewBox="0 0 340 200" role="img" aria-label="差分平面図">';
+  s += '<rect x="18" y="14" width="304" height="172" fill="#fffbe8" stroke="#b8860b" stroke-width="3"/>';
+  s += '<text x="34" y="36" font-size="12" font-weight="700" fill="#18211c">1F 玄関まわり</text>';
+  s += '<rect x="130" y="58" width="80" height="12" fill="#e8ece8" stroke="#5b6b60" stroke-width="2"/>';
+  s += '<path d="M 130 70 A 80 80 0 0 1 210 150" fill="none" stroke="#5b6b60" stroke-width="1.5" stroke-dasharray="4 3"/>';
+  s += '<rect x="126" y="54" width="88" height="20" rx="3" fill="#fff3bf" stroke="#b8860b" stroke-width="2"/>';
+  s += '<text x="170" y="68" font-size="10" font-weight="700" text-anchor="middle" fill="#18211c">ドア</text>';
+  s += '<rect x="52" y="118" width="236" height="30" rx="4" fill="#ffffff" stroke="#b8860b" stroke-width="1.5"/>';
+  s += '<text x="62" y="137" font-size="10" fill="#18211c">コメント： <tspan font-weight="700">diff-test</tspan>（確認メモを追記）</text>';
+  s += '<text x="34" y="168" font-size="10" fill="#b8860b" font-weight="700">形状変化なし — プロパティのみ変更</text>';
+  return s + pin(238,64) + '</svg>';
+}
+function wallRenameDiffSVG(){
+  var s = '<svg viewBox="0 0 340 200" role="img" aria-label="差分平面図">';
+  s += '<rect x="18" y="14" width="304" height="172" fill="none" stroke="#5b6b60" stroke-width="2.5"/>';
+  s += '<text x="34" y="36" font-size="12" font-weight="700" fill="#18211c">2F Main Unit</text>';
+  s += '<text x="34" y="52" font-size="10" fill="#66706a"><tspan text-decoration="line-through">Studio Unit</tspan> → Main Unit（室名変更）</text>';
+  s += '<rect x="52" y="78" width="22" height="22" fill="#e8ece8" stroke="#5b6b60" stroke-width="2"/><rect x="266" y="78" width="22" height="22" fill="#e8ece8" stroke="#5b6b60" stroke-width="2"/>';
+  s += '<text x="63" y="72" font-size="8.5" text-anchor="middle" fill="#66706a">柱</text><text x="277" y="72" font-size="8.5" text-anchor="middle" fill="#66706a">柱</text>';
+  s += '<line x1="63" y1="70" x2="63" y2="150" stroke="#d43a2f" stroke-width="1.5" stroke-dasharray="6 4"/>';
+  s += '<line x1="277" y1="70" x2="277" y2="150" stroke="#d43a2f" stroke-width="1.5" stroke-dasharray="6 4"/>';
+  s += '<text x="70" y="146" font-size="8.5" fill="#d43a2f" font-weight="700">旧：柱芯</text>';
+  s += '<line x1="74" y1="89" x2="266" y2="89" stroke="#d43a2f" stroke-width="1.5" stroke-dasharray="6 4"/>';
+  s += '<line x1="74" y1="100" x2="266" y2="100" stroke="#b8860b" stroke-width="4"/>';
+  s += '<text x="170" y="122" font-size="10" font-weight="700" text-anchor="middle" fill="#b8860b">壁：柱芯 → 柱面へ移動</text>';
+  s += '<text x="34" y="168" font-size="10" fill="#66706a">壁の線が柱の面に揃う（有効寸法が変わる）</text>';
+  return s + pin(170,140) + '</svg>';
+}
+function diffSVG(p){
+  if(p.kind==='room') return roomDiffSVG();
+  if(p.kind==='prop') return propDiffSVG();
+  if(p.kind==='beam') return beamDiffSVG();
+  if(p.kind==='fixture') return fixtureDiffSVG();
+  if(p.kind==='planting') return plantingDiffSVG();
+  if(p.kind==='pergola') return pergolaDiffSVG();
+  if(p.kind==='light') return lightDiffSVG();
+  if(p.kind==='doorprop') return doorPropDiffSVG();
+  if(p.kind==='wallrename') return wallRenameDiffSVG();
+  return deskDiffSVG(p);
+}
+function planHeadRight(p){
+  if(p.kind==='room') return '面積 28.4 → <b>34.8㎡</b>';
+  if(p.kind==='prop') return '用途 会議室 → <b>応接室</b>';
+  if(p.kind==='beam') return '梁 2本 → <b>1本</b>';
+  if(p.kind==='fixture') return '便器 A社 → <b>B社</b>';
+  if(p.kind==='planting') return '植栽 +<b>1</b>';
+  if(p.kind==='pergola') return '藤棚 −<b>1</b>';
+  if(p.kind==='light') return '外灯 移動 <b>×2</b>';
+  if(p.kind==='doorprop') return 'コメント <b>diff-test</b> 追記';
+  if(p.kind==='wallrename') return 'Studio Unit → <b>Main Unit</b>';
+  return '机 '+p.before+' → <b>'+p.desks+'</b>';
+}
+function prevVer(ver){ return 'V' + (parseInt(ver.slice(1),10) - 1); }
+
+/* ================= データ ================= */
+var ISSUES = [
+ {
+  id:"ISS-201", title:"何もないところに、机を1つ追加してほしい", status:"Closed", assignee:"佐藤（監理者）", due:"2026-10-02",
+  mini:[["start","●"],["model","V2"],["goal","🏁"]],
+  events:[
+   {type:"open", when:"2026-09-12", text:"<b>施主・伊藤</b>が起票（Open）"},
+   {type:"comment", when:"2026-09-13", text:"<b>設計者・田中</b>がコメント「V2で反映します」"},
+   {type:"assign", when:"2026-09-16", text:"担当変更：<b>田中 → 佐藤</b>"},
+   {type:"model", when:"2026-09-30", text:"モデル更新 V2 ― 追加1（机 +1）", plan:{ver:"V2", before:0, desks:1, room:"2F 共有スペース", counts:{a:1,d:0,c:0}, diff:{items:["追加：机 ×1","削除：なし","変更：なし"], near:"机 +1"}}},
+   {type:"comment", when:"2026-10-01", text:"<b>監理者・佐藤</b>がコメント「確認しました」"},
+   {type:"goal", when:"2026-10-02", text:"<b>Close</b> — ゴール"}
+  ]
+ },
+ {
+  id:"ISS-202", title:"机があるところから、机を1つ減らしてほしい", status:"Closed", assignee:"鈴木（設計者）", due:"2026-10-20",
+  mini:[["start","●"],["model","V2"],["model","V3"],["goal","🏁"]],
+  events:[
+   {type:"open", when:"2026-09-15", text:"<b>監理者・佐藤</b>が起票（Open）"},
+   {type:"comment", when:"2026-09-18", text:"<b>設計者・田中</b>がコメント「V2で対応します」"},
+   {type:"model", when:"2026-09-30", text:"モデル更新 V2 ― 追加0／削除0／変更2（別の場所の変更のみ）― このIssueの周辺：変更なし", plan:{ver:"V2", before:3, desks:3, room:"3F 会議室", counts:{a:0,d:0,c:0}, diff:{items:["追加：なし","削除：なし","変更：2（別の場所の壁・扉）"], near:"変更なし"}}},
+   {type:"comment", when:"2026-10-03", text:"<b>監理者・佐藤</b>がコメント「まだ3つです。差し戻し」"},
+   {type:"assign", when:"2026-10-06", text:"担当変更：<b>田中 → 鈴木</b>"},
+   {type:"model", when:"2026-10-14", text:"モデル更新 V3 ― 削除1（机 −1）", plan:{ver:"V3", before:3, desks:2, room:"3F 会議室", counts:{a:0,d:1,c:0}, diff:{items:["追加：なし","削除：机 ×1","変更：なし"], near:"机 −1"}}},
+   {type:"comment", when:"2026-10-18", text:"<b>監理者・佐藤</b>がコメント「確認しました」"},
+   {type:"goal", when:"2026-10-20", text:"<b>Close</b> — ゴール"}
+  ]
+ },
+ {
+  id:"ISS-203", title:"机を2つ追加してほしい", status:"Closed", assignee:"鈴木（設計者）", due:"2026-11-11",
+  mini:[["start","●"],["model","V2"],["goal","🏁"],["reopen","↩"],["model","V4"],["goal","🏁"]],
+  events:[
+   {type:"open", when:"2026-09-20", text:"<b>施主・伊藤</b>が起票（Open）"},
+   {type:"comment", when:"2026-09-22", text:"<b>設計者・田中</b>がコメント「V2で反映します」"},
+   {type:"model", when:"2026-09-30", text:"モデル更新 V2 ― 追加1（机 +1）― あと1つ不足", plan:{ver:"V2", before:0, desks:1, room:"1F 打合せコーナー", counts:{a:1,d:0,c:0}, diff:{items:["追加：机 ×1","削除：なし","変更：なし"], near:"机 +1（あと1つ不足）"}}},
+   {type:"comment", when:"2026-10-02", text:"<b>設計者・田中</b>がコメント「対応しました」"},
+   {type:"goal", when:"2026-10-05", text:"<b>Close</b> — ゴール（1回目）"},
+   {type:"reopen", when:"2026-10-08", text:"<b>施主・伊藤</b>が Reopen「机が1つしかありません」"},
+   {type:"assign", when:"2026-10-09", text:"担当変更：<b>佐藤 → 鈴木</b>"},
+   {type:"model", when:"2026-10-28", text:"モデル更新 V4 ― 追加1（机 +1）", plan:{ver:"V4", before:1, desks:2, room:"1F 打合せコーナー", counts:{a:1,d:0,c:0}, diff:{items:["追加：机 ×1","削除：なし","変更：なし"], near:"机 +1"}}},
+   {type:"comment", when:"2026-11-02", text:"<b>施主・伊藤</b>がコメント「机2つを確認しました」"},
+   {type:"goal", when:"2026-11-11", text:"<b>Close</b> — ゴール（2回目）"}
+  ]
+ },
+ {
+  id:"ISS-204", tag:"部屋サイズ", title:"会議室を広くしてほしい", status:"Closed", assignee:"田中（設計者）", due:"2026-10-19",
+  mini:[["start","●"],["model","V3"],["goal","🏁"]],
+  events:[
+   {type:"open", when:"2026-09-18", text:"<b>施主・伊藤</b>が起票（Open）"},
+   {type:"comment", when:"2026-09-21", text:"<b>設計者・田中</b>がコメント「V3で壁を動かします」"},
+   {type:"model", when:"2026-10-14", text:"モデル更新 V3 ― 変更1（壁の移動）― 面積 28.4→34.8㎡", plan:{ver:"V3", kind:"room", counts:{a:0,d:0,c:1}, diff:{items:["追加：なし","削除：なし","変更：壁 ×1（900mm 移動）","面積：28.4㎡ → 34.8㎡"], near:"壁の移動（面積 28.4→34.8㎡）"}}},
+   {type:"comment", when:"2026-10-16", text:"<b>監理者・佐藤</b>がコメント「広くなったことを確認しました」"},
+   {type:"goal", when:"2026-10-19", text:"<b>Close</b> — ゴール"}
+  ]
+ },
+ {
+  id:"ISS-205", tag:"プロパティのみ", title:"部屋の用途を会議室から応接室に変更してほしい", status:"Closed", assignee:"田中（設計者）", due:"2026-10-20",
+  mini:[["start","●"],["model","V3"],["goal","🏁"]],
+  events:[
+   {type:"open", when:"2026-09-25", text:"<b>監理者・佐藤</b>が起票（Open）"},
+   {type:"comment", when:"2026-09-28", text:"<b>設計者・田中</b>がコメント「用途と仕上げだけ変更します」"},
+   {type:"model", when:"2026-10-14", text:"モデル更新 V3 ― 変更1（プロパティのみ、形状変化なし）― 用途：会議室→応接室", plan:{ver:"V3", kind:"prop", counts:{a:0,d:0,c:1}, diff:{items:["追加：なし","削除：なし","変更：部屋 ×1（プロパティのみ）","用途：会議室 → 応接室","仕上げ：ビニルクロス → 木目パネル"], near:"プロパティのみ変更（形状変化なし）"}}},
+   {type:"comment", when:"2026-10-17", text:"<b>監理者・佐藤</b>がコメント「図面の見た目は同じですが、用途変更を確認しました」"},
+   {type:"goal", when:"2026-10-20", text:"<b>Close</b> — ゴール"}
+  ]
+ },
+ {
+  id:"ISS-206", tag:"梁の統合", title:"梁を2本から1本にまとめてほしい", status:"Closed", assignee:"鈴木（施工者）", due:"2026-11-04",
+  mini:[["start","●"],["model","V4"],["goal","🏁"]],
+  events:[
+   {type:"open", when:"2026-10-03", text:"<b>監理者・佐藤</b>が起票（Open）"},
+   {type:"comment", when:"2026-10-06", text:"<b>設計者・田中</b>がコメント「構造を確認します」"},
+   {type:"assign", when:"2026-10-09", text:"担当変更：<b>田中（設計者） → 鈴木（施工者）</b>"},
+   {type:"model", when:"2026-10-28", text:"モデル更新 V4 ― 削除1／変更1（梁 2本→1本に統合）", plan:{ver:"V4", kind:"beam", counts:{a:0,d:1,c:1}, diff:{items:["追加：なし","削除：梁 ×1","変更：梁 ×1（断面を拡大して統合）"], near:"梁 2本→1本に統合"}}},
+   {type:"comment", when:"2026-10-30", text:"<b>監理者・佐藤</b>がコメント「梁1本になったことを確認しました」"},
+   {type:"goal", when:"2026-11-04", text:"<b>Close</b> — ゴール"}
+  ]
+ },
+ {
+  id:"ISS-207", tag:"器具の作り替え", title:"便器を別メーカーのものに取り替えてほしい", status:"Closed", assignee:"田中（設計者）", due:"2026-11-05",
+  mini:[["start","●"],["model","V4"],["goal","🏁"]],
+  events:[
+   {type:"open", when:"2026-10-10", text:"<b>施主・伊藤</b>が起票（Open）"},
+   {type:"comment", when:"2026-10-13", text:"<b>設計者・田中</b>がコメント「V4で器具を取り替えます」"},
+   {type:"model", when:"2026-10-28", text:"モデル更新 V4 ― 削除1／追加1（便器の作り替え）", plan:{ver:"V4", kind:"fixture", counts:{a:1,d:1,c:0}, diff:{items:["追加：便器 ×1（B社・丸形）","削除：便器 ×1（A社・角形）","変更：なし"], near:"便器の作り替え（削除1／追加1）", note:"diff では削除と追加に分かれる（同じ器具の作り替えとは自動では繋がらない）"}}},
+   {type:"comment", when:"2026-11-01", text:"<b>施主・伊藤</b>がコメント「新しい便器を確認しました」"},
+   {type:"goal", when:"2026-11-05", text:"<b>Close</b> — ゴール"}
+  ]
+ },
+ {
+  id:"ISS-208", tag:"起票したて", title:"3F 執務室に机を1つ追加してほしい", status:"Open", assignee:"田中（設計者）", due:"2026-11-21",
+  mini:[["start","●"],["now",""]],
+  events:[
+   {type:"open", when:"2026-11-14", text:"<b>施主・伊藤</b>が起票（Open）"},
+   {type:"comment", when:"2026-11-15", text:"<b>設計者・田中</b>がコメント「次のモデル更新で反映します」"},
+   {type:"now", when:"現在", text:"対応中 — モデル更新はまだ"}
+  ]
+ },
+ {
+  id:"ISS-209", tag:"長期化", title:"2F 会議室の机を1つ減らしてほしい", status:"Open", assignee:"鈴木（設計者）", due:"2026-10-24",
+  mini:[["start","●"],["model","V2"],["model","V3"],["model","V4"],["now",""]],
+  events:[
+   {type:"open", when:"2026-09-10", text:"<b>監理者・佐藤</b>が起票（Open）"},
+   {type:"comment", when:"2026-09-12", text:"<b>設計者・田中</b>がコメント「V2で対応します」"},
+   {type:"model", when:"2026-09-30", text:"モデル更新 V2 ― このIssueの周辺：変更なし", plan:{ver:"V2", before:3, desks:3, room:"2F 会議室", counts:{a:0,d:0,c:0}, diff:{items:["追加：なし","削除：なし","変更：3（すべて別の場所）"], near:"変更なし"}}},
+   {type:"comment", when:"2026-10-03", text:"<b>監理者・佐藤</b>がコメント「まだ3つです」"},
+   {type:"model", when:"2026-10-14", text:"モデル更新 V3 ― このIssueの周辺：変更なし", plan:{ver:"V3", before:3, desks:3, room:"2F 会議室", counts:{a:0,d:0,c:0}, diff:{items:["追加：なし","削除：なし","変更：2（すべて別の場所）"], near:"変更なし"}}},
+   {type:"comment", when:"2026-10-17", text:"<b>監理者・佐藤</b>がコメント「2回連続で未反映です。優先度を上げてください」"},
+   {type:"assign", when:"2026-10-20", text:"担当変更：<b>田中 → 鈴木</b>"},
+   {type:"model", when:"2026-10-28", text:"モデル更新 V4 ― 変更1（机の配置のみ）― 数は変わらず", plan:{ver:"V4", before:3, desks:3, room:"2F 会議室", moved:1, counts:{a:0,d:0,c:1}, diff:{items:["追加：なし","削除：なし","変更：机 ×1（配置のみ）"], near:"配置のみ変更（机 −1 は未反映）"}}},
+   {type:"comment", when:"2026-11-03", text:"<b>監理者・佐藤</b>がコメント「配置は変わりましたが、数はまだ3つです」"},
+   {type:"now", when:"現在", text:"Open のまま 2ヶ月超 — モデル更新3回を跨いでも未解決"}
+  ]
+ },
+ {
+  id:"ISS-210", tag:"相手ボール", title:"1F ロビーに机を2つ追加してほしい", status:"Pending", assignee:"佐藤（監理者）", due:"2026-11-20",
+  mini:[["start","●"],["status","◆"],["pending","II"]],
+  events:[
+   {type:"open", when:"2026-11-05", text:"<b>施主・伊藤</b>が起票（Open）"},
+   {type:"assign", when:"2026-11-07", text:"担当変更：<b>田中 → 佐藤</b>"},
+   {type:"status", when:"2026-11-08", text:"状態変更：<span class=\"st-arrow\">Open → Pending</span>（施主のレイアウト確定待ち）"},
+   {type:"now", when:"現在", text:"Pending — 相手の返答待ちで止まっている"}
+  ]
+ },
+ {
+  id:"ISS-211", tag:"確認待ち", title:"2F 応接室に机を1つ追加してほしい", status:"In Review", assignee:"佐藤（監理者）", due:"2026-11-06",
+  mini:[["start","●"],["model","V4"],["review","⚑"]],
+  events:[
+   {type:"open", when:"2026-10-20", text:"<b>施主・伊藤</b>が起票（Open）"},
+   {type:"comment", when:"2026-10-22", text:"<b>設計者・田中</b>がコメント「V4で反映します」"},
+   {type:"model", when:"2026-10-28", text:"モデル更新 V4 ― 追加1（机 +1）", plan:{ver:"V4", before:0, desks:1, room:"2F 応接室", counts:{a:1,d:0,c:0}, diff:{items:["追加：机 ×1","削除：なし","変更：なし"], near:"机 +1"}}},
+   {type:"status", when:"2026-10-30", text:"状態変更：<span class=\"st-arrow\">Open → In Review</span>（反映済み・確認待ち）"},
+   {type:"now", when:"現在", text:"In Review — Close の一歩手前"}
+  ]
+ },
+ {
+  id:"ISS-212", tag:"Reopen後", title:"3F 会議室に机を2つ追加してほしい", status:"Open", assignee:"田中（設計者）", due:"2026-11-25",
+  mini:[["start","●"],["model","V2"],["goal","🏁"],["reopen","↩"],["now",""]],
+  events:[
+   {type:"open", when:"2026-09-08", text:"<b>施主・伊藤</b>が起票（Open）"},
+   {type:"comment", when:"2026-09-11", text:"<b>設計者・田中</b>がコメント「V2で2つ入れます」"},
+   {type:"model", when:"2026-09-30", text:"モデル更新 V2 ― 追加2（机 +2）", plan:{ver:"V2", before:0, desks:2, room:"3F 会議室", counts:{a:2,d:0,c:0}, diff:{items:["追加：机 ×2","削除：なし","変更：なし"], near:"机 +2"}}},
+   {type:"goal", when:"2026-10-05", text:"<b>Close</b> — ゴール（1回目）"},
+   {type:"reopen", when:"2026-10-12", text:"<b>施主・伊藤</b>が Reopen「1つの向きが依頼と逆でした」"},
+   {type:"comment", when:"2026-10-15", text:"<b>設計者・田中</b>がコメント「向きを直して次回更新に入れます」"},
+   {type:"now", when:"現在", text:"Open — 旗の先でグラフが続いている"}
+  ]
+ },
+ {
+  id:"ISS-301", tag:"実データ", title:"外構に植栽を1つ追加してほしい", status:"Closed", assignee:"田中（設計者）", due:"2026-11-18",
+  mini:[["start","●"],["model","V2"],["goal","🏁"]],
+  events:[
+   {type:"open", when:"2026-11-10", text:"<b>施主・伊藤</b>が起票（Open）"},
+   {type:"comment", when:"2026-11-12", text:"<b>設計者・田中</b>がコメント「近くの植栽と揃えて V2 で追加します」"},
+   {type:"model", when:"2026-11-16", text:"モデル更新 V2 ― 追加1（植栽 +1）", plan:{ver:"V2", kind:"planting", counts:{a:1,d:0,c:0}, diff:{items:["追加：植栽 ×1（既存の植栽をコピー）","削除：なし","変更：なし"], near:"植栽 +1", note:"実モデル「Snowdon Towers Sample Architectural」での実際の編集に基づく"}}},
+   {type:"comment", when:"2026-11-17", text:"<b>監理者・佐藤</b>がコメント「植栽が1つ増えたことを確認しました」"},
+   {type:"goal", when:"2026-11-17", text:"<b>Close</b> — ゴール"}
+  ]
+ },
+ {
+  id:"ISS-302", tag:"実データ", title:"藤棚を1つ撤去してほしい", status:"Closed", assignee:"田中（設計者）", due:"2026-11-18",
+  mini:[["start","●"],["model","V2"],["goal","🏁"]],
+  events:[
+   {type:"open", when:"2026-11-10", text:"<b>監理者・佐藤</b>が起票（Open）"},
+   {type:"comment", when:"2026-11-12", text:"<b>設計者・田中</b>がコメント「V2で藤棚を1つ撤去します」"},
+   {type:"model", when:"2026-11-16", text:"モデル更新 V2 ― 削除1（藤棚 −1）", plan:{ver:"V2", kind:"pergola", counts:{a:0,d:1,c:0}, diff:{items:["追加：なし","削除：藤棚 ×1","変更：なし"], near:"藤棚 −1", note:"実モデル「Snowdon Towers Sample Architectural」での実際の編集に基づく"}}},
+   {type:"comment", when:"2026-11-17", text:"<b>監理者・佐藤</b>がコメント「撤去を確認しました」"},
+   {type:"goal", when:"2026-11-17", text:"<b>Close</b> — ゴール"}
+  ]
+ },
+ {
+  id:"ISS-303", tag:"実データ", title:"小型外灯2基の位置を調整してほしい", status:"Closed", assignee:"鈴木（設計者）", due:"2026-11-19",
+  mini:[["start","●"],["model","V2"],["goal","🏁"]],
+  events:[
+   {type:"open", when:"2026-11-11", text:"<b>施主・伊藤</b>が起票（Open）"},
+   {type:"comment", when:"2026-11-13", text:"<b>設計者・鈴木</b>がコメント「通路沿いの2基を V2 で動かします」"},
+   {type:"model", when:"2026-11-16", text:"モデル更新 V2 ― 変更2（外灯 移動×2）", plan:{ver:"V2", kind:"light", counts:{a:0,d:0,c:2}, diff:{items:["追加：なし","削除：なし","変更：外灯 ×2（移動）"], near:"外灯 移動 ×2", note:"実モデル「Snowdon Towers Sample Architectural」での実際の編集に基づく"}}},
+   {type:"comment", when:"2026-11-17", text:"<b>監理者・佐藤</b>がコメント「2基の新しい位置を確認しました」"},
+   {type:"goal", when:"2026-11-17", text:"<b>Close</b> — ゴール"}
+  ]
+ },
+ {
+  id:"ISS-304", tag:"実データ", title:"ドアに確認メモを残してほしい", status:"Closed", assignee:"佐藤（監理者）", due:"2026-11-18",
+  mini:[["start","●"],["model","V2"],["goal","🏁"]],
+  events:[
+   {type:"open", when:"2026-11-11", text:"<b>監理者・佐藤</b>が起票（Open）"},
+   {type:"model", when:"2026-11-16", text:"モデル更新 V2 ― 変更1（プロパティのみ：コメント追記）", plan:{ver:"V2", kind:"doorprop", counts:{a:0,d:0,c:1}, diff:{items:["追加：なし","削除：なし","変更：ドア ×1（プロパティのみ）","コメント：「diff-test」を追記"], near:"プロパティのみ変更（形状変化なし）", note:"実モデル「Snowdon Towers Sample Architectural」での実際の編集に基づく"}}},
+   {type:"goal", when:"2026-11-17", text:"<b>Close</b> — ゴール"}
+  ]
+ },
+ {
+  id:"ISS-305", tag:"実データ", title:"2F 室名変更と壁位置の見直し", status:"In Review", assignee:"田中（設計者）", due:"2026-11-25",
+  mini:[["start","●"],["model","V3"],["review","⚑"]],
+  events:[
+   {type:"open", when:"2026-11-13", text:"<b>施主・伊藤</b>が起票（Open）"},
+   {type:"comment", when:"2026-11-14", text:"<b>設計者・田中</b>がコメント「室名と壁位置を合わせて V3 で見直します」"},
+   {type:"model", when:"2026-11-17", text:"モデル更新 V3 ― 追加51／削除33／変更374（実測）", plan:{ver:"V3", kind:"wallrename", counts:{a:51,d:33,c:374}, diff:{items:["部屋名変更：Studio Unit → Main Unit（プロパティ値が変わった行 40件。部屋要素本体＋部屋名を持つ関連要素群）","壁位置の移動：標準壁1件が約47mm平行移動（bbox 移動量 +0.14, +0.068, 0 ft）。接続する標準壁28件は形状変化（geomHash変化）として検出","波及：照明器具の移動（ペンダントライト7件、スコンスライト2件）","注記：追加51件の大半はビュー／セッション系の要素で、実モデル要素の追加ではない（Revit バージョン差の残差を含む）。変更374件は日本語ロケール保存同士の比較で、ロケールノイズ（英語→日本語保存時に発生する約34,718件の見かけ変更）は分離済み"], near:"室名変更＋壁の移動（実測）", note:"出典：Snowdon Towers Sample Architectural.rvt V2→V4（実質 V2→V3）Model Properties Diff 実測"}}},
+   {type:"status", when:"2026-11-17", text:"状態変更：<span class=\"st-arrow\">Open → In Review</span>（反映済み・確認待ち）"},
+   {type:"now", when:"現在", text:"In Review — Close の一歩手前"}
+  ]
+ }
+];
+
+var STATUS_CLS = {"Open":"open","Pending":"pending","In Review":"review","Closed":"closed"};
+var TODAY = "2026-11-17";
+var currentIssue = 6; /* ISS-207（器具の作り替え） */
+var selectedVer = null;
+var filter = "all";
+
+function countEvents(iss, type){ return iss.events.filter(function(e){ return e.type===type; }).length; }
+
+function miniHTML(iss){
+  return iss.mini.map(function(n, i){
+    var label = n[0]==='goal' ? '🏁' : n[0]==='reopen' ? '↩' : n[0]==='start' ? '●' : n[0]==='review' ? '⚑' : n[1];
+    var openEnd = (n[0]==='now' || n[0]==='pending') ? ' open-end' : '';
+    var node = '<span class="mini-node '+n[0]+'"><span class="dot">'+label+'</span></span>';
+    var line = i < iss.mini.length-1 ? '<span class="mini-line'+openEnd+'"></span>' : '';
+    return node + line;
+  }).join('');
+}
+
+function renderChips(){
+  var defs = [["all","すべて"],["Open","Open"],["Pending","Pending"],["In Review","In Review"],["Closed","Closed"]];
+  document.getElementById('chips').innerHTML = defs.map(function(d){
+    var n = d[0]==='all' ? ISSUES.length : ISSUES.filter(function(x){ return x.status===d[0]; }).length;
+    return '<button type="button" class="chip'+(filter===d[0]?' active':'')+'" data-f="'+d[0]+'">'+d[1]+' <span class="n">'+n+'</span></button>';
+  }).join('');
+  document.querySelectorAll('.chip').forEach(function(c){
+    c.addEventListener('click', function(){ filter = c.getAttribute('data-f'); page = 1; renderChips(); renderTable(); });
+  });
+}
+
+/* ---------- 表機能（sample-d と同じ：検索・ヘッダーソート・ページネーション） ---------- */
+var STATUS_BAR = {"Open":"#e8a33d","Pending":"#d97706","In Review":"#3b82c4","Closed":"#4caf7d"};
+var STATUS_LABEL = {"Open":"Open","Pending":"Pending","In Review":"In review","Closed":"Closed"};
+var page = 1, pageSize = 5, sortState = null, query = "";
+var COLS = [
+  {key:"num", label:"#", sortable:true},
+  {key:"title", label:"タイトル", sortable:true},
+  {key:"status", label:"ステータス", sortable:true},
+  {key:"assignee", label:"担当", sortable:true},
+  {key:"due", label:"期限", sortable:true, cls:"c-due"},
+  {key:"tag", label:"パターン", sortable:true, cls:"c-tag"},
+  {key:"mini", label:"履歴グラフ", sortable:false}
+];
+var SORT_GET = {
+  num: function(i){ return parseInt(i.id.replace(/\D/g,''),10); },
+  title: function(i){ return i.title; },
+  status: function(i){ return STATUS_LABEL[i.status] || i.status; },
+  assignee: function(i){ return i.assignee; },
+  due: function(i){ return i.due; },
+  tag: function(i){ return i.tag || ''; }
+};
+function visibleIssues(){
+  var q = query.trim().toLowerCase();
+  var list = ISSUES.map(function(iss, idx){ return {iss:iss, idx:idx}; }).filter(function(o){
+    if(filter!=='all' && o.iss.status!==filter) return false;
+    if(q){
+      var hay = (o.iss.id+' '+o.iss.title+' '+o.iss.assignee+' '+(o.iss.tag||'')).toLowerCase();
+      if(hay.indexOf(q)===-1) return false;
+    }
+    return true;
+  });
+  if(sortState){
+    var get = SORT_GET[sortState.key], dir = sortState.dir;
+    list.sort(function(a, b){
+      var va = get(a.iss), vb = get(b.iss);
+      var ea = (va==='' || va==null), eb = (vb==='' || vb==null);
+      if(ea || eb) return ea===eb ? 0 : (ea ? 1 : -1);
+      var c = (typeof va==='number' && typeof vb==='number') ? va-vb : String(va).localeCompare(String(vb),'ja',{numeric:true});
+      return c*dir;
+    });
+  }
+  return list;
+}
+function renderHead(){
+  document.getElementById('issueHead').innerHTML = '<tr>' + COLS.map(function(c){
+    var cls = c.cls || '';
+    if(!c.sortable) return '<th scope="col"'+(cls?' class="'+cls+'"':'')+'>'+c.label+'</th>';
+    var active = sortState && sortState.key===c.key;
+    var arrow = active ? ' <span class="arr">'+(sortState.dir===1?'▲':'▼')+'</span>' : '';
+    return '<th scope="col" class="sortable'+(active?' sorted':'')+(cls?' '+cls:'')+'" data-key="'+c.key+'" title="クリックでソート（昇順→降順→解除）">'+c.label+arrow+'</th>';
+  }).join('') + '</tr>';
+  document.querySelectorAll('#issueHead th.sortable').forEach(function(th){
+    th.addEventListener('click', function(){
+      var key = th.getAttribute('data-key');
+      if(!sortState || sortState.key!==key) sortState = {key:key, dir:1};
+      else if(sortState.dir===1) sortState = {key:key, dir:-1};
+      else sortState = null;
+      page = 1;
+      renderTable();
+    });
+  });
+}
+function renderTable(){
+  renderHead();
+  var list = visibleIssues();
+  var pages = Math.max(1, Math.ceil(list.length / pageSize));
+  if(page > pages) page = pages;
+  if(page < 1) page = 1;
+  var slice = list.slice((page-1)*pageSize, page*pageSize);
+  var html;
+  if(!slice.length){
+    html = '<tr><td colspan="7" style="color:var(--sd-sub)">条件に合う Issue はありません。</td></tr>';
+  } else {
+    html = slice.map(function(o){
+      var iss = o.iss, idx = o.idx;
+      var closes = countEvents(iss,'goal'), reopens = countEvents(iss,'reopen');
+      var badges = '';
+      if(closes>0 || reopens>0){
+        badges = '<div class="badges">'
+          + (closes>0 ? '<span class="badge">Close ×'+closes+'</span>' : '')
+          + (reopens>0 ? '<span class="badge reopen">Reopen ×'+reopens+'</span>' : '')
+          + '</div>';
+      }
+      var overdue = iss.status!=='Closed' && iss.due < TODAY;
+      return '<tr data-idx="'+idx+'" class="'+(idx===currentIssue?'active':'')+'" tabindex="0" aria-label="'+iss.id+' '+iss.title+'">'
+        + '<td class="c-num">'+iss.id.replace('ISS-','#')+'</td>'
+        + '<td class="c-title">'+iss.title+'</td>'
+        + '<td><span class="fst"><i style="background:'+STATUS_BAR[iss.status]+'"></i>'+STATUS_LABEL[iss.status]+'</span>'+badges+'</td>'
+        + '<td class="c-assignee">'+iss.assignee+'</td>'
+        + '<td class="c-due'+(overdue?' overdue':'')+'">'+iss.due+(overdue?'<span class="od">期限超過</span>':'')+'</td>'
+        + '<td class="c-tag">'+(iss.tag?'<span class="tag'+(iss.tag==='実データ'?' real':'')+'">'+iss.tag+'</span>':'')+'</td>'
+        + '<td><div class="mini-track">'+miniHTML(iss)+'</div></td>'
+        + '</tr>';
+    }).join('');
+  }
+  document.getElementById('issueRows').innerHTML = html;
+  document.getElementById('tblCount').textContent = list.length + ' 件表示 / 全 ' + ISSUES.length + ' 件';
+  document.getElementById('pagerInfo').textContent = page + ' / ' + pages + ' ページ（全 ' + list.length + ' 件）';
+  document.getElementById('btnPrev').disabled = page <= 1;
+  document.getElementById('btnNext').disabled = page >= pages;
+  document.querySelectorAll('#issueRows tr[data-idx]').forEach(function(r){
+    var go = function(){ selectIssue(parseInt(r.getAttribute('data-idx'),10)); };
+    r.addEventListener('click', go);
+    r.addEventListener('keydown', function(e){ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); go(); } });
+  });
+}
+
+function showDiff(plan){
+  selectedVer = plan ? plan.ver : null;
+  var title = document.getElementById('diffTitle');
+  var counts = document.getElementById('diffCounts');
+  var body = document.getElementById('diffBody');
+  if(!plan){
+    title.textContent = '差分ビュー';
+    counts.innerHTML = '';
+    body.innerHTML = '<p class="diff-empty">この Issue には、まだモデル更新がありません。<br>タイムラインにモデル更新が入ると、ここにバージョン間の差分が出ます。</p>';
+  } else {
+    title.textContent = '差分ビュー ' + prevVer(plan.ver) + ' → ' + plan.ver;
+    counts.innerHTML = '<span class="dc a">追加 '+plan.counts.a+'</span><span class="dc d">削除 '+plan.counts.d+'</span><span class="dc c">変更 '+plan.counts.c+'</span>';
+    body.innerHTML = '<div class="diff-body"><div class="diff-flex">'
+      + '<div class="plan-box"><header><span>モデル '+plan.ver+' 時点</span><span>'+planHeadRight(plan)+'</span></header>' + diffSVG(plan) + '</div>'
+      + '<div class="diff-side">'
+      + '<div class="legend"><span><i class="la"></i>追加</span><span><i class="ld"></i>削除</span><span><i class="lc"></i>変更</span><span>灰色＝変化なし</span></div>'
+      + '<p class="diff-near">このIssueの周辺：'+plan.diff.near+'</p>'
+      + '<ul>' + plan.diff.items.map(function(it){ return '<li>'+it+'</li>'; }).join('') + '</ul>'
+      + (plan.diff.note ? '<p class="diff-note">'+plan.diff.note+'</p>' : '')
+      + '</div></div></div>';
+  }
+  document.querySelectorAll('.ev.model').forEach(function(el){
+    el.classList.toggle('selected', !!plan && el.getAttribute('data-ver')===plan.ver);
+  });
+}
+
+function selectIssue(idx){
+  currentIssue = idx;
+  var iss = ISSUES[idx];
+  renderTable();
+  document.getElementById('tlTitle').textContent = iss.title;
+  document.getElementById('tlMeta').innerHTML =
+    '<span class="c-num">'+iss.id+'</span>'
+    + '<span class="pill '+STATUS_CLS[iss.status]+'">'+iss.status+'</span>'
+    + '<span>担当：'+iss.assignee+'</span>'
+    + '<span>期限：'+iss.due+'</span>'
+    + (iss.tag ? '<span class="tag'+(iss.tag==='実データ'?' real':'')+'">'+iss.tag+'</span>' : '');
+  document.getElementById('tlBody').innerHTML = iss.events.map(function(ev){
+    var inner = '<span class="ev-when">'+ev.when+'</span><span class="ev-text">'+ev.text+'</span>';
+    if(ev.plan){
+      return '<div class="ev '+ev.type+'" data-ver="'+ev.plan.ver+'"><span class="ev-dot"></span><button class="ev-row" type="button">'+inner+'</button></div>';
+    }
+    return '<div class="ev '+ev.type+'"><span class="ev-dot"></span><div class="ev-row">'+inner+'</div></div>';
+  }).join('');
+  document.querySelectorAll('.ev.model .ev-row').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var ver = btn.closest('.ev').getAttribute('data-ver');
+      var found = null;
+      iss.events.forEach(function(e){ if(e.plan && e.plan.ver===ver) found = e.plan; });
+      showDiff(found);
+    });
+  });
+  var lastPlan = null;
+  iss.events.forEach(function(e){ if(e.plan) lastPlan = e.plan; });
+  showDiff(lastPlan);
+}
+
+document.getElementById('fltQ').addEventListener('input', function(){ query = this.value; page = 1; renderTable(); });
+document.getElementById('pageSize').addEventListener('change', function(){ pageSize = parseInt(this.value,10); page = 1; renderTable(); });
+document.getElementById('btnPrev').addEventListener('click', function(){ if(page>1){ page--; renderTable(); } });
+document.getElementById('btnNext').addEventListener('click', function(){ page++; renderTable(); });
+page = Math.floor(currentIssue / pageSize) + 1;
+renderChips();
+renderTable();
+selectIssue(currentIssue);
+</script>
+</body>
+</html>

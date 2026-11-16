@@ -1,0 +1,4 @@
+{"key":"p153cb174","category":"__name__","type":"String","name":"name","uom":null}
+{"key":"p93e93af5","category":"__parent__","type":"DbKey","name":"parent","uom":null}
+{"key":"p2f4a91c0","category":"Identity Data","type":"String","name":"Comments","uom":null}
+{"key":"p3aa77b10","category":"Geometry","type":"Double","name":"Position X","uom":null}

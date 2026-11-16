@@ -1,0 +1,40 @@
+{
+ "diffId": "Yx7p_YDpaAPwstyr_VKbOg",
+ "idxV1": "lrFpQFXv3iKQ73ZACKmUfw",
+ "idxV2": "WcJaEUqemj-DNp9VSMhVog",
+ "stats": {
+  "added": 450,
+  "removed": 450,
+  "modified": 34718
+ },
+ "objectsV1": 36131,
+ "objectsV2": 36131,
+ "diffRowsDumped": 35618,
+ "reconcile": {
+  "1_shrub_added": {
+   "verdict": "CONFIRMED",
+   "detail": "OBJECT_ADDED exactly 1 with Switchgrass: RPC Shrub [2482933], cat=Revit 植栽, svf2Id=36268. Switchgrass REMOVED=0."
+  },
+  "2_pergola_removed": {
+   "verdict": "CONFIRMED",
+   "detail": "OBJECT_REMOVED: Pergola Modern [1103501], cat=Revit Furniture, svf2Id=6700."
+  },
+  "3_bollard_moved": {
+   "verdict": "CONFIRMED",
+   "detail": "Entire diff has exactly 2 bbox-translated rows: Bollard Light [2053768] & [2053808], identical delta (-1.671, +3.424, 0), |d|=3.81. location field is 0,0,0 for all rows (not populated); move surfaces via bboxMin/bboxMax + geomHash change, inside OBJECT_CHANGED (no separate Transform row type in the row dump)."
+  },
+  "4_door_comment": {
+   "verdict": "CONFIRMED",
+   "detail": "Exactly 1 row in the whole diff contains 'diff-test': Door-Passage-Single-Flush [888428], svf2Id=5596, OBJECT_CHANGED; comment key p4f5f6c38 prev=None -> cur='diff-test'."
+  }
+ },
+ "modifiedMassExplanation": "User's Japanese-locale Revit re-save: localized parameter/category names hash to different field keys (e.g. Identity Data/Type Name p09faf620 vs 識別情報/タイプ名 p63edc1e5; Category 'Revit Doors'->'Revit ドア'), so 34,718/36,131 objects register as modified. geomHash changed on only 106 rows (handrails/stairs/generic models re-tessellation + the 2 bollards).",
+ "v3": {
+  "file": "Snowdon Towers Sample Architectural_v3.rvt",
+  "bytes": 55604220,
+  "sha256": "dcf35b3a36d6487d40cde384f7078f7c09b01d8adbc67c05839ede3a184ece2f",
+  "registered": "urn:adsk.wipprod:fs.file:vf.VwJ57NkiQ-Gy0nHLR3UmAA?version=3",
+  "derivative": "FAILED twice (auto + explicit job retry): Revit-UnsupportedFileType",
+  "fileHealth": "size % 512 = 508 (OLE files are 512-multiples); olefile FAT load fails 'incomplete OLE sector' -> file truncated/corrupt as received; ZIP CRC itself OK, so corruption predates zipping"
+ }
+}

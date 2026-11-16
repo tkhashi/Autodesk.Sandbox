@@ -1,0 +1,58 @@
+[
+ {
+  "step": "token-refresh",
+  "method": "POST",
+  "url": "/authentication/v2/token",
+  "status": 200,
+  "note": "refreshed; wrote back to BOTH .token.json files"
+ },
+ {
+  "step": "dm-versions-before",
+  "method": "GET",
+  "url": "/data/v1/projects/{pid}/items/{arch lineage}/versions",
+  "status": 200,
+  "note": "versions=1; numbers=1; tipName=Snowdon Towers Sample Architectural.rvt"
+ },
+ {
+  "step": "dm-create-storage-official",
+  "method": "POST",
+  "url": "/data/v1/projects/{pid}/storage",
+  "status": 201,
+  "note": "objectId=urn:adsk.objects:os.object:wip.dm.prod/98d4f77b-cb50-48f4-bf70-92e488f526c8.rvt"
+ },
+ {
+  "step": "oss-signeds3upload-get",
+  "method": "GET",
+  "url": "/oss/v2/buckets/{bucket}/objects/{key}/signeds3upload?parts=2",
+  "status": 200,
+  "note": "urls=2"
+ },
+ {
+  "step": "oss-part-put",
+  "method": "PUT",
+  "url": "signed-url part 1/2",
+  "status": 200,
+  "note": "bytes=10485760 etag=\"c72b75ebc93a472a9cec2e6e66f15c23\""
+ },
+ {
+  "step": "oss-part-put",
+  "method": "PUT",
+  "url": "signed-url part 2/2",
+  "status": 200,
+  "note": "bytes=2097152 etag=\"02be6fa5865787ef074eefff70bacd33\""
+ },
+ {
+  "step": "oss-signeds3upload-complete",
+  "method": "POST",
+  "url": "/oss/v2/buckets/{bucket}/objects/{key}/signeds3upload",
+  "status": 200,
+  "note": "objectId=urn:adsk.objects:os.object:wip.dm.prod/98d4f77b-cb50-48f4-bf70-92e488f526c8.rvt size=12582912"
+ },
+ {
+  "step": "dm-create-version",
+  "method": "POST",
+  "url": "/data/v1/projects/{pid}/versions",
+  "status": 201,
+  "note": "versionUrn=urn:adsk.wipprod:fs.file:vf.VwJ57NkiQ-Gy0nHLR3UmAA?version=2 versionNumber=2 status=undefined"
+ }
+]
