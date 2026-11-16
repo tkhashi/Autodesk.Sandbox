@@ -387,7 +387,7 @@ function updateFocusPin() {
   const pos = anchorFor(i);
   if (!pos) { el.hidden = true; return; }
   try {
-    const T = Autodesk.Viewing.Math;
+    const T = THREE;
     const p = new T.Vector3(pos.x, pos.y, pos.z);
     const cam = viewer.impl.camera; const dir = new T.Vector3(); cam.getWorldDirection(dir);
     if (p.clone().sub(cam.position).dot(dir) <= 0) { el.hidden = true; return; }
@@ -528,7 +528,7 @@ function buildMarkers() {
 }
 function updateMarkers() {
   if (!viewer || !markerItems.length) return;
-  const T = Autodesk.Viewing.Math;
+  const T = THREE;
   let cam = null, dir = null;
   try { cam = viewer.impl.camera; dir = new T.Vector3(); cam.getWorldDirection(dir); } catch (e) {}
   for (const it of markerItems) {
@@ -594,77 +594,92 @@ let contextTransparency = (() => {
   return Number.isFinite(n) ? Math.min(97, Math.max(0, n)) : 90;
 })();
 let contextAppliedOff = null; // 直前に適用した「透明度0%（透明化オフ）」かどうか
-let fadedFrags = null; // 差し替え済みフラグメント（fragId → 元のマテリアル）
-let fadeClones = new Map(); // 元マテリアルの id → 透明化した複製
-let fadedForKey = null; // 透明化を適用済みの対象キー（モデル＋対象要素の組）
-let fadeRunId = 0; // 連続した選択変更で古い適用処理を打ち切るための世代番号
+let fadedMats = null;        // Map<material, {t, o, d}> 書き換えた材質と元の値
+let fadedTargetFrags = null; // Map<fragId, material> 対象に付け替えた元の材質
+let fadeRunId = 0;           // 適用の世代（古い適用を途中で打ち切る）
+let streamingNow = false;    // 逐次配信中か（エッジ制御用）
 
-function fadeCloneFor(orig) {
-  let c = fadeClones.get(orig.id);
-  if (!c) {
-    c = orig.clone();
-    c.transparent = true;
-    c.depthWrite = false; // 透明同士で奥を隠し合わない（重なりが柔らかく溶ける）
-    c.opacity = 1 - contextTransparency / 100;
-    fadeClones.set(orig.id, c);
-  }
-  return c;
+// エッジ（部材の輪郭線）は配信中と透明化中は切る。輪郭線は不透明なまま残るため、
+// 透明化しても「線の檻」に見えてしまう（ユーザー指摘の見づらさの主因）。
+function updateEdges() {
+  if (!viewer) return;
+  try { viewer.setDisplayEdges(!streamingNow && !fadedMats); } catch (e) {}
 }
-function updateFadeOpacity() {
-  const op = 1 - contextTransparency / 100;
-  for (const c of fadeClones.values()) c.opacity = op;
-  try { viewer?.impl.invalidate?.(false, true, false); } catch (e) {}
-}
+
 async function restoreContextFade() {
-  if (!fadedFrags || !viewer) { fadedFrags = null; fadedForKey = null; return; }
-  const frags = viewer.model.getFragmentList();
-  const entries = [...fadedFrags.entries()];
-  fadedFrags = null; fadedForKey = null;
-  for (let s = 0; s < entries.length; s += 40000) {
-    for (const [fid, orig] of entries.slice(s, s + 40000)) { try { frags.setMaterial(fid, orig); } catch (e) {} }
-    if (s + 40000 < entries.length) await new Promise(r => setTimeout(r, 0));
+  if (fadedMats) {
+    for (const [m, orig] of fadedMats) { m.transparent = orig.t; m.opacity = orig.o; m.depthWrite = orig.d; }
+    fadedMats = null;
   }
-  try { viewer.impl.invalidate?.(true); } catch (e) {}
+  if (fadedTargetFrags && viewer) {
+    const frags = viewer.model.getFragmentList();
+    for (const [fid, orig] of fadedTargetFrags) { try { frags.setMaterial(fid, orig); } catch (e) {} }
+    fadedTargetFrags = null;
+  }
+  updateEdges();
+  if (viewer) viewer.impl.invalidate(false, true, false);
 }
-// keepDbIds 以外の部材を透明化する。透明度0% のときは元に戻すだけ。
+
+// keepDbIds 以外の部材を透明化する。keepDbIds が空なら何もしない。
+// 方式は「材質のその場変更」：クローンへの差し替えでは LMV の MaterialManager が
+// GPU 材質を使い回し opacity の変更が描画に反映されなかった（ローカル Viewer
+// リグで実測）。元の材質自体の transparent / opacity / depthWrite を書き換える
+// 方式は反映される（LMV 自身のフェード実装もこの方式）。
+// 対象が周囲と材質を共有する場合は、対象のフラグメントだけ元の値を写した
+// 専用材質に付け替えてから周囲を書き換える（対象は元の見た目のまま残る）。
 async function applyContextFade(keepDbIds) {
-  if (!viewer || !geoLoaded) return;
-  if (contextTransparency === 0) { await restoreContextFade(); return; }
-  const key = viewerModelKey + '|' + [...keepDbIds].sort((a, b) => a - b).join(',');
-  if (fadedForKey === key) { updateFadeOpacity(); return; }
   const run = ++fadeRunId;
   await restoreContextFade();
-  if (run !== fadeRunId || !viewer) return;
-  try {
-    const tree = viewer.model.getInstanceTree();
-    const frags = viewer.model.getFragmentList();
-    const keep = new Set();
-    for (const dbId of keepDbIds) tree.enumNodeFragments(dbId, (fid) => keep.add(fid), true);
-    const total = frags.getCount();
-    const map = new Map();
-    fadedFrags = map;
-    for (let s = 0; s < total; s += 40000) {
-      for (let fid = s; fid < Math.min(s + 40000, total); fid++) {
-        if (keep.has(fid)) continue;
-        const orig = frags.getMaterial(fid);
-        if (!orig) continue;
-        map.set(fid, orig);
-        frags.setMaterial(fid, fadeCloneFor(orig));
-      }
-      if (run !== fadeRunId) return; // 途中で別の選択に切り替わった。復元は次の適用が行う
-      if (s + 40000 < total) await new Promise(r => setTimeout(r, 0));
+  if (!viewer || !geoLoaded || !keepDbIds.length || contextTransparency <= 0) { updateEdges(); return; }
+  const frags = viewer.model.getFragmentList();
+  const tree = viewer.model.getInstanceTree();
+  if (!frags || !tree) return;
+  const keepFrags = new Set();
+  for (const dbId of keepDbIds) tree.enumNodeFragments(dbId, (f) => keepFrags.add(f), true);
+  const opacity = 1 - contextTransparency / 100;
+  const targetClones = new Map();
+  fadedTargetFrags = new Map();
+  for (const fid of keepFrags) {
+    const orig = frags.getMaterial(fid);
+    if (!orig) continue;
+    if (!targetClones.has(orig)) targetClones.set(orig, orig.clone());
+    fadedTargetFrags.set(fid, orig);
+    frags.setMaterial(fid, targetClones.get(orig));
+  }
+  fadedMats = new Map();
+  const total = frags.getCount();
+  const CHUNK = 40000;
+  for (let start = 0; start < total; start += CHUNK) {
+    if (run !== fadeRunId) return;
+    const end = Math.min(total, start + CHUNK);
+    for (let fid = start; fid < end; fid++) {
+      if (keepFrags.has(fid)) continue;
+      const m = frags.getMaterial(fid);
+      if (!m || fadedMats.has(m)) continue;
+      fadedMats.set(m, { t: m.transparent, o: m.opacity, d: m.depthWrite });
+      m.transparent = true; m.opacity = opacity; m.depthWrite = false;
     }
-    fadedForKey = key;
-    try { viewer.impl.invalidate?.(true); } catch (e) {}
-  } catch (e) {}
+    if (end < total) await new Promise(r => setTimeout(r, 0));
+  }
+  updateEdges();
+  viewer.impl.invalidate(false, true, false);
 }
-// 透明度の変更への追随：0% との境界を跨いだら表示を作り直し、それ以外は不透明度だけ更新する
+
+// スライダ変更時：書き換え済み材質の opacity だけを更新する（軽い）
+function updateFadeOpacity() {
+  if (!fadedMats) return;
+  const opacity = 1 - contextTransparency / 100;
+  for (const m of fadedMats.keys()) m.opacity = opacity;
+  if (viewer) viewer.impl.invalidate(false, true, false);
+}
+
+
 function onContextTransparencyChanged() {
   const off = contextTransparency === 0;
   if (contextAppliedOff !== null && contextAppliedOff !== off && geoLoaded) {
     if (overviewOn) enterOverview();
     else applySelection();
-  } else if (fadedFrags) {
+  } else if (fadedMats) {
     updateFadeOpacity();
   }
   contextAppliedOff = off;
@@ -693,9 +708,9 @@ if (ghostRangeEl) ghostRangeEl.addEventListener('input', () => {
 // （2026-11-16 ユーザー指示）。
 function fitToElement(dbId) {
   const box = nodeWorldBox(dbId);
-  if (!box) { try { viewer.fitToView([dbId]); } catch (e) {} return; }
+  if (!box) return false;
   try {
-    const T = Autodesk.Viewing.Math;
+    const T = THREE;
     const c = new T.Vector3((box.min.x + box.max.x) / 2, (box.min.y + box.max.y) / 2, (box.min.z + box.max.z) / 2);
     const dx = box.max.x - box.min.x, dy = box.max.y - box.min.y, dz = box.max.z - box.min.z;
     const radius = Math.max(0.5 * Math.sqrt(dx * dx + dy * dy + dz * dz), 0.5);
@@ -705,7 +720,8 @@ function fitToElement(dbId) {
     if (dir.lengthSq() < 1e-9) dir.set(1, -1, 0.7);
     dir.normalize();
     viewer.navigation.setView(c.clone().add(dir.multiplyScalar(dist)), c);
-  } catch (e) { try { viewer.fitToView([dbId]); } catch (e2) {} }
+    return true;
+  } catch (e) { return false; }
 }
 
 // フォーカス中の Issue を Viewer に反映
@@ -728,7 +744,10 @@ function applySelection() {
     // 明示的なフォーカス操作（3D ボタン／ツールバーのフォーカスボタン）は fittedFor を
     // リセットするので、その場合はもう一度フィットする。
     const fkey = viewerModelKey + ':' + i.id;
-    if (geoLoaded && fittedFor !== fkey) { fitToElement(i.targetDbId); fittedFor = fkey; }
+    if (fittedFor !== fkey && (geoLoaded || rootLoaded)) {
+      if (fitToElement(i.targetDbId)) fittedFor = fkey;
+      else if (geoLoaded) { try { viewer.fitToView([i.targetDbId]); } catch (e) {} fittedFor = fkey; }
+    }
   } catch (e) { return; }
   paintFocusTarget(i.targetDbId);
   updateFocusPin();
@@ -745,7 +764,7 @@ function setupViewer(modelKey) {
   if (viewer) { clearMarkers(); try { viewer.finish(); } catch (e) {} viewer = null; }
   $('viewerWrap').innerHTML = '';
   setViewerLoading(`モデル（${esc(m.short)}）を読み込んでいます…`);
-  viewerModelKey = modelKey; rootLoaded = false; geoLoaded = false; fittedFor = null; fadedFrags = null; fadedForKey = null; fadeClones = new Map(); fadeRunId++;
+  viewerModelKey = modelKey; rootLoaded = false; geoLoaded = false; fittedFor = null; fadedMats = null; fadedTargetFrags = null; streamingNow = true; fadeRunId++;
   viewer = new Autodesk.Viewing.GuiViewer3D($('viewerWrap'));
   viewer.start();
   viewer.loadExtension('DemoToolbarExtension').catch(() => {});
@@ -761,6 +780,8 @@ function setupViewer(modelKey) {
   });
   viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, () => {
     geoLoaded = true;
+    streamingNow = false;
+    updateEdges();
     setViewerLoading(null);
     if (overviewOn) { enterOverview(); return; }
     applySelection();
