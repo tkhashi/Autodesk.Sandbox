@@ -500,6 +500,10 @@ function buildMarkers() {
   for (const i of issuesOnCurrentModel()) {
     const pos = anchorFor(i);
     if (!pos) continue;
+    const bb = nodeWorldBox(i.targetDbId);
+    const corners = bb ? [0, 1].flatMap(xi => [0, 1].flatMap(yi => [0, 1].map(zi => ({
+      x: xi ? bb.max.x : bb.min.x, y: yi ? bb.max.y : bb.min.y, z: zi ? bb.max.z : bb.min.z,
+    })))) : null;
     const key = `${Math.round(pos.x)},${Math.round(pos.y)},${Math.round(pos.z)}`;
     const stack = seen.get(key) ?? 0; seen.set(key, stack + 1);
     const el = document.createElement('div');
@@ -522,7 +526,7 @@ function buildMarkers() {
     dot.style.fill = FSTATUS[i.status]?.[1] ?? '#999';
     svg.appendChild(line);
     svg.appendChild(dot);
-    markerItems.push({ el, line, dot, pos, stack, id: i.id, dbId: i.targetDbId });
+    markerItems.push({ el, line, dot, pos, corners, stack, id: i.id, dbId: i.targetDbId });
   }
   updateMarkers();
 }
@@ -557,11 +561,18 @@ function updateMarkers() {
   const vis = [];
   for (const it of markerItems) {
     try {
-      const p = new T.Vector3(it.pos.x, it.pos.y, it.pos.z);
-      let behind = false;
-      if (cam && dir) behind = p.clone().sub(cam.position).dot(dir) <= 0;
-      const v = viewer.worldToClient(p);
-      const visible = !behind && (typeof viewer.isNodeVisible === 'function' ? viewer.isNodeVisible(it.dbId) : true);
+      // 代表点：中心がカメラの後ろでも、ボックスの隅が前にあればそれを使う。
+      // 非表示状態（isNodeVisible）では判定しない：手前消去や配信の都合で
+      // 一時的に隠れた要素のラベルまで消えてしまうため（実機報告）。
+      const candPts = [it.pos, ...(it.corners ?? [])];
+      let v = null;
+      for (const cp of candPts) {
+        const p = new T.Vector3(cp.x, cp.y, cp.z);
+        if (cam && dir && p.clone().sub(cam.position).dot(dir) <= 0) continue;
+        v = viewer.worldToClient(p);
+        break;
+      }
+      const visible = !!v;
       const disp = visible ? '' : 'none';
       it.el.style.display = disp; it.line.style.display = disp; it.dot.style.display = disp;
       if (visible) vis.push({ it, v });
@@ -709,26 +720,42 @@ function computeOccluders(targetDbId) {
   let par = targetDbId;
   while (true) { const p = tree.getNodeParent(par); if (!p || p === par) break; excluded.add(p); par = p; }
   (function mark(id) { excluded.add(id); tree.enumNodeChildren(id, c => mark(c)); })(targetDbId);
-  for (const i of issuesOnCurrentModel()) excluded.add(i.targetDbId);
+  // 他の Issue 要素とその祖先も消さない（祖先を消すと配下の Issue 要素ごと消えてしまう）
+  for (const i of issuesOnCurrentModel()) {
+    excluded.add(i.targetDbId);
+    let q = i.targetDbId;
+    while (true) { const p = tree.getNodeParent(q); if (!p || p === q) break; excluded.add(p); q = p; }
+  }
   const result = [];
-  (function walk(id) {
-    if (!excluded.has(id)) {
+  for (const cand of occluderCandidates()) {
+    if (excluded.has(cand.dbId)) continue;
+    const b = cand.box;
+    const bcx = (b.min.x + b.max.x) / 2, bcy = (b.min.y + b.max.y) / 2, bcz = (b.min.z + b.max.z) / 2;
+    const br = Math.hypot(b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z) / 2;
+    if (Math.hypot(bcx - C.x, bcy - C.y, bcz - C.z) - br < distC) {
+      for (const r of rays) { if (segmentHitsBox(r.o, r.d, 1, b)) { result.push(cand.dbId); break; } }
+    }
+  }
+  return result;
+}
+
+// 描画される要素（自身のフラグメントを持つノード）とそのボックスの一覧。
+// モデル単位でキャッシュし、消去の再計算では幾何判定だけを行う（高速化）。
+let occCache = null;
+function occluderCandidates() {
+  if (occCache?.modelKey === viewerModelKey) return occCache.list;
+  const tree = viewer.model.getInstanceTree();
+  const list = [];
+  if (tree) {
+    (function walk(id) {
       let own = 0;
       tree.enumNodeFragments(id, () => own++, false);
-      if (own > 0) {
-        const b = nodeWorldBox(id);
-        if (b) {
-          const bcx = (b.min.x + b.max.x) / 2, bcy = (b.min.y + b.max.y) / 2, bcz = (b.min.z + b.max.z) / 2;
-          const br = Math.hypot(b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z) / 2;
-          if (Math.hypot(bcx - C.x, bcy - C.y, bcz - C.z) - br < distC) {
-            for (const r of rays) { if (segmentHitsBox(r.o, r.d, 1, b)) { result.push(id); break; } }
-          }
-        }
-      }
-    }
-    tree.enumNodeChildren(id, c => walk(c));
-  })(tree.getRootId());
-  return result;
+      if (own > 0) { const b = nodeWorldBox(id); if (b) list.push({ dbId: id, box: b }); }
+      tree.enumNodeChildren(id, c => walk(c));
+    })(tree.getRootId());
+  }
+  occCache = { modelKey: viewerModelKey, list };
+  return list;
 }
 
 // 選択中の Issue の要素について、手前の部材を消し直す
@@ -820,7 +847,6 @@ function applySelection() {
   }
   if (!viewer.model?.getFragmentList?.()) return;
   try {
-    applyOccluderClearing(); // 対象の手前の部材だけを消す（材質には触らない）
     viewer.clearThemingColors();
     // カメラのフィットは、形状の読み込みが終わってから対象ごとに1回だけ行う。
     // 読み込み途中のイベント（ルート読み込み時など）で繰り返すと、不完全な範囲への
@@ -832,6 +858,7 @@ function applySelection() {
       if (fitToElement(i.targetDbId)) fittedFor = fkey;
       else if (geoLoaded) { try { viewer.fitToView([i.targetDbId]); } catch (e) {} fittedFor = fkey; }
     }
+    applyOccluderClearing(); // 対象の手前の部材だけを消す（材質には触らない）
   } catch (e) { return; }
   paintFocusTarget(i.targetDbId);
   updateFocusPin();
@@ -848,7 +875,7 @@ function setupViewer(modelKey) {
   if (viewer) { clearMarkers(); try { viewer.finish(); } catch (e) {} viewer = null; }
   $('viewerWrap').innerHTML = '';
   setViewerLoading(`モデル（${esc(m.short)}）を読み込んでいます…`);
-  viewerModelKey = modelKey; rootLoaded = false; geoLoaded = false; fittedFor = null; hiddenOccluders = new Set(); occHiddenCount = 0; occTargetDbId = null; streamingNow = true;
+  viewerModelKey = modelKey; rootLoaded = false; geoLoaded = false; fittedFor = null; hiddenOccluders = new Set(); occHiddenCount = 0; occTargetDbId = null; occCache = null; streamingNow = true;
   viewer = new Autodesk.Viewing.GuiViewer3D($('viewerWrap'));
   viewer.start();
   viewer.loadExtension('DemoToolbarExtension').then(() => syncOverviewBtn()).catch(() => {});
@@ -939,7 +966,14 @@ if (window.Autodesk?.Viewing?.Extension) {
   }
   Autodesk.Viewing.theExtensionManager.registerExtension('DemoToolbarExtension', DemoToolbarExtension);
 }
-window.addEventListener('demo-focus-target', () => { exitOverview(false); fittedFor = null; applySelection(); });
+window.addEventListener('demo-focus-target', () => {
+  const i = issue() ?? focusedIssue();
+  if (!viewer || !i?.targetDbId || i.modelKey !== viewerModelKey) return;
+  if (!fitToElement(i.targetDbId)) { try { viewer.fitToView([i.targetDbId]); } catch (e) {} }
+  fittedFor = viewerModelKey + ':' + i.id;
+  if (overviewOn) { colorIssueElements(); updateMarkers(); applyOccluderClearing(); }
+  else applySelection();
+});
 window.addEventListener('demo-toggle-overview', () => toggleOverview());
 window.addEventListener('demo-toggle-ghost-panel', () => toggleGhostPanel());
 
