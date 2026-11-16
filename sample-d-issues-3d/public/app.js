@@ -1158,7 +1158,11 @@ async function initViewer() {
   };
   Autodesk.Viewing.Initializer(options, () => {
     viewerReady = true;
-    setupViewer(desiredModelKey ?? focusedIssue()?.modelKey ?? DATA?.models[0]?.key ?? 'dach');
+    // Issue データがまだ届いていない間は、ここでモデルを読み始めない。
+    // 先に始めると一覧の先頭モデル（DACH・最大 132MB）で読み込みが始まり、
+    // データ到着後に選択中の Issue のモデルへ切り替わって読み込みが二重になる
+    // （実機報告：ロードが遅い）。データ到着側の初期処理が正しいモデルで始める。
+    if (DATA) setupViewer(desiredModelKey ?? focusedIssue()?.modelKey ?? DATA.models[0]?.key ?? 'dach');
   });
 }
 
