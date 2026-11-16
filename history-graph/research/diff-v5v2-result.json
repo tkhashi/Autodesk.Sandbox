@@ -1,0 +1,21 @@
+{
+ "label": "v5v2",
+ "prev": "urn:adsk.wipprod:fs.file:vf.VwJ57NkiQ-Gy0nHLR3UmAA?version=5",
+ "cur": "urn:adsk.wipprod:fs.file:vf.VwJ57NkiQ-Gy0nHLR3UmAA?version=2",
+ "idxPrev": {
+  "indexId": "W324n0HbyewQWVt2AN7grw",
+  "objects": 36131
+ },
+ "idxCur": {
+  "indexId": "WcJaEUqemj-DNp9VSMhVog",
+  "objects": 36131
+ },
+ "diffId": "b0Sw_c5pxPc_nBdJEzE_pQ",
+ "diffStats": {
+  "added": 34,
+  "removed": 34,
+  "modified": 267
+ },
+ "dumpedRows": 335,
+ "outfile": "/home/hatch/workspace/forma-hands-on/research/diff-rows/diff-v5v2.ndjson"
+}

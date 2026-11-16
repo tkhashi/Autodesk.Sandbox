@@ -1,0 +1,32 @@
+[
+ {
+  "displayId": 48,
+  "key": "shrub",
+  "commentId": "9093b09c-4ed7-4e92-9b0f-33303dfbde59",
+  "finalStatus": "closed"
+ },
+ {
+  "displayId": 49,
+  "key": "pergola",
+  "commentId": "c6eaf2bd-51e1-4719-9c6c-a1fca57d7d3d",
+  "finalStatus": "closed"
+ },
+ {
+  "displayId": 50,
+  "key": "bollard",
+  "commentId": "7c57e18a-c7da-435d-923f-b3703a7f399f",
+  "finalStatus": "closed"
+ },
+ {
+  "displayId": 51,
+  "key": "door",
+  "commentId": "681e782f-9608-4809-a1b1-2eb91fe51c9b",
+  "finalStatus": "closed"
+ },
+ {
+  "displayId": 52,
+  "key": "room-wall",
+  "commentId": "f7e1ca1d-00a6-43be-a251-5e29192045e2",
+  "finalStatus": "in_review"
+ }
+]

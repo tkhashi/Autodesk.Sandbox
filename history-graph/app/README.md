@@ -5,13 +5,22 @@ sample-d（Issues 3D デモ）の流儀を土台に、モックデータを実 A
 
 - **Issue の現在値**は常に Forma から実取得（Issues API）
 - **状態変更・担当変更の履歴**は Forma の API では返らないため、アプリ側のスナップショットで記録
-- **モデル更新イベント**は Snowdon Towers Sample Architectural.rvt の版公開日時から差し込み
+- **モデル更新イベント**は Snowdon Towers Sample Architectural HG.rvt の版公開日時から差し込み
 - **版間の差分**は Model Properties Diff を実行時に実 API ジョブで取得します。
   **データは全て実行時に API から取得し、事前投入データ（実測ダンプ等）は使いません。**
   ジョブ結果は出所（ジョブ実行日時・対象ペア）つきで実行時キャッシュに保存して再利用します
 
 対象プロジェクト: Snowdon Towers（`b.031a6e68-ccdf-4a29-b8a5-50a2a3ecac25`）
-対象モデル: Snowdon Towers Sample Architectural.rvt（lineage `VwJ57NkiQ-Gy0nHLR3UmAA`）
+対象モデル: **Snowdon Towers Sample Architectural HG.rvt**（lineage `n1BdFAarT-ajJkQvheK5EA`）
+
+> **対象モデルについて（2026-11-17 切り替え）**: 本アプリの向き先は、正規ルートで作り直した
+> 新アイテム「Snowdon Towers Sample Architectural **HG**」です。HG は V1（V1 無変更＋日本語再保存の
+> 対照ファイル）に対して Issue を先に起票し、その後に V2（変更4点）・V3（室名変更＋壁移動）が
+> 公開される順序で構成されているため、モデル更新イベントが各 Issue のタイムラインに自然に付きます。
+> 旧アイテム（Snowdon Towers Sample Architectural.rvt）と旧 Issue #43〜47 は API では削除できないため
+> ACC 上にそのまま残っていますが、本アプリの対象外です。対象は環境変数
+> `HG_LINEAGE_ID` / `HG_ITEM_NAME` / `HG_VIEWABLE_GUID` で切り替えできます
+> （旧アイテムに戻す場合: `HG_LINEAGE_ID=VwJ57NkiQ-Gy0nHLR3UmAA`）。
 
 ## 起動手順
 
@@ -82,7 +91,7 @@ node server.mjs          # 依存パッケージなし（Node 18+）
 | `GET /api/issues` | 実 Issue 一覧＋アプリ側履歴（変化イベント、モデル更新、派生指標）をマージして返す |
 | `GET /api/issues/:id/comments` | コメントを実 API から取得 |
 | `GET /api/issues/:id/thumbnail` | ピン時点のサムネイル画像（`snapshotUrn`）をサーバ側プロキシで配信。無い Issue では 404 |
-| `GET /api/versions` | Architectural の版一覧（V1〜V4、公開日時つき）を DM API から取得 |
+| `GET /api/versions` | 対象モデルの版一覧（公開日時つき）を DM API から取得 |
 | `GET /api/diff?from=&to=&issue=` | 版ペアの diff。実行時キャッシュがあればそれを返し、無ければ実 API ジョブを開始（202 で状態を返し、完了後に再取得で結果）。`issue` を付けるとピン周辺の内訳も返す |
 | `GET /api/diff/elements?from=&to=&mode=` | 3D 差分表示用の要素 ID リスト（added／removed／changed の externalId・SVF2Id）。`mode=geometry`（既定）は「変更」を形状シグナルのある要素のみに絞り、`mode=all` はプロパティのみの変更も含む。diff が未取得なら 202 でジョブ状態を返す |
 | `POST /api/refresh` | スナップショット取り込みを実行 |
@@ -101,6 +110,9 @@ node server.mjs          # 依存パッケージなし（Node 18+）
   diff 結果の正規化キャッシュ（format 3。変更行には形状シグナルに加えて「プロパティ値の実変化」
   フラグを持ち、関連ペア判定に使います）。各ファイルにジョブ実行日時（`jobRunAt`）と対象ペアを記録します。
   ここに無いペアは、初回アクセス時にジョブを実行して取得します（202 応答で状態を返し、完了後に結果を返す）。
+  ファイル名には対象モデルの lineageId を含みます（`diff-<lineageId>-<from>-<to>.json`）。
+  版番号だけでは、対象アイテムを切り替えたときに別アイテムの同じ版ペアの結果を誤って読むためです
+  （旧アイテムの旧名キャッシュ `diff-<from>-<to>.json` は、旧アイテムを対象にした場合に限り読みます）。
 
 将来は Issues の Webhook（`issue.updated-1.0` 等）で検出をリアルタイム化する想定で、
 その場合も「前回値との比較でイベント化する」核はそのまま使えます。今回はポーリング方式です。
@@ -125,8 +137,12 @@ diff は、アプリが Model Properties API の index＋diff ジョブをその
   日本語ロケールで再保存すると、パラメータ名等の表記差でほぼ全要素が「変更」になります。
   日本語保存同士の V2→V4 では変更は 374 件まで減りました。実際に形が変わった目安は、
   形状ハッシュ変化・bbox 移動のある「形状シグナル」の件数です（画面でも併記）。
-- **V3 は登録ファイルが破損しており変換できません**（内容の実体は V4）。そのため V4 の
-  モデル更新イベントの diff は V2→V4 ペアで表示します。
+- **旧アイテムでは V3 は登録ファイルが破損しており変換できません**（内容の実体は V4）。
+  そのため旧アイテムの V4 のモデル更新イベントの diff は V2→V4 ペアで表示します。
+  現行の対象である HG アイテムにこの事情はありません（V1→V2→V3 の順で正常に公開されています）。
+  HG の V1 は対照ファイル（日本語再保存）のため、HG の V1→V2 は日本語保存同士のペアとなり、
+  変更件数は旧アイテム V1→V2 のようなロケールノイズの洪水にはなりません
+  （同じ内容ペアの実測: 追加34／削除34／変更267、`research/v2-diff-measurement.md` §8）。
 - ピン近傍の絞り込み: Issues API のピン座標は Viewer 座標系、diff の bbox は Revit 共有座標系で、
   しかもピンは要素上の一点（中心ではない）ため、座標同士を直接は比較できません。
   本アプリでは「ピン対象要素の bbox 中心（共有座標系）」をアンカーに、水平 30ft 以内・
@@ -137,9 +153,10 @@ diff は、アプリが Model Properties API の index＋diff ジョブをその
 
 ## 既知の制約
 
-- **対象プロジェクト（Snowdon Towers）の実 Issue はコメントが全件 0 件**のため、実データの
-  タイムラインは起票・モデル更新・スナップショットで検出した変化イベントが主になります。
-  コメントが付いた Issue が現れれば自動的にタイムラインに表示されます。
+- **対象プロジェクト（Snowdon Towers）の実 Issue は、当初コメントが全件 0 件**でした
+  （Forma の画面からコメントが付いた Issue はまだありません）。そのため実データのタイムラインは
+  起票・モデル更新・スナップショットで検出した変化イベントが主になります。
+  API 経由で投稿したコメント（旧 #43〜47、新 #48〜52）も自動的にタイムラインに表示されます。
 - ピン時点のサムネイル（`snapshotUrn`）が取得できるのは実 Issue のうち 3 件のみです
   （2026-11-17 時点。Forma の画面から作られた Issue だけが画像を持ちます）。無い Issue では表示を省略します。
 - APS Viewer の描画は、Viewer の CDN に到達できる環境（実機ブラウザ）でのみ確認できます。

@@ -16,9 +16,16 @@ diff はアプリ自身が Model Properties API の index＋diff ジョブを実
 起動は `cd app && node server.mjs`（http://localhost:3100）。前提・設計・API の詳細は `app/README.md` を参照。
 `.env` / `.token.json` / `data/`（実行時状態）はリポジトリに含めていない。
 
+> **対象モデルの切り替え（2026-11-17）**: アプリの向き先は、新アイテム「Snowdon Towers Sample
+> Architectural **HG**」（lineage `n1BdFAarT-ajJkQvheK5EA`）になりました。HG は正規ルート
+> （V1 に対照ファイルを登録 → V1 に Issue を起票 → その後に V2・V3 を公開）で構成されており、
+> モデル更新イベントが各 Issue のタイムラインに自然に付きます。旧アイテムと旧 Issue #43〜47 は
+> 削除できないため ACC 上に残っていますが、アプリの対象外です（環境変数で切替可能。詳細は `app/README.md`）。
+> 対照実験（V1 無変更＋日本語再保存の実測）は `research/v2-diff-measurement.md` §8 で完遂しています。
+
 ### 実データの制約（app）
 
-- 対象プロジェクト（Snowdon Towers）の実 Issue はコメントが全件 0 件のため、実データのタイムラインは起票・モデル更新・スナップショットで検出した変化イベントが主になります。コメントが付いた Issue が現れれば自動的にタイムラインに表示されます。
+- 対象プロジェクト（Snowdon Towers）の実 Issue は、当初コメントが全件 0 件でした（Forma の画面からコメントが付いた Issue はまだありません）。そのため実データのタイムラインは起票・モデル更新・スナップショットで検出した変化イベントが主になります。API 経由で投稿したコメント（旧 #43〜47、新 #48〜52）も自動的にタイムラインに表示されます。
 - ピン時点のサムネイル（Issues API の `snapshotUrn`）が取得できるのは実 Issue のうち 3 件のみです（2026-11-17 時点）。無い Issue ではタイムライン上の表示を省略します。
 
 ## 設計の要点（設計 v2）

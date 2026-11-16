@@ -1,0 +1,77 @@
+[
+ {
+  "key": "shrub",
+  "displayId": 48,
+  "id": "ddba7a51-d362-49eb-afb0-d5a99368df3c",
+  "title": "屋上テラスに植栽が未設置（追加の確認）",
+  "status": "open",
+  "anchorName": "床 [1397309]",
+  "objectId": 6714,
+  "externalId": "98fc0674-037e-46de-b878-c5e65f1bd3b9-0015523d",
+  "position": {
+   "x": -32.81,
+   "y": -16.29,
+   "z": 4.98
+  }
+ },
+ {
+  "key": "pergola",
+  "displayId": 49,
+  "id": "c972978c-a5a5-45ba-8e42-0036ab02e290",
+  "title": "藤棚（Pergola Modern）の撤去検討",
+  "status": "open",
+  "anchorName": "Pergola Modern [1103501]",
+  "objectId": 6701,
+  "externalId": "8f3a5315-0c53-46b4-bd66-7fe172228201-0010d68d",
+  "position": {
+   "x": -30.37,
+   "y": -10.91,
+   "z": 6
+  }
+ },
+ {
+  "key": "bollard",
+  "displayId": 50,
+  "id": "3dad8f8a-c565-46bf-bb39-9e6a0bebb6bb",
+  "title": "屋上テラス外灯2基の位置確認",
+  "status": "open",
+  "anchorName": "Bollard Light [2053768]",
+  "objectId": 6882,
+  "externalId": "c527d6db-3cd7-41e5-bb3a-3dcd744150fb-001f5688",
+  "position": {
+   "x": -31.57,
+   "y": -13.59,
+   "z": 5.09
+  }
+ },
+ {
+  "key": "door",
+  "displayId": 51,
+  "id": "c9dcdc14-6dee-48d7-9ab3-2af18e7bc6fc",
+  "title": "ドアへの確認メモ追記の検討",
+  "status": "open",
+  "anchorName": "Door-Passage-Single-Flush [888428]",
+  "objectId": 5597,
+  "externalId": "ee03061f-d7b4-4e6a-b397-fa44f24a42a7-000d8e6c",
+  "position": {
+   "x": -42.91,
+   "y": -19.55,
+   "z": 5.8
+  }
+ },
+ {
+  "key": "room-wall",
+  "displayId": 52,
+  "id": "a523d03b-bc7f-4a23-9837-33736ae12c03",
+  "title": "2F 室名と壁位置の見直し",
+  "status": "open",
+  "anchorName": "標準壁 [748873]",
+  "objectId": 3019,
+  "externalId": "45ed4799-d124-4abc-8e2b-9d29089bad28-000b6d49",
+  "position": {
+   "x": -39.03,
+   "y": -27.67,
+   "z": -5.47
+  }
+ }
+]

@@ -53,22 +53,30 @@ const TOKEN_FILES = CRED_DIRS.map(d => path.join(d, '.token.json'));
 
 const PROJECT_ID = 'b.031a6e68-ccdf-4a29-b8a5-50a2a3ecac25'; // Snowdon Towers
 const PID = PROJECT_ID.replace(/^b\./, ''); // Issues API / Index API は b. なし
+// 対象モデルは環境変数で切り替え可能（HG_ITEM_NAME / HG_LINEAGE_ID / HG_VIEWABLE_GUID）。
+// 既定は正規ルートで作り直した新アイテム「Snowdon Towers Sample Architectural HG」:
+// V1（対照ファイル）に対して Issue を先に起票し、その後に V2・V3 が公開される順序のため、
+// モデル更新イベントが各 Issue のタイムラインに自然に付く。
+// 旧アイテム（Snowdon Towers Sample Architectural.rvt）に戻す場合は
+// HG_LINEAGE_ID=VwJ57NkiQ-Gy0nHLR3UmAA HG_ITEM_NAME="Snowdon Towers Sample Architectural.rvt" を指定する。
+const OLD_LINEAGE_ID = 'VwJ57NkiQ-Gy0nHLR3UmAA';
 const ARCH = {
-  name: 'Snowdon Towers Sample Architectural.rvt',
-  lineage: 'urn:adsk.wipprod:dm.lineage:VwJ57NkiQ-Gy0nHLR3UmAA',
-  lineageId: 'VwJ57NkiQ-Gy0nHLR3UmAA',
-  viewableGuid: '7738212f-d458-662f-cb9c-cf7c761af18d',
+  name: process.env.HG_ITEM_NAME ?? 'Snowdon Towers Sample Architectural HG.rvt',
+  lineageId: process.env.HG_LINEAGE_ID ?? 'n1BdFAarT-ajJkQvheK5EA',
+  viewableGuid: process.env.HG_VIEWABLE_GUID ?? '7738212f-d458-662f-cb9c-cf7c761af18d',
 };
-// 実測で判明している版ごとの事情（research/v2-diff-measurement.md）
-const VERSION_NOTES = {
+ARCH.lineage = `urn:adsk.wipprod:dm.lineage:${ARCH.lineageId}`;
+const IS_OLD_ITEM = ARCH.lineageId === OLD_LINEAGE_ID;
+// 実測で判明している版ごとの事情（research/v2-diff-measurement.md。旧アイテムのみ）
+const VERSION_NOTES = IS_OLD_ITEM ? {
   3: '登録されたファイルが破損しており変換できない（実測記録）。内容の実体は V4',
-};
+} : {};
 const versionUrn = n => `urn:adsk.wipprod:fs.file:vf.${ARCH.lineageId}?version=${n}`;
 const derivativeUrn = n => Buffer.from(versionUrn(n), 'utf8').toString('base64url');
-// 版 v のモデル更新イベントに対する diff ペア。V3 は変換不可なので V4 は V2 とのペアで見る
+// 版 v のモデル更新イベントに対する diff ペア。旧アイテムでは V3 は変換不可なので V4 は V2 とのペアで見る
 function diffPairFor(v) {
   if (VERSION_NOTES[v]) return null;
-  if (v === 4) return { from: 2, to: 4, label: 'V2 → V4（実質 V3）' };
+  if (IS_OLD_ITEM && v === 4) return { from: 2, to: 4, label: 'V2 → V4（実質 V3）' };
   if (v >= 2) return { from: v - 1, to: v, label: `V${v - 1} → V${v}` };
   return null;
 }
@@ -400,11 +408,22 @@ function computeRelatedPairs(issues, versions) {
 // ============ Diff（実行時キャッシュ → 実 API ジョブ） ============
 // 実行時キャッシュは「このアプリ自身が実 API ジョブで取得した結果」だけを保存する（format 3、
 // ジョブ実行日時つき）。事前に用意されたダンプファイル等を読む経路は持たない。
+// キャッシュファイル名には lineageId を含める（版番号だけだと、対象アイテムを切り替えたときに
+// 別アイテムの同じ版ペアのキャッシュを誤って読んでしまうため）。
+// 旧アイテムの既存キャッシュ（lineageId なしの旧名）は、そのアイテム自身の実ジョブ結果なので
+// 旧アイテムを対象にしている場合に限りフォールバックで読む。
+function diffCachePath(from, to) {
+  return path.join(diffCacheDir, `diff-${ARCH.lineageId}-${from}-${to}.json`);
+}
 function loadDiffCache(from, to) {
-  try {
-    const d = JSON.parse(fs.readFileSync(path.join(diffCacheDir, `diff-${from}-${to}.json`), 'utf8'));
-    if (d && d.format === 3 && d.source === 'live') return d;
-  } catch (e) {}
+  const candidates = [diffCachePath(from, to)];
+  if (IS_OLD_ITEM) candidates.push(path.join(diffCacheDir, `diff-${from}-${to}.json`));
+  for (const p of candidates) {
+    try {
+      const d = JSON.parse(fs.readFileSync(p, 'utf8'));
+      if (d && d.format === 3 && d.source === 'live') return d;
+    } catch (e) {}
+  }
   return null;
 }
 // プロパティの「実質的な値の変化」判定（ロケールノイズとの切り分け用）。
@@ -562,7 +581,7 @@ async function runLiveDiff(from, to) {
       format: 3, from, to, source: 'live', jobRunAt: new Date().toISOString(), stats, totalRows: rows.length,
       bboxRowCount: bboxRows.length, byCategory, bboxRows, elements,
     };
-    fs.writeFileSync(path.join(diffCacheDir, `diff-${from}-${to}.json`), JSON.stringify(out));
+    fs.writeFileSync(diffCachePath(from, to), JSON.stringify(out));
     job.state = 'ready';
     console.log(`live diff ready: ${key} stats=${JSON.stringify(stats)} rows=${rows.length}`);
   } catch (e) {
@@ -591,9 +610,11 @@ function findPinAnchor(issue, primaryDiff) {
   const a = fromRow(primaryDiff);
   if (a) return a;
   // 対象要素がこのペアの diff に現れない（無変更）場合は、このアプリが取得済みの
-  // 他ペアの diff（実行時キャッシュ）の bbox で代用する
+  // 他ペアの diff（実行時キャッシュ）の bbox で代用する。対象は現在のアイテムの
+  // キャッシュだけに限る（旧アイテムの旧名キャッシュは旧アイテム対象時のみ）
+  const ownFile = f => f.startsWith(`diff-${ARCH.lineageId}-`) || (IS_OLD_ITEM && /^diff-\d+-\d+\.json$/.test(f));
   for (const f of fs.readdirSync(diffCacheDir)) {
-    if (!f.startsWith('diff-')) continue;
+    if (!ownFile(f)) continue;
     try { const a3 = fromRow(JSON.parse(fs.readFileSync(path.join(diffCacheDir, f), 'utf8'))); if (a3) return a3; } catch (e) {}
   }
   return null;
