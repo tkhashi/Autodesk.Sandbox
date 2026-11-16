@@ -9,6 +9,10 @@ Autodesk Forma（ACC）の Issue について、「同じ指摘がモデル更�
 diff はアプリ自身が Model Properties API の index＋diff ジョブを実行して取得し、結果だけを
 実行時キャッシュ（`data/diff-cache/`、ジョブ実行日時つき）に保存します。
 差分は APS Viewer の 3D 表示（2版を集約ロードし、追加=緑／削除=赤ゴースト／変更=黄に色分け）で確認できます。
+差分ペアはタイムラインのイベントからでも、ピッカーからでも（任意のペアを独立に）指定できます。
+ピン付き Issue には、アンカー要素が実際に変化したペアを「関連するモデル更新」としてタイムラインに付けます。
+3D ビューア脇には Before = V{n}（旧版）／After = V{m}（新版）の凡例を常時表示し、
+「重ねて表示／Before のみ／After のみ」の表示切替もできます。
 起動は `cd app && node server.mjs`（http://localhost:3100）。前提・設計・API の詳細は `app/README.md` を参照。
 `.env` / `.token.json` / `data/`（実行時状態）はリポジトリに含めていない。
 

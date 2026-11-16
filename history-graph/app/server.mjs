@@ -337,15 +337,102 @@ function buildHistory(issue, snap, versions) {
   return { events, modelUpdates, stats: { closeCount, reopenCount, modelUpdateCount: modelUpdates.length } };
 }
 
+// ============ 関連するモデル更新（ピン付き Issue × ライブ diff の要素リストで判定） ============
+// 「Issue が開いている間に公開された版」だけでは、版が Issue 作成より前に公開されていた
+// 場合にモデル更新イベントが1つも付かない。ピン付き Issue については、アンカー要素が
+// 実際に変化した連続ペアを「関連するモデル更新」として併せて付ける。
+// 判定はライブ diff の要素リストへの含有で行う（推測では付けない）:
+//   added／removed リストにアンカー要素が含まれるペアは無条件に対象。
+//   modified は、跨ロケールペアでは無変更要素も大量に含まれる（ロケールノイズ）ため、
+//   形状シグナル（geomHash 変化・bbox 移動）か実質的な値の変化（computeValueChanged）が
+//   ある要素だけを「実際に変化した」とみなす。プロパティのみの実変化（コメント追記など）は
+//   valueChanged で拾う（geometry 判定には限定しない）。
+function anchorChangeIn(diff, externalId) {
+  const el = diff?.elements;
+  if (!el || !externalId) return null;
+  const a = (el.added ?? []).find(e => e.externalId === externalId);
+  if (a) return { change: 'added', anchorName: a.name ?? null };
+  const rm = (el.removed ?? []).find(e => e.externalId === externalId);
+  if (rm) return { change: 'removed', anchorName: rm.name ?? null };
+  const m = (el.modified ?? []).find(e => e.externalId === externalId);
+  if (m && (m.geomChanged || m.moved || m.valueChanged)) return { change: 'changed', anchorName: m.name ?? null };
+  return null;
+}
+function candidateDiffPairs(versions) {
+  const seen = new Set();
+  const out = [];
+  for (const v of versions) {
+    const p = diffPairFor(v.versionNumber);
+    if (!p) continue;
+    const key = `${p.from}-${p.to}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ ...p, version: v.versionNumber, publishedAt: v.createdAt ?? null });
+  }
+  return out;
+}
+// 候補ペアの diff が実行時キャッシュに無ければジョブを開始し、その Issue は pending とする
+// （ジョブ完了後の再取得で関連ペアが付く）。
+function computeRelatedPairs(issues, versions) {
+  const pairDefs = candidateDiffPairs(versions);
+  const diffs = new Map();
+  let anyPending = false;
+  for (const pd of pairDefs) {
+    const got = getDiffOrStart(pd.from, pd.to);
+    if (got.diff) diffs.set(`${pd.from}-${pd.to}`, got.diff);
+    else anyPending = true;
+  }
+  const map = new Map();
+  for (const issue of issues) {
+    if (!issue.pin?.isArchitectural || !issue.pin?.externalId) continue;
+    const pairs = [];
+    for (const pd of pairDefs) {
+      const d = diffs.get(`${pd.from}-${pd.to}`);
+      if (!d) continue;
+      const hit = anchorChangeIn(d, issue.pin.externalId);
+      if (hit) pairs.push({ from: pd.from, to: pd.to, label: pd.label, version: pd.version, publishedAt: pd.publishedAt, change: hit.change, anchorName: hit.anchorName });
+    }
+    map.set(issue.id, { pairs, pending: anyPending });
+  }
+  return map;
+}
+
 // ============ Diff（実行時キャッシュ → 実 API ジョブ） ============
-// 実行時キャッシュは「このアプリ自身が実 API ジョブで取得した結果」だけを保存する（format 2、
+// 実行時キャッシュは「このアプリ自身が実 API ジョブで取得した結果」だけを保存する（format 3、
 // ジョブ実行日時つき）。事前に用意されたダンプファイル等を読む経路は持たない。
 function loadDiffCache(from, to) {
   try {
     const d = JSON.parse(fs.readFileSync(path.join(diffCacheDir, `diff-${from}-${to}.json`), 'utf8'));
-    if (d && d.format === 2 && d.source === 'live') return d;
+    if (d && d.format === 3 && d.source === 'live') return d;
   } catch (e) {}
   return null;
+}
+// プロパティの「実質的な値の変化」判定（ロケールノイズとの切り分け用）。
+// 英語ロケール保存 → 日本語ロケール保存のような跨ロケールペアでは、フィールドキーが
+// ロケールごとに付け替わるため、無変更の要素でも OBJECT_CHANGED に大量に現れる
+// （実測: V1→V2 で 34,718 件）。そのノイズ行では「片側にしか無いキーに同じ値が入っている」
+// （付け替え）か「共有キーでも prev 側が null」のどちらかで、値そのものは変わっていない。
+// 実質変化とみなすのは次のいずれか:
+//   (1) システムフィールド以外で、同一キーに両側とも非 null の異なる値が入っている
+//   (2) 新版側の値（ASCII 文字列または数値。システムフィールド以外）が旧版側の値集合に存在しない
+//       （例: ドアのコメント "diff-test" の新規追記）
+// 日本語文字列同士の付け替え（ enum 表示名の翻訳など）は (2) の対象外としてノイズ側に倒す。
+function computeValueChanged(r, fmap) {
+  const cur = r.props ?? {}, prev = r.prev?.props ?? {};
+  const isSys = k => { const f = fmap.get(k); return !!f && String(f.category ?? '').startsWith('__'); };
+  for (const k of Object.keys(cur)) {
+    if (isSys(k)) continue;
+    if (k in prev && prev[k] != null && cur[k] != null && JSON.stringify(prev[k]) !== JSON.stringify(cur[k])) return true;
+  }
+  const prevVals = new Set();
+  for (const v of Object.values(prev)) if (v != null) prevVals.add(JSON.stringify(v));
+  for (const [k, v] of Object.entries(cur)) {
+    if (isSys(k) || v == null || v === '') continue;
+    if (typeof v === 'number' || (typeof v === 'string' && /^[\x00-\x7F]+$/.test(v))) {
+      if (!prevVals.has(JSON.stringify(v))) return true;
+    }
+  }
+  return false;
 }
 const TYPE_MAP = { OBJECT_ADDED: 'added', OBJECT_REMOVED: 'removed', OBJECT_CHANGED: 'modified' };
 function normalizeLiveRows(rows, fieldsText) {
@@ -376,7 +463,7 @@ function normalizeLiveRows(rows, fieldsText) {
     else if (type === 'removed') elements.removed.push(entry);
     else if (type === 'modified') {
       const geomChanged = !!(r.geomHash && r.prev?.geomHash && r.geomHash !== r.prev.geomHash);
-      elements.modified.push({ ...entry, geomChanged, moved: isMoved(r) });
+      elements.modified.push({ ...entry, geomChanged, moved: isMoved(r), valueChanged: computeValueChanged(r, fmap) });
     }
     if (!r.bboxMin && !r.prev?.bboxMin) continue;
     let changedProps = [];
@@ -472,7 +559,7 @@ async function runLiveDiff(from, to) {
     }
     const { bboxRows, byCategory, elements } = normalizeLiveRows(rows, fieldsText);
     const out = {
-      format: 2, from, to, source: 'live', jobRunAt: new Date().toISOString(), stats, totalRows: rows.length,
+      format: 3, from, to, source: 'live', jobRunAt: new Date().toISOString(), stats, totalRows: rows.length,
       bboxRowCount: bboxRows.length, byCategory, bboxRows, elements,
     };
     fs.writeFileSync(path.join(diffCacheDir, `diff-${from}-${to}.json`), JSON.stringify(out));
@@ -570,7 +657,26 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/issues') {
       const [issues, versions] = await Promise.all([fetchIssues(), fetchVersions()]);
       const snap = loadSnapshots();
-      const merged = issues.map(i => ({ ...i, history: buildHistory(i, snap, versions) }));
+      const related = computeRelatedPairs(issues, versions);
+      const merged = issues.map(i => {
+        const h = buildHistory(i, snap, versions);
+        const rel = related.get(i.id);
+        let relatedPairs = rel?.pairs ?? [];
+        if (relatedPairs.length && h.modelUpdates.length) {
+          // 「開いている間に公開された版」と同じペアは二重に付けない
+          const have = new Set(h.modelUpdates.filter(m => m.diffPair).map(m => `${m.diffPair.from}-${m.diffPair.to}`));
+          relatedPairs = relatedPairs.filter(p => !have.has(`${p.from}-${p.to}`));
+        }
+        return {
+          ...i,
+          history: {
+            ...h,
+            relatedPairs,
+            relatedPairsPending: rel?.pending ?? false,
+            stats: { ...h.stats, relatedPairCount: relatedPairs.length },
+          },
+        };
+      });
       return sendJson(res, 200, {
         project: { id: PROJECT_ID, name: 'Snowdon Towers' },
         model: { name: ARCH.name, lineage: ARCH.lineage },

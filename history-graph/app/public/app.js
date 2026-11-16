@@ -61,7 +61,11 @@ function filteredIssues() {
 function miniGraph(i) {
   const h = i.history;
   const nodes = [{ cls: 'start', label: '開', title: '起票（Open）' }];
-  for (const m of h.modelUpdates) nodes.push({ cls: 'model', label: 'V' + m.version, title: `モデル更新 V${m.version}（${fmtDate(m.publishedAt)}）` });
+  const modelVers = [
+    ...h.modelUpdates.map(m => ({ v: m.version, t: `モデル更新 V${m.version}（${fmtDate(m.publishedAt)}）` })),
+    ...(h.relatedPairs ?? []).map(p => ({ v: p.version, t: `関連するモデル更新 ${p.label}（ピン対象要素が変化）` })),
+  ].sort((a, b) => a.v - b.v);
+  for (const m of modelVers) nodes.push({ cls: 'model', label: 'V' + m.v, title: m.t });
   if (h.stats.reopenCount > 0) nodes.push({ cls: 'reopen', label: '↩', title: `Reopen ${h.stats.reopenCount} 回` });
   if (i.status === 'closed') nodes.push({ cls: 'goal', label: '🏁', title: 'Close（ゴール）' });
   else nodes.push({ cls: 'now', label: '', title: '現在もオープン' });
@@ -114,6 +118,7 @@ function buildTable() {
     if (i.history.stats.closeCount) badges.push(`<span class="badge">Close ${i.history.stats.closeCount}回</span>`);
     if (i.history.stats.reopenCount) badges.push(`<span class="badge reopen">Reopen ${i.history.stats.reopenCount}回</span>`);
     if (i.history.stats.modelUpdateCount) badges.push(`<span class="badge">モデル更新 ${i.history.stats.modelUpdateCount}件</span>`);
+    if (i.history.stats.relatedPairCount) badges.push(`<span class="badge">関連モデル更新 ${i.history.stats.relatedPairCount}件</span>`);
     if (!i.pin) badges.push('<span class="badge">ピンなし</span>');
     return `<tr data-id="${esc(i.id)}" class="${i.id === selectedId ? 'active' : ''}">
       <td class="c-num">${i.displayId ?? ''}</td>
@@ -146,6 +151,7 @@ async function loadComments(id) {
 async function buildTimeline() {
   const i = issue();
   if (!i) { $('tlTitle').textContent = '—'; $('tlBody').innerHTML = ''; return; }
+  const myId = i.id;
   const [label] = FSTATUS[i.status] ?? [i.status];
   $('tlTitle').textContent = `#${i.displayId ?? ''} ${i.title ?? ''}`;
   $('tlMeta').innerHTML = [
@@ -167,6 +173,7 @@ async function buildTimeline() {
     timg.removeAttribute('src');
   }
   const comments = await loadComments(i.id);
+  if (selectedId !== myId) return; // 待っている間に選択が切り替わっていたら、古い描画で上書きしない
   const evs = [];
   evs.push({ t: i.createdAt, cls: 'open', html: `<b>起票</b> — ${esc(i.createdByName ?? '')} が Open` });
   for (const c of comments) {
@@ -188,7 +195,18 @@ async function buildTimeline() {
       note: m.note ?? (m.diffPair ? `差分: ${m.diffPair.label}` : ''),
     });
   }
+  for (const rp of i.history.relatedPairs ?? []) {
+    const chg = rp.change === 'added' ? '追加' : rp.change === 'removed' ? '削除' : '変更';
+    evs.push({
+      t: rp.publishedAt, cls: 'model', pair: { from: rp.from, to: rp.to, label: rp.label }, version: rp.version,
+      html: `<b>関連するモデル更新 — ${esc(rp.label)}</b>`,
+      note: `ピン対象要素${rp.anchorName ? `「${esc(rp.anchorName)}」` : ''}がこのペアで${chg}されました（ライブ diff で判定）`,
+    });
+  }
   evs.sort((a, b) => String(a.t ?? '').localeCompare(String(b.t ?? '')));
+  if (i.history.relatedPairsPending) {
+    evs.push({ t: null, cls: 'model', html: '<b>関連するモデル更新</b> — ライブ diff で確認中…', note: 'diff ジョブの完了後に自動で表示されます' });
+  }
   if (i.status !== 'closed') evs.push({ t: null, cls: 'now', html: '<b>現在</b> — オープン中' });
   $('tlBody').innerHTML = evs.map((e, idx) => `
     <div class="ev ${e.cls}${e.pair && selectedPair && e.pair.from === selectedPair.from && e.pair.to === selectedPair.to ? ' selected' : ''}">
@@ -200,7 +218,7 @@ async function buildTimeline() {
   for (const b of $('tlBody').querySelectorAll('button.ev-row')) {
     b.addEventListener('click', () => {
       const e = evs[Number(b.dataset.ev)];
-      if (e?.pair) { selectedPair = { ...e.pair, version: e.version }; buildTimeline(); loadDiff(true); updateViewerButton(); }
+      if (e?.pair) applyPair({ ...e.pair, version: e.version }, true);
     });
   }
 }
@@ -213,20 +231,58 @@ function countsChips(stats, geom) {
   if (geom) s += `<span class="dc g">うち形状シグナル 追加 ${geom.added}／削除 ${geom.removed}／変更 ${geom.modified}</span>`;
   return s;
 }
+// ---- 版ペアのピッカー（Issue やイベントの選択とは独立に任意ペアを指定できる） ----
+function pairLabel(from, to) {
+  if (from === 2 && to === 4) return 'V2 → V4（実質 V3）';
+  return `V${from} → V${to}`;
+}
+function populatePairPicker() {
+  const opts = (DATA?.versions ?? []).map(v =>
+    `<option value="${v.versionNumber}">V${v.versionNumber}${v.note ? '（変換不可）' : ''}</option>`).join('');
+  $('pairFrom').innerHTML = opts;
+  $('pairTo').innerHTML = opts;
+  const vers = (DATA?.versions ?? []).map(v => v.versionNumber);
+  if (vers.length) {
+    $('pairFrom').value = String(vers[0]);
+    $('pairTo').value = String(vers[vers.length - 1]);
+  }
+  syncPairPicker();
+}
+function syncPairPicker() {
+  if (!selectedPair) return;
+  if ([...$('pairFrom').options].some(o => Number(o.value) === selectedPair.from)) $('pairFrom').value = String(selectedPair.from);
+  if ([...$('pairTo').options].some(o => Number(o.value) === selectedPair.to)) $('pairTo').value = String(selectedPair.to);
+}
+// ペアを確定し、ピッカー・タイムラインのハイライト・差分表示を一貫して動かす
+function applyPair(pair, auto3d) {
+  selectedPair = {
+    from: pair.from, to: pair.to,
+    version: pair.version ?? pair.to,
+    label: pair.label ?? pairLabel(pair.from, pair.to),
+  };
+  diffViewCtx = null; // ペアが変わったら分類コンテキストは破棄（モード切替ボタンは無効に戻る）
+  updateBaControls();
+  renderDiffLegend();
+  $('pairNote').textContent = '';
+  syncPairPicker();
+  buildTimeline().then(() => loadDiff(auto3d));
+  updateViewerButton();
+}
 async function loadDiff(auto3d) {
   const i = issue();
-  if (!i || !selectedPair) {
+  if (!selectedPair) {
     $('diffTitle').textContent = '差分ビュー';
     $('diffCounts').innerHTML = '';
-    $('diffBody').innerHTML = '<div class="diff-empty">タイムラインの「モデル更新」イベントを選ぶと、その版ペアの差分が出ます。</div>';
+    $('diffBody').innerHTML = '<div class="diff-empty">タイムラインのモデル更新イベントを選ぶか、上のピッカーで版ペアを指定すると差分が出ます。</div>';
     return;
   }
   const { from, to } = selectedPair;
   $('diffTitle').textContent = `差分ビュー — ${selectedPair.label ?? `V${from} → V${to}`}`;
+  renderDiffLegend();
   $('diffBody').innerHTML = '<div class="diff-empty">読み込み中…</div>';
   let d;
   try {
-    const r = await fetch(`/api/diff?from=${from}&to=${to}&issue=${encodeURIComponent(i.id)}`);
+    const r = await fetch(`/api/diff?from=${from}&to=${to}${i ? `&issue=${encodeURIComponent(i.id)}` : ''}`);
     d = await r.json();
     if (r.status === 202) {
       $('diffBody').innerHTML = `<div class="diff-empty">実 API で diff ジョブを実行中です（${esc(d.status ?? '')}）。10 秒後に自動で再取得します。</div>`;
@@ -241,7 +297,9 @@ async function loadDiff(auto3d) {
   $('diffCounts').innerHTML = countsChips(d.stats, null);
   const np = d.nearPin;
   let side = '';
-  if (d.pinNote) {
+  if (!i) {
+    side = '<p class="diff-note">Issue を選ぶと、そのピンの周辺にある変更の内訳も表示します。</p>';
+  } else if (d.pinNote) {
     side = `<p class="diff-note">${esc(d.pinNote)}</p>`;
   } else if (np) {
     $('diffCounts').innerHTML = countsChips(d.stats, np.geomCounts);
@@ -267,7 +325,7 @@ async function loadDiff(auto3d) {
       <button type="button" class="btn primary" id="btnDiff3d">差分を 3D で表示</button>
       <span class="dc-status" id="diff3dStatus"></span>
     </div>
-    <div class="legend"><span><i class="la"></i>追加（新版のみ・緑）</span><span><i class="ld"></i>削除（旧版のみ・赤ゴースト）</span><span><i class="lc"></i>変更（新版・黄／旧版はゴースト）</span><span>変更なしは新版のみ表示</span></div>
+    <div class="legend"><span><i class="la"></i>追加（After のみ・緑）</span><span><i class="ld"></i>削除（Before のみ・赤ゴースト）</span><span><i class="lc"></i>変更（After・黄／Before はゴースト）</span><span>変更なしは After のみ表示</span><span>※ Before／After の対応表はビューア脇の凡例に常時表示</span></div>
     <div class="diff-side">${side}</div>
   </div>`;
   for (const b of $('diffBody').querySelectorAll('[data-dmode]')) {
@@ -275,10 +333,19 @@ async function loadDiff(auto3d) {
       if (diffMode === b.dataset.dmode) return;
       diffMode = b.dataset.dmode;
       for (const x of $('diffBody').querySelectorAll('[data-dmode]')) x.classList.toggle('active', x.dataset.dmode === diffMode);
+      diffViewCtx = null; // 要素リストが変わるので分類コンテキストは破棄する
+      updateBaControls();
       reapplyDiff3D();
     });
   }
-  $('diffGhostOld').addEventListener('change', () => { diffGhostOld = $('diffGhostOld').checked; reapplyDiff3D(); });
+  $('diffGhostOld').addEventListener('change', () => {
+    diffGhostOld = $('diffGhostOld').checked;
+    // ゴースト切替は見せ方だけの変更なので、分類済みなら再取得せずに適用し直す
+    if (diffViewCtx && diffPairShown && selectedPair && diffPairShown.from === selectedPair.from && diffPairShown.to === selectedPair.to) {
+      applyDiffViewMode();
+      renderDiffLegend();
+    } else reapplyDiff3D();
+  });
   $('btnDiff3d').addEventListener('click', () => showDiff3D());
   if (auto3d) showDiff3D();
 }
@@ -293,8 +360,10 @@ const diffModelByVersion = new Map(); // versionNumber -> model（読み込み�
 let diffPairShown = null;             // { from, to } 3D 差分を表示中のペア
 let diffElements = null;              // /api/diff/elements の応答（現在のモード）
 let diffBusy = false;
+let diffViewMode = 'overlay';         // 3D 差分の見せ方: 'overlay'（重ねて表示）| 'before'（Before のみ）| 'after'（After のみ）
+let diffViewCtx = null;               // 分類済みの表示コンテキスト（モード切替時は再取得せずこれを使い回す）
 function updateViewerButton() {
-  $('btnViewer').disabled = !(issue() && selectedPair);
+  $('btnViewer').disabled = !selectedPair;
 }
 function diffStatus(msg) {
   const el = $('diff3dStatus');
@@ -400,30 +469,114 @@ async function fetchDiffElements() {
   }
   throw new Error('diff ジョブが時間内に完了しませんでした');
 }
+// ---- Before／After の凡例と表示モード切替 ----
+// 凡例はビューア脇に常時表示し、版ペアが変われば版番号が追従する。
+function baModeLabel() {
+  if (!selectedPair) return '';
+  if (diffViewMode === 'before') return `Before のみ（V${selectedPair.from} の姿だけを表示）`;
+  if (diffViewMode === 'after') return `After のみ（V${selectedPair.to} の姿だけを表示）`;
+  return '重ねて表示（Before と After を重ねる）';
+}
+function renderDiffLegend() {
+  const el = $('diffLegend');
+  if (!el) return;
+  if (!selectedPair) {
+    el.innerHTML = '<p class="dl-empty">差分ペアを選ぶと、Before／After の対応と色の意味がここに出ます。</p>';
+    return;
+  }
+  const { from, to } = selectedPair;
+  el.innerHTML = `
+    <div class="dl-head">
+      <span class="dl-ver dl-before">Before = V${from}（旧版）</span>
+      <span class="dl-arrow">→</span>
+      <span class="dl-ver dl-after">After = V${to}（新版）</span>
+      <span class="dl-cur">現在の表示: ${esc(baModeLabel())}</span>
+    </div>
+    <ul class="dl-list">
+      <li><i class="sw sw-a"></i><b>追加</b>（After にのみ存在する要素）: After の要素を<b>緑</b>で表示</li>
+      <li><i class="sw sw-d"></i><b>削除</b>（Before にのみ存在する要素）: Before の要素を<b>赤いゴースト</b>で表示</li>
+      <li><i class="sw sw-c"></i><b>変更</b>（両版に存在し変化した要素）: After の要素を<b>黄</b>で表示し、Before の要素を<b>薄黄ゴースト</b>で重ねて表示（ゴースト OFF のときは After のみ）</li>
+      <li><i class="sw sw-n"></i><b>変更なし</b>: After の要素を通常表示（Before の同要素は重ねない）</li>
+    </ul>
+    ${diffViewCtx ? '' : '<p class="dl-note">「Before のみ／After のみ」の切り替えボタンは、3D 差分を表示したあと有効になります。</p>'}`;
+}
+function updateBaControls() {
+  const has = !!diffViewCtx;
+  for (const b of document.querySelectorAll('[data-bamode]')) {
+    b.disabled = !has;
+    b.classList.toggle('active', b.dataset.bamode === diffViewMode);
+  }
+  const note = $('baNote');
+  if (note) note.textContent = has
+    ? `表示中: ${pairLabel(diffViewCtx.from, diffViewCtx.to)}`
+    : '3D 差分を表示すると切り替えできます';
+}
+function setDiffViewMode(m) {
+  diffViewMode = m;
+  updateBaControls();
+  renderDiffLegend();
+  applyDiffViewMode();
+}
+// 分類済みコンテキスト（diffViewCtx）に対して、表示モードに応じた表示／非表示と色付けだけを適用する。
+// モード切替ではモデルも要素リストも再取得しない。
+function applyDiffViewMode() {
+  if (!viewer || !diffViewCtx) return;
+  const ctx = diffViewCtx;
+  const THREE = window.THREE;
+  if (!THREE) return;
+  const V4 = (r, g, b, a) => new THREE.Vector4(r, g, b, a);
+  const { fromM, toM } = ctx;
+  const show = (model, ids) => { if (ids.length) { try { viewer.show(ids, model); } catch (e) {} } };
+  const hide = (model, ids) => { if (ids.length) { try { viewer.hide(ids, model); } catch (e) {} } };
+  const theme = (model, ids, v4) => { for (const db of ids) { try { viewer.setThemingColor(db, v4, model); } catch (e) {} } };
+  const rest = (all, keep) => { const s = new Set(keep); return all.filter(id => !s.has(id)); };
+  // 前回の isolate 状態を解除してから、明示的な表示／非表示リストで状態を作り直す
+  try { viewer.isolate([], fromM); } catch (e) {}
+  try { viewer.isolate([], toM); } catch (e) {}
+  try { viewer.clearThemingColors(fromM); } catch (e) {}
+  try { viewer.clearThemingColors(toM); } catch (e) {}
+  if (diffViewMode === 'before') {
+    // Before のみ: 旧版モデルを全表示（削除=赤、変更=黄でその版の姿を見せる）、新版は全て隠す
+    show(fromM, ctx.allFrom);
+    hide(toM, ctx.allTo);
+    theme(fromM, ctx.removedDb, V4(0.85, 0.16, 0.1, 0.9));
+    theme(fromM, ctx.changedFromDb, V4(0.95, 0.72, 0.08, 0.9));
+  } else if (diffViewMode === 'after') {
+    // After のみ: 新版モデルを全表示（追加=緑、変更=黄でその版の姿を見せる）、旧版は全て隠す
+    show(toM, ctx.allTo);
+    hide(fromM, ctx.allFrom);
+    theme(toM, ctx.addedToDb, V4(0.1, 0.65, 0.3, 1));
+    theme(toM, ctx.changedToDb, V4(0.95, 0.72, 0.08, 1));
+  } else {
+    // 重ねて表示: 新版を全表示し、旧版は削除（＋ゴースト ON 時は変更の旧形状）だけを重ねる
+    show(toM, ctx.allTo);
+    const keepFrom = diffGhostOld ? [...ctx.removedDb, ...ctx.changedFromDb] : [...ctx.removedDb];
+    show(fromM, keepFrom);
+    hide(fromM, rest(ctx.allFrom, keepFrom));
+    theme(toM, ctx.addedToDb, V4(0.1, 0.65, 0.3, 1));
+    theme(toM, ctx.changedToDb, V4(0.95, 0.72, 0.08, 1));
+    theme(fromM, ctx.removedDb, V4(0.85, 0.16, 0.1, 0.45));
+    if (diffGhostOld) theme(fromM, ctx.changedFromDb, V4(0.9, 0.7, 0.15, 0.35));
+  }
+}
 async function applyDiffClassification() {
   const fromM = diffModelByVersion.get(selectedPair.from);
   const toM = diffModelByVersion.get(selectedPair.to);
   if (!fromM || !toM || !diffElements) return;
-  const THREE = window.THREE;
-  if (!THREE) return;
-  const V4 = (r, g, b, a) => new THREE.Vector4(r, g, b, a);
   const [mapFrom, mapTo] = await Promise.all([extMapping(fromM), extMapping(toM)]);
   const dbOf = (map, e) => { const db = map[e.externalId]; return db != null ? db : null; };
-  // 旧版: 削除（＋トグル時は変更の旧形状）だけを残し、残りは全て隠す
-  const removedDb = diffElements.removed.map(e => dbOf(mapFrom, e)).filter(db => db != null);
-  const changedFromDb = diffElements.changed.map(e => dbOf(mapFrom, e)).filter(db => db != null);
-  const keepFrom = diffGhostOld ? [...removedDb, ...changedFromDb] : [...removedDb];
-  try { viewer.clearThemingColors(fromM); } catch (e) {}
-  try {
-    if (keepFrom.length) viewer.isolate(keepFrom, fromM);
-    else viewer.hide(allDbIds(fromM), fromM);
-  } catch (e) {}
-  for (const db of removedDb) { try { viewer.setThemingColor(db, V4(0.85, 0.16, 0.1, 0.45), fromM); } catch (e) {} }
-  if (diffGhostOld) for (const db of changedFromDb) { try { viewer.setThemingColor(db, V4(0.9, 0.7, 0.15, 0.35), fromM); } catch (e) {} }
-  // 新版: 追加=緑、変更=黄（変更なし・追加・変更はそのまま表示）
-  try { viewer.clearThemingColors(toM); } catch (e) {}
-  for (const e of diffElements.added) { const db = dbOf(mapTo, e); if (db != null) { try { viewer.setThemingColor(db, V4(0.1, 0.65, 0.3, 1), toM); } catch (err) {} } }
-  for (const e of diffElements.changed) { const db = dbOf(mapTo, e); if (db != null) { try { viewer.setThemingColor(db, V4(0.95, 0.72, 0.08, 1), toM); } catch (err) {} } }
+  // 分類結果を表示コンテキストとして保持し、見せ方の適用は applyDiffViewMode に寄せる
+  diffViewCtx = {
+    from: selectedPair.from, to: selectedPair.to, fromM, toM,
+    allFrom: allDbIds(fromM), allTo: allDbIds(toM),
+    removedDb: diffElements.removed.map(e => dbOf(mapFrom, e)).filter(db => db != null),
+    changedFromDb: diffElements.changed.map(e => dbOf(mapFrom, e)).filter(db => db != null),
+    addedToDb: diffElements.added.map(e => dbOf(mapTo, e)).filter(db => db != null),
+    changedToDb: diffElements.changed.map(e => dbOf(mapTo, e)).filter(db => db != null),
+  };
+  applyDiffViewMode();
+  updateBaControls();
+  renderDiffLegend();
   // ピン対象要素があればそこへフィット（無ければピン座標へ）
   const i = issue();
   let fitted = false;
@@ -436,7 +589,7 @@ async function applyDiffClassification() {
   diffStatus(`3D 差分を表示中: V${selectedPair.from} → V${selectedPair.to}（追加 ${diffElements.counts.added}／削除 ${diffElements.counts.removed}／変更 ${diffElements.counts.changed}${diffMode === 'geometry' ? '・形状のみ' : '・プロパティのみ含む'}）`);
 }
 async function showDiff3D() {
-  if (!issue() || !selectedPair || diffBusy) return;
+  if (!selectedPair || diffBusy) return;
   diffBusy = true;
   try {
     await ensureViewer();
@@ -463,21 +616,66 @@ function reapplyDiff3D() {
 }
 
 // ============ 選択・初期化 ============
+function defaultPairFor(i) {
+  // 既定の差分ペア：diffPair を持つ最新のモデル更新。無ければ関連するモデル更新の最新ペア
+  const withPair = (i?.history.modelUpdates ?? []).filter(m => m.diffPair);
+  if (withPair.length) {
+    const m = withPair[withPair.length - 1];
+    return { ...m.diffPair, version: m.version };
+  }
+  const rel = i?.history.relatedPairs ?? [];
+  if (rel.length) {
+    const rp = rel[rel.length - 1];
+    return { from: rp.from, to: rp.to, version: rp.version, label: rp.label };
+  }
+  return null;
+}
+// 関連ペアの判定はサーバ側でライブ diff ジョブが要るため、初回は pending になることがある。
+// ジョブ完了後に自動でタイムラインへ反映するため、pending の間は /api/issues を取り直す。
+let relatedPollTimer = null, relatedPollTries = 0;
+function scheduleRelatedPoll() {
+  clearTimeout(relatedPollTimer);
+  const i = issue();
+  if (!i?.history?.relatedPairsPending || relatedPollTries >= 12) return;
+  relatedPollTimer = setTimeout(async () => {
+    relatedPollTries++;
+    const keepId = selectedId, keepPair = selectedPair;
+    try {
+      const r = await fetch('/api/issues');
+      if (r.ok && selectedId === keepId) {
+        DATA = await r.json();
+        buildChips();
+        buildTable();
+        await buildTimeline();
+        if (!selectedPair) {
+          const p = defaultPairFor(issue());
+          if (p) { selectedPair = p; syncPairPicker(); loadDiff(false); updateViewerButton(); }
+        }
+      }
+    } catch (e) { /* 次回に再試行 */ }
+    scheduleRelatedPoll();
+  }, 15000);
+}
 function selectIssue(id, scrollTimeline) {
+  if (selectedId !== id) relatedPollTries = 0;
   selectedId = id;
   const i = issue();
-  // 既定の差分ペア：diffPair を持つ最新のモデル更新
-  const withPair = (i?.history.modelUpdates ?? []).filter(m => m.diffPair);
-  selectedPair = withPair.length ? { ...withPair[withPair.length - 1].diffPair, version: withPair[withPair.length - 1].version } : null;
+  selectedPair = defaultPairFor(i);
+  diffViewCtx = null; // Issue が変われば表示中の分類は別ペアのものになり得るため破棄
+  updateBaControls();
+  renderDiffLegend();
+  syncPairPicker();
   buildTable();
   buildTimeline().then(() => { loadDiff(); });
   updateViewerButton();
+  scheduleRelatedPoll();
 }
 async function loadAll() {
   const r = await fetch('/api/issues');
   if (!r.ok) throw new Error('Issue の取得に失敗しました（HTTP ' + r.status + '）');
   DATA = await r.json();
   $('headNote').textContent = `${DATA.project.name} — ${DATA.model.name}（V${DATA.versions.map(v => v.versionNumber).join(' / ')}）／履歴スナップショット: ${DATA.snapshot.refreshCount} 回・変化イベント ${DATA.snapshot.eventCount} 件`;
+  populatePairPicker();
   buildChips();
   buildTable();
   const first = DATA.issues.slice().sort((a, b) => (a.displayId ?? 0) - (b.displayId ?? 0))[0];
@@ -488,6 +686,19 @@ $('pageSize').addEventListener('change', () => { flt.pageSize = Number($('pageSi
 $('btnPrev').addEventListener('click', () => { if (flt.page > 1) { flt.page--; buildTable(); } });
 $('btnNext').addEventListener('click', () => { flt.page++; buildTable(); });
 $('btnViewer').addEventListener('click', () => showDiff3D());
+for (const b of document.querySelectorAll('[data-bamode]')) {
+  b.addEventListener('click', () => setDiffViewMode(b.dataset.bamode));
+}
+updateBaControls();
+$('btnPair').addEventListener('click', () => {
+  const from = Number($('pairFrom').value);
+  const to = Number($('pairTo').value);
+  if (!Number.isInteger(from) || !Number.isInteger(to) || from === to) {
+    $('pairNote').textContent = 'From と To には異なる版を選んでください';
+    return;
+  }
+  applyPair({ from, to, version: to }, true);
+});
 $('btnRefresh').addEventListener('click', async () => {
   $('btnRefresh').disabled = true;
   try {
