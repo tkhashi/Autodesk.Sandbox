@@ -438,15 +438,15 @@ function updateFocusPin() {
   const el = $('focusPin');
   if (!el) return;
   const i = focusedIssue();
-  if (!viewer || !geoLoaded || overviewOn || viewerMode !== 'aps' || !i?.targetDbId || i.modelKey !== viewerModelKey) { el.hidden = true; return; }
-  const pos = anchorFor(i);
+  if (!viewer || !rootLoaded || overviewOn || viewerMode !== 'aps' || !i?.targetDbId || i.modelKey !== viewerModelKey) { el.hidden = true; return; }
+  const pos = anchorFor(i) ?? pinAnchorFor(i); // 読み込み中はピン座標で先行表示
   if (!pos) { el.hidden = true; return; }
   try {
     const T = THREE;
     const p = new T.Vector3(pos.x, pos.y, pos.z);
     const cam = viewer.impl.camera; const dir = new T.Vector3(); cam.getWorldDirection(dir);
     if (p.clone().sub(cam.position).dot(dir) <= 0) { el.hidden = true; return; }
-    if (typeof viewer.isNodeVisible === 'function' && !viewer.isNodeVisible(i.targetDbId)) { el.hidden = true; return; }
+    if (geoLoaded && typeof viewer.isNodeVisible === 'function' && !viewer.isNodeVisible(i.targetDbId)) { el.hidden = true; return; }
     const v = viewer.worldToClient(p);
     el.style.left = Math.floor(v.x) + 'px';
     el.style.top = Math.floor(v.y) + 'px';
@@ -511,15 +511,28 @@ function nodeWorldBox(dbId) {
   } catch (e) {}
   return null;
 }
-// 引き出し線の先端は、ハイライトされる部材そのものの中心にする。
-// ピンの保存座標は使わない：Forma で付けたピンの座標は、デモの Viewer のワールド座標と
-// 原点がずれた別空間で記録されていることが数値照合で判明したため（2026-11-16 調査。
-// Forma ピン #1・#3 は部材の実形状に対し約 (+20.2, +0.84, -24.0) ft の平行移動分だけ外側にあった）。
+// 引き出し線の先端は、読み込み完了後はハイライトされる部材そのものの中心にする。
 // 部材ボックスは Viewer 実行時 API から取るので、ハイライトや fitToView と同じ空間で必ず部材の上に来る。
 function anchorFor(issue) {
   const box = nodeWorldBox(issue.targetDbId);
   if (!box) return null;
   return { x: (box.min.x + box.max.x) / 2, y: (box.min.y + box.max.y) / 2, z: (box.min.z + box.max.z) / 2 };
+}
+// 読み込み中に使う先行アンカー：Issue のピン座標（Issues API 由来）。
+// ピン座標は Viewer のワールド座標そのものであることを 2026-11-16 にローカルリグで実測した
+// （対象部材を色付けし、ピン座標の投影点が部材の上に重なることを目視確認。globalOffset を
+// 足した点は部材から外れた）。かつて「別空間の座標」とした調査は、ワールド座標のピンと
+// ローカル座標のオフラインボックスを比べた取り違えだった（差分はモデルの globalOffset と一致）。
+// サーバー側の索引は使わず、Forma（Issues API）が持つデータだけで先行表示する。
+function pinAnchorFor(issue) {
+  const p = issue?.pin?.position;
+  if (!p || typeof p.x !== 'number' || typeof p.y !== 'number' || typeof p.z !== 'number') return null;
+  return { x: p.x, y: p.y, z: p.z };
+}
+// マーカー構築済みキーは段階も含める：読み込み中（ピン座標アンカー）→ 完了後
+// （ボックスアンカー）でキーが変わり、完了時に作り直されて線の先が部材に合い直す。
+function markersKey() {
+  return viewerModelKey + ':' + issuesOnCurrentModel().map(x => x.id + '|' + x.status).join(',') + (geoLoaded ? ':g' : ':e');
 }
 function colorIssueElements() {
   if (!viewer) return;
@@ -551,7 +564,7 @@ function buildMarkers() {
   const svg = $('leaders');
   const seen = new Map();
   for (const i of issuesOnCurrentModel()) {
-    const pos = anchorFor(i);
+    const pos = anchorFor(i) ?? pinAnchorFor(i); // 読み込み中はピン座標で先行表示し、完了後の再構築でボックス中心に合い直す
     if (!pos) continue;
     const bb = nodeWorldBox(i.targetDbId);
     const corners = bb ? [0, 1].flatMap(xi => [0, 1].flatMap(yi => [0, 1].map(zi => ({
@@ -722,7 +735,7 @@ function enterOverview() {
   applyOccluderClearing(); // 選択中の Issue の手前の部材だけを消す
   viewer.clearThemingColors();
   colorIssueElements();
-  const mkey = viewerModelKey + ':' + issuesOnCurrentModel().map(x => x.id + '|' + x.status).join(',');
+  const mkey = markersKey();
   if (markersBuiltFor !== mkey) { buildMarkers(); markersBuiltFor = mkey; }
   updateFocusPin(); // 一覧モード中はフォーカスピンを隠す
   const n = issuesOnCurrentModel().length;
@@ -741,6 +754,11 @@ function toggleOverview() {
   overviewOn = true;
   syncOverviewBtn();
   if (viewer && geoLoaded) enterOverview();
+  else if (viewer && rootLoaded) {
+    const k = markersKey();
+    if (markersBuiltFor !== k) { buildMarkers(); markersBuiltFor = k; }
+    setStatV('モデルの読み込み中：ピン位置で指摘箇所を先行表示しています。読み込みが終わると部材の位置に合わせ直します。');
+  }
   else setStatV('モデルの読み込みが終わったら、指摘事項一覧を表示します。');
 }
 window.addEventListener('resize', () => { if (overviewOn) updateMarkers(); updateFocusPin(); });
@@ -1039,6 +1057,9 @@ function setupViewer(modelKey) {
   viewer.addEventListener(Autodesk.Viewing.MODEL_ROOT_LOADED_EVENT, () => {
     rootLoaded = true;
     applySelection();
+    // 形状のストリーミング完了を待たず、ピン座標でラベル＋引き出し線を先行表示する
+    if (overviewOn) { const k = markersKey(); if (markersBuiltFor !== k) { buildMarkers(); markersBuiltFor = k; } }
+    updateFocusPin();
     setStatV(`モデル（${esc(m.short)}）の読み込み中…`);
   });
   viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, () => {
@@ -1056,6 +1077,7 @@ function setupViewer(modelKey) {
     if (!geoLoaded && typeof e.percent === 'number') {
       setStatV(`モデル（${esc(m.short)}）を読み込んでいます（逐次配信）… ${Math.round(e.percent)}%`);
       setViewerLoading(`モデル（${esc(m.short)}）を読み込んでいます… ${Math.round(e.percent)}%`);
+      updMarkers(); // 先行表示中のラベル／ピンを、配信中の視点変化にも追随させる（rAF で間引き済み）
     }
   });
   Autodesk.Viewing.Document.load('urn:' + m.urn, (doc) => {
