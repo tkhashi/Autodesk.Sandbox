@@ -471,6 +471,7 @@ const STATUS3D = { // 3D ハイライト色（表のステータス色に合わ�
   in_review: [0.23, 0.51, 0.77], closed: [0.30, 0.69, 0.49], void: [0.54, 0.60, 0.66],
 };
 let markerItems = [];
+let markersBuiltFor = null; // マーカーを構築済みのモデル＋状態のキー（再構築の省略用）
 function v4(r, g, b, a = 1) { const V = window.THREE?.Vector4 ?? Autodesk.Viewing.Private.THREE.Vector4; return new V(r, g, b, a); }
 function syncOverviewBtn() { window.dispatchEvent(new CustomEvent('demo-overview-state', { detail: overviewOn })); }
 // 要素のワールド境界ボックス（未ロードなら null）
@@ -529,6 +530,7 @@ function colorIssueElements() {
 }
 function clearMarkers() {
   markerItems = [];
+  markersBuiltFor = null;
   const l = $('markers'); if (l) l.innerHTML = '';
   const s = $('leaders'); if (s) s.innerHTML = '';
 }
@@ -555,6 +557,7 @@ function buildMarkers() {
     const stack = seen.get(key) ?? 0; seen.set(key, stack + 1);
     const el = document.createElement('div');
     el.className = 'issue-label' + (i.id === selected ? ' sel' : '');
+    el.style.left = '0px'; el.style.top = '0px'; // 配置は transform で行う（left/top の書き換えはレイアウトを引くため）
     el.style.borderLeftColor = FSTATUS[i.status]?.[1] ?? '#999';
     el.textContent = i.title;
     el.title = `#${i.displayId} ${i.title}`;
@@ -573,7 +576,7 @@ function buildMarkers() {
     dot.style.fill = FSTATUS[i.status]?.[1] ?? '#999';
     svg.appendChild(line);
     svg.appendChild(dot);
-    markerItems.push({ el, line, dot, pos, corners, stack, id: i.id, dbId: i.targetDbId });
+    markerItems.push({ el, line, dot, pos, corners, stack, id: i.id, dbId: i.targetDbId, w: el.offsetWidth || 0, h: el.offsetHeight || 0 });
   }
   updateMarkers();
 }
@@ -622,10 +625,13 @@ function updateMarkers() {
       }
       const visible = !!v;
       const disp = visible ? '' : 'none';
-      it.el.style.display = disp; it.line.style.display = disp; it.dot.style.display = disp;
-      if (visible) vis.push({ it, v });
+      if (it._disp !== disp) { it._disp = disp; it.el.style.display = disp; it.line.style.display = disp; it.dot.style.display = disp; }
+      if (visible) {
+        if (!it.w) { it.w = it.el.offsetWidth || 120; it.h = it.el.offsetHeight || 22; }
+        vis.push({ it, v });
+      }
     } catch (e) {
-      it.el.style.display = 'none'; it.line.style.display = 'none'; it.dot.style.display = 'none';
+      if (it._disp !== 'none') { it._disp = 'none'; it.el.style.display = 'none'; it.line.style.display = 'none'; it.dot.style.display = 'none'; }
     }
   }
   if (!vis.length || !W || !H) return;
@@ -637,7 +643,7 @@ function updateMarkers() {
     const ex = rayExitRect(C, o.v, R) ?? { x: Math.min(Math.max(o.v.x, 8), W - 8), y: R.t, side: 'top' };
     o.side = ex.side;
     o.lx = ex.x; o.ly = ex.y;
-    const w = o.it.el.offsetWidth, h = o.it.el.offsetHeight;
+    const w = o.it.w || 120, h = o.it.h || 22;
     if (ex.side === 'top') o.ly -= h / 2 + 4;
     else if (ex.side === 'bottom') o.ly += h / 2 + 4;
     else if (ex.side === 'left') o.lx -= w / 2 + 4;
@@ -650,7 +656,7 @@ function updateMarkers() {
     const g = vis.filter(o => o.side === side);
     if (!g.length) continue;
     const horiz = side === 'top' || side === 'bottom';
-    const size = o => horiz ? o.it.el.offsetWidth : o.it.el.offsetHeight;
+    const size = o => horiz ? (o.it.w || 120) : (o.it.h || 22);
     const L = horiz ? W : H;
     const get = o => horiz ? o.lx : o.ly;
     const set = (o, val) => { if (horiz) o.lx = val; else o.ly = val; };
@@ -683,8 +689,8 @@ function updateMarkers() {
     for (let a = 0; a < placedAll.length; a++) {
       for (let b = a + 1; b < placedAll.length; b++) {
         const A = placedAll[a], B = placedAll[b];
-        const aw = A.it.el.offsetWidth, ah = A.it.el.offsetHeight;
-        const bw = B.it.el.offsetWidth, bh = B.it.el.offsetHeight;
+        const aw = A.it.w || 120, ah = A.it.h || 22;
+        const bw = B.it.w || 120, bh = B.it.h || 22;
         const ox = (aw + bw) / 2 - Math.abs(A.lx - B.lx);
         const oy = (ah + bh) / 2 - Math.abs(A.ly - B.ly);
         if (ox > 0 && oy > 0) {
@@ -700,9 +706,8 @@ function updateMarkers() {
   // 配置して引き出し線を結ぶ
   for (const o of vis) {
     const { it, v } = o;
-    const w = it.el.offsetWidth, h = it.el.offsetHeight;
-    it.el.style.left = Math.floor(o.lx - w / 2) + 'px';
-    it.el.style.top = Math.floor(o.ly - h / 2) + 'px';
+    const w = it.w || 120, h = it.h || 22;
+    it.el.style.transform = `translate(${Math.floor(o.lx - w / 2)}px, ${Math.floor(o.ly - h / 2)}px)`;
     it.line.setAttribute('points', `${v.x},${v.y} ${o.lx},${o.ly}`);
     it.dot.setAttribute('cx', v.x);
     it.dot.setAttribute('cy', v.y);
@@ -713,7 +718,8 @@ function enterOverview() {
   applyOccluderClearing(); // 選択中の Issue の手前の部材だけを消す
   viewer.clearThemingColors();
   colorIssueElements();
-  buildMarkers();
+  const mkey = viewerModelKey + ':' + issuesOnCurrentModel().map(x => x.id + '|' + x.status).join(',');
+  if (markersBuiltFor !== mkey) { buildMarkers(); markersBuiltFor = mkey; }
   updateFocusPin(); // 一覧モード中はフォーカスピンを隠す
   const n = issuesOnCurrentModel().length;
   setStatV(`指摘事項一覧を表示中（このモデルの Issue ${n} 件）。色はステータス別、選択中は赤。${occHiddenCount ? '選択中の Issue の手前にある部材 ' + occHiddenCount + ' 件を消して、奥を見通せるようにしています。' : ''}ラベルをクリックすると詳細が開きます。`);
@@ -764,9 +770,7 @@ function updateEdges() {
 function clearOccluders() {
   for (const t of occSettleTimers) clearTimeout(t);
   occSettleTimers = [];
-  if (viewer && hiddenOccluders.size) { try { viewer.show([...hiddenOccluders]); } catch (e) {} }
-  hiddenOccluders = new Set();
-  occHiddenCount = 0;
+  applyOccluderSet(new Set());
   occTargetDbId = null;
 }
 
@@ -858,16 +862,24 @@ function occluderCandidates() {
 
 // 選択中の Issue の要素について、手前の部材を消し直す
 let occSettleTimers = [];
+// 非表示セットを差分だけで適用する。以前は再計算のたびに「全部戻してから
+// 消し直す」ため、カメラ移動や Issue 切替のたびに表示状態の組み替えが走って
+// 描画がバタついていた（実機報告：操作するとちらつく）
+function applyOccluderSet(next) {
+  const toShow = [...hiddenOccluders].filter(id => !next.has(id));
+  const toHide = [...next].filter(id => !hiddenOccluders.has(id));
+  if (viewer && toShow.length) { try { viewer.show(toShow); } catch (e) {} }
+  if (viewer && toHide.length) { try { viewer.hide(toHide); } catch (e) {} }
+  hiddenOccluders = next;
+  occHiddenCount = next.size;
+}
 function applyOccluderClearing(settle = false) {
-  clearOccluders();
-  if (!viewer || !geoLoaded || viewerMode !== 'aps' || occluderRange <= 0) return 0;
+  if (!viewer || !geoLoaded || viewerMode !== 'aps' || occluderRange <= 0) { applyOccluderSet(new Set()); occTargetDbId = null; return 0; }
   const i = issue() ?? focusedIssue();
-  if (!i?.targetDbId || i.modelKey !== viewerModelKey) return 0;
+  if (!i?.targetDbId || i.modelKey !== viewerModelKey) { applyOccluderSet(new Set()); occTargetDbId = null; return 0; }
   try {
     const occ = computeOccluders(i.targetDbId);
-    if (occ.length) viewer.hide(occ);
-    hiddenOccluders = new Set(occ);
-    occHiddenCount = occ.length;
+    applyOccluderSet(new Set(occ));
     occTargetDbId = i.targetDbId;
     const p = viewer.navigation.getPosition();
     occCamPos = { x: p.x, y: p.y, z: p.z };
@@ -926,6 +938,8 @@ if (ghostRangeEl) ghostRangeEl.addEventListener('input', () => {
 // 対象要素へカメラを寄せる。Viewer 標準の fitToView だと部材が画面いっぱいに
 // なって近すぎるため、部材のボックスから距離を計算して「引き」で収める
 // （2026-11-16 ユーザー指示）。
+let focusAnim = null; // フォーカス移動アニメーションの状態（ユーザー操作で中断する）
+function cancelFocusAnim() { if (focusAnim) { cancelAnimationFrame(focusAnim.raf); focusAnim = null; } }
 function fitToElement(dbId) {
   const box = nodeWorldBox(dbId);
   if (!box) return false;
@@ -945,10 +959,32 @@ function fitToElement(dbId) {
     if (!isFinite(az)) az = Math.PI / 4;
     const el = (28 * Math.PI) / 180;
     const dir = new T.Vector3(Math.cos(az) * Math.cos(el), Math.sin(az) * Math.cos(el), Math.sin(el));
-    viewer.navigation.setView(c.clone().add(dir.multiplyScalar(dist)), c, new T.Vector3(0, 0, 1));
+    const dest = c.clone().add(dir.multiplyScalar(dist));
     // 回転中心（ピボット）も対象へ合わせる。setView はピボットを動かさないため、
     // 放っておくと原点中心の回転になり、回すたびにビューが斜めに振れる（実測で確認）
     try { viewer.navigation.setPivotPoint(c); } catch (e) {}
+    // 滑らかに移動する。setView は瞬間移動なので、イージング付きで補間する
+    // （移動中にユーザーが操作したら cancelFocusAnim で譲る）
+    const fromPos = viewer.impl.camera.position.clone();
+    const fromTgt = viewer.navigation.getTarget().clone();
+    const travel = fromPos.distanceTo(dest);
+    const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    cancelFocusAnim();
+    if (reduceMotion || travel < 1.5) { viewer.navigation.setView(dest, c, new T.Vector3(0, 0, 1)); return true; }
+    const dur = Math.min(1200, Math.max(650, 450 + travel * 1.2));
+    const t0 = performance.now();
+    const ease = (x) => x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+    const anim = { raf: 0 };
+    focusAnim = anim;
+    const step = (now) => {
+      if (focusAnim !== anim) return;
+      const t = Math.min(1, Math.max(0, (now - t0) / dur));
+      const e = ease(t);
+      viewer.navigation.setView(fromPos.clone().lerp(dest, e), fromTgt.clone().lerp(c, e), new T.Vector3(0, 0, 1));
+      if (t < 1) anim.raf = requestAnimationFrame(step);
+      else focusAnim = null;
+    };
+    anim.raf = requestAnimationFrame(step);
     return true;
   } catch (e) { return false; }
 }
@@ -997,7 +1033,11 @@ function setupViewer(modelKey) {
   viewer = new Autodesk.Viewing.GuiViewer3D($('viewerWrap'));
   viewer.start();
   viewer.loadExtension('DemoToolbarExtension').then(() => syncOverviewBtn()).catch(() => {});
-  const updMarkers = () => { if (overviewOn) updateMarkers(); updateFocusPin(); };
+  let markersRaf = 0;
+  const updMarkers = () => {
+    if (markersRaf) return; // カメラ移動中は毎フレームではなく描画フレーム単位に間引く
+    markersRaf = requestAnimationFrame(() => { markersRaf = 0; if (overviewOn) updateMarkers(); updateFocusPin(); });
+  };
   viewer.addEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, updMarkers);
   viewer.addEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, scheduleOccluderRecompute);
   // ストリーミングで後から届いた部材が非表示をすり抜けないよう、進捗のたびに
@@ -1108,6 +1148,10 @@ window.addEventListener('demo-focus-target', () => {
 });
 window.addEventListener('demo-toggle-overview', () => toggleOverview());
 window.addEventListener('demo-toggle-ghost-panel', () => toggleGhostPanel());
+// フォーカスの移動中にユーザーがビューアを操作したら、アニメーションを譲る
+for (const ev of ['pointerdown', 'wheel']) {
+  document.getElementById('viewerWrap')?.addEventListener(ev, () => cancelFocusAnim(), { passive: true });
+}
 
 async function initViewer() {
   if (!window.Autodesk) {
