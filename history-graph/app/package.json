@@ -1,0 +1,1 @@
+{"description":"履歴グラフ実アプリ v1 — Forma Issues の生涯（起票→Close→Reopen）とモデル版 diff を実 API で表示する","engines":{"node":">=18"},"name":"history-graph-app","private":true,"scripts":{"build-diff-cache":"node tools/build-diff-cache.mjs","start":"node server.mjs"},"type":"module","version":"1.0.0"}

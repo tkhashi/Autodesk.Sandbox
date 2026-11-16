@@ -1,6 +1,12 @@
-# history-graph — Issue 単位の履歴グラフ（モック一式）
+# history-graph — Issue 単位の履歴グラフ（モック一式＋実アプリ v1）
 
-Autodesk Forma（ACC）の Issue について、「同じ指摘がモデル更新をまたいでどう扱われてきたか」を追えるようにするアプリのモック／検証一式。本体は未実装で、ここにあるのは UI モック、API モック、ビューア代替（bbox ボックスモデル）と、その裏付けとなる実測データ。
+Autodesk Forma（ACC）の Issue について、「同じ指摘がモデル更新をまたいでどう扱われてきたか」を追えるようにするアプリのモック／検証一式と、実 API に繋がる実アプリ v1（`app/`）。モック類は UI モック、API モック、ビューア代替（bbox ボックスモデル）と、その裏付けとなる実測データ。
+
+## app/ — 実アプリ v1
+
+実 Issue（Snowdon Towers）＋アプリ側スナップショット履歴＋実測 diff を表示する HTML/JS アプリ。
+起動は `cd app && node server.mjs`（http://localhost:3100）。前提・設計・API の詳細は `app/README.md` を参照。
+`.env` / `.token.json` / `data/`（実行時状態）はリポジトリに含めていない。
 
 ## 設計の要点（設計 v2）
 
