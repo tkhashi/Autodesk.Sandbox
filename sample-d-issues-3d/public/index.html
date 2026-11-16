@@ -63,7 +63,12 @@ table.issues tbody tr.sel { background: #e8f2fa; }
 /* ---- ビューア ---- */
 .view { position: relative; flex: 1 1 auto; min-height: 0; background: #e9eff4; border-radius: 8px; overflow: hidden; }
 #viewerWrap { position: absolute; inset: 0; }
-.view .msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #68798a; font-size: 13px; text-align: center; padding: 12px; }
+.view .msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 10px; color: #68798a; font-size: 13px; text-align: center; padding: 12px; z-index: 8; background: rgba(233,239,244,.65); }
+.vl-spin { width: 18px; height: 18px; flex: none; border-radius: 50%; border: 3px solid #c3d2de; border-top-color: #3b82c4; animation: vl-rot .8s linear infinite; }
+@keyframes vl-rot { to { transform: rotate(360deg); } }
+.skel-line { display: flex; gap: 10px; align-items: center; padding: 10px 6px; border-bottom: 1px solid #eef2f5; }
+.skel-bar { display: block; height: 12px; border-radius: 6px; background: linear-gradient(90deg, #e4ebf1 25%, #f3f7fa 50%, #e4ebf1 75%); background-size: 200% 100%; animation: skel-shimmer 1.3s ease-in-out infinite; }
+@keyframes skel-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 .stat { margin-top: 8px; font-size: 12.5px; color: #33475c; line-height: 1.7; }
 .stat b { color: #b3541e; }
 .tb-focus-btn .adsk-button-icon { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='6' fill='none' stroke='%23e8eef4' stroke-width='2'/%3E%3Cpath d='M12 2v4M12 18v4M2 12h4M18 12h4' stroke='%23e8eef4' stroke-width='2'/%3E%3Ccircle cx='12' cy='12' r='1.8' fill='%23e8eef4'/%3E%3C/svg%3E") !important; background-size: 20px 20px; background-position: center; background-repeat: no-repeat; }
@@ -79,7 +84,7 @@ table.issues tbody tr.sel { background: #e8f2fa; }
 #viewerSwitch { position: absolute; top: 8px; left: 8px; z-index: 9; display: flex; gap: 4px; opacity: .82; }
 #viewerSwitch button { padding: 3px 9px; font-size: 11px; border: 1px solid #9db4c6; background: rgba(255,255,255,.88); color: #41586c; border-radius: 999px; cursor: pointer; }
 #viewerSwitch button.on { background: #2b7bbb; border-color: #2b7bbb; color: #fff; font-weight: 700; }
-#viewerOuter.obj-mode #markers, #viewerOuter.obj-mode #leaders, #viewerOuter.obj-mode #ghostPanel, #viewerOuter.obj-mode #focusPin { display: none !important; }
+#viewerOuter.obj-mode #markers, #viewerOuter.obj-mode #leaders, #viewerOuter.obj-mode #ghostPanel, #viewerOuter.obj-mode #focusPin, #viewerOuter.obj-mode #viewerMsg { display: none !important; }
 #focusPin { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; z-index: 7; pointer-events: none; }
 #focusPin .fp-dot { position: absolute; inset: 2px; border-radius: 50%; background: #e03131; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.45); }
 #focusPin .fp-ring { position: absolute; inset: 0; border-radius: 50%; border: 2px solid rgba(224,49,49,.75); animation: fp-pulse 1.6s ease-out infinite; }
@@ -117,7 +122,7 @@ table.issues tbody tr.sel { background: #e8f2fa; }
 <div id="idxStat" hidden style="font-size:12.5px;color:#8a5a13;background:#fdf6e0;border:1px solid #ecd9a0;border-radius:6px;padding:6px 10px;margin-bottom:8px"></div>
 <table class="issues">
 <thead id="issueHead"></thead>
-<tbody id="issueRows"></tbody>
+<tbody id="issueRows"><tr class="skel"><td colspan="99"><div class="skel-line"><span class="skel-bar" style="width:44%"></span><span class="skel-bar" style="width:14%"></span><span class="skel-bar" style="width:20%"></span><span class="skel-bar" style="width:10%"></span></div><div class="skel-line"><span class="skel-bar" style="width:44%"></span><span class="skel-bar" style="width:14%"></span><span class="skel-bar" style="width:20%"></span><span class="skel-bar" style="width:10%"></span></div><div class="skel-line"><span class="skel-bar" style="width:44%"></span><span class="skel-bar" style="width:14%"></span><span class="skel-bar" style="width:20%"></span><span class="skel-bar" style="width:10%"></span></div><div class="skel-line"><span class="skel-bar" style="width:44%"></span><span class="skel-bar" style="width:14%"></span><span class="skel-bar" style="width:20%"></span><span class="skel-bar" style="width:10%"></span></div><div class="skel-line"><span class="skel-bar" style="width:44%"></span><span class="skel-bar" style="width:14%"></span><span class="skel-bar" style="width:20%"></span><span class="skel-bar" style="width:10%"></span></div></td></tr></tbody>
 </table>
 <div class="pager">
 <button id="btnPrev">前へ</button>
@@ -150,12 +155,12 @@ table.issues tbody tr.sel { background: #e8f2fa; }
 <div id="markers"></div>
 <div id="focusPin" hidden><span class="fp-ring"></span><span class="fp-dot"></span></div>
 <div id="ghostPanel" hidden>
-  <span style="font-weight:700">ゴースト透明度</span>
+  <span style="font-weight:700">まわりの部材の透明度</span>
   <input type="range" id="ghostRange" min="0" max="97" step="1" value="90">
   <span id="ghostVal" class="mono">90%</span>
 </div>
 
-<div class="msg" id="viewerMsg">モデルを読み込んでいます…</div>
+<div class="msg" id="viewerMsg"><span class="vl-spin"></span><span id="viewerMsgText">Issue データを読み込んでいます…</span></div>
 </div>
 <div class="stat" id="statV">—</div>
 </div>

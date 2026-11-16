@@ -426,27 +426,32 @@ const STATUS3D = { // 3D ハイライト色（表のステータス色に合わ�
 let markerItems = [];
 function v4(r, g, b, a = 1) { const V = window.THREE?.Vector4 ?? Autodesk.Viewing.Private.THREE.Vector4; return new V(r, g, b, a); }
 function syncOverviewBtn() { window.dispatchEvent(new CustomEvent('demo-overview-state', { detail: overviewOn })); }
-// 要素のワールド中心（サンプルと同じくインスタンスのワールド境界を合成。未ロードなら null）
+// 要素のワールド境界ボックス（未ロードなら null）
+// 注意：InstanceTree.getNodeBox(dbId, out) の out は THREE.Box3 ではなく
+// [minx, miny, minz, maxx, maxy, maxz] の数値配列（LMV 本体の実装で確認。2026-11-16）。
+// Box3 を渡すと min/max が初期値（+∞/−∞）のままになり、常に「ボックスなし」になって
+// ラベル・引き出し線・フォーカスピンが全て消える（実機報告で発覚した不具合の真因）。
 function nodeWorldBox(dbId) {
   try {
-    const tree = viewer.model.getInstanceTree?.();
-    const instances = viewer.model.getInstances?.();
-    if (tree?.enumNodeInstances && instances) {
-      const nodeBox = new Autodesk.Viewing.Math.Box3(), instBox = new Autodesk.Viewing.Math.Box3();
-      let found = false;
-      tree.enumNodeInstances(dbId, (iid) => {
-        if (instances.getGeometry(iid)) { instances.getWorldBounds(iid, instBox); nodeBox.union(instBox); found = true; }
-      }, true);
-      if (found) return { min: { x: nodeBox.min.x, y: nodeBox.min.y, z: nodeBox.min.z }, max: { x: nodeBox.max.x, y: nodeBox.max.y, z: nodeBox.max.z } };
+    const tree = viewer.model.getInstanceTree();
+    const a = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
+    tree.getNodeBox(dbId, a);
+    if (a[0] <= a[3] && a[1] <= a[4] && a[2] <= a[5]) {
+      return { min: { x: a[0], y: a[1], z: a[2] }, max: { x: a[3], y: a[4], z: a[5] } };
     }
   } catch (e) {}
   try {
+    // 予備：フラグメントのワールド境界を合成する
     const tree = viewer.model.getInstanceTree();
+    const frags = viewer.model.getFragmentList();
     const box = new Autodesk.Viewing.Private.THREE.Box3();
-    tree.getNodeBox(dbId, box);
-    // 注意：isEmpty はメソッド。() を付けずに関数オブジェクトで判定すると常に真になり、
-    // このフォールバックが永久に空を返してラベル・引き出し線が全て消える（2026-11-16 実機報告で発覚）
-    if (box && !box.isEmpty()) return { min: { x: box.min.x, y: box.min.y, z: box.min.z }, max: { x: box.max.x, y: box.max.y, z: box.max.z } };
+    const fb = new Autodesk.Viewing.Private.THREE.Box3();
+    let found = false;
+    tree.enumNodeFragments(dbId, (fid) => {
+      frags.getWorldBounds(fid, fb);
+      if (fb && !fb.isEmpty()) { box.union(fb); found = true; }
+    }, true);
+    if (found && !box.isEmpty()) return { min: { x: box.min.x, y: box.min.y, z: box.min.z }, max: { x: box.max.x, y: box.max.y, z: box.max.z } };
   } catch (e) {}
   return null;
 }
@@ -550,19 +555,15 @@ function updateMarkers() {
 }
 function enterOverview() {
   if (!viewer || !geoLoaded) return;
-  try {
-    if (typeof viewer.setGhosting === 'function') viewer.setGhosting(true);
-    const dbIds = issuesOnCurrentModel().map(i => i.targetDbId);
-    // ゴースト表示は切らない：Issue の要素だけを実体表示にし、それ以外はゴーストのまま残す（透明度0%のときだけ全表示）
-    if (ghostTransparency > 0 && dbIds.length) viewer.isolate(dbIds);
-    else viewer.showAll();
-  } catch (e) {}
+  const dbIds = issuesOnCurrentModel().map(i => i.targetDbId);
+  if (dbIds.length) applyContextFade(dbIds); // Issue の要素以外は材質のまま透明化する
+  else restoreContextFade();
   viewer.clearThemingColors();
   colorIssueElements();
   buildMarkers();
   updateFocusPin(); // 一覧モード中はフォーカスピンを隠す
   const n = issuesOnCurrentModel().length;
-  setStatV(`指摘事項一覧を表示中（このモデルの Issue ${n} 件）。色はステータス別、選択中は赤。${ghostTransparency === 0 ? 'ゴーストオフ：モデル全体を表示しています。' : 'Issue の要素以外はゴースト表示です。'}ラベルをクリックすると詳細が開きます。`);
+  setStatV(`指摘事項一覧を表示中（このモデルの Issue ${n} 件）。色はステータス別、選択中は赤。${contextTransparency === 0 ? '透明化オフ：モデル全体をそのまま表示しています。' : 'Issue の要素以外は透明表示（透明度 ' + contextTransparency + '%）です。'}ラベルをクリックすると詳細が開きます。`);
   syncOverviewBtn();
 }
 function exitOverview(restore = true) {
@@ -581,39 +582,92 @@ function toggleOverview() {
 }
 window.addEventListener('resize', () => { if (overviewOn) updateMarkers(); updateFocusPin(); });
 
-// ---- ゴースト透明度（ゴースト表示に使うフェード用マテリアルの不透明度を調整する） ----
-let ghostTransparency = (() => {
+// ---- まわりの部材の透明化（ゴースト表示は使わない） ----
+// LMV のゴースト表示は、対象外を単色のフェード用マテリアルで描くため、部材が重なる
+// 箇所でエッジが重なって見づらくなる。ここでは isolate もゴーストも使わず、対象外の
+// フラグメントのマテリアルを「元の材質のまま透明にした複製」に差し替える
+// （FragmentList.setMaterial。LMV 本体の実装で確認）。色・質感は元のまま薄くなる。
+// 透明度はスライダ（0〜97%）で調整し、0% は透明化オフ（元の表示）。
+let contextTransparency = (() => {
   const raw = localStorage.getItem(LS_GHOST);
   const n = raw === null ? NaN : Number(raw);
   return Number.isFinite(n) ? Math.min(97, Math.max(0, n)) : 90;
 })();
-let ghostAppliedOff = null; // 直前に適用した「透明度0%（ゴーストオフ）」かどうか
-let ghostOpacityWritten = null; // マテリアルへ書き込み済みの透明度（同じ値の再書き込み＋全体再描画をしないため）
-function applyGhostOpacity() {
-  if (!viewer) return;
-  const off = ghostTransparency === 0;
+let contextAppliedOff = null; // 直前に適用した「透明度0%（透明化オフ）」かどうか
+let fadedFrags = null; // 差し替え済みフラグメント（fragId → 元のマテリアル）
+let fadeClones = new Map(); // 元マテリアルの id → 透明化した複製
+let fadedForKey = null; // 透明化を適用済みの対象キー（モデル＋対象要素の組）
+let fadeRunId = 0; // 連続した選択変更で古い適用処理を打ち切るための世代番号
+
+function fadeCloneFor(orig) {
+  let c = fadeClones.get(orig.id);
+  if (!c) {
+    c = orig.clone();
+    c.transparent = true;
+    c.depthWrite = false; // 透明同士で奥を隠し合わない（重なりが柔らかく溶ける）
+    c.opacity = 1 - contextTransparency / 100;
+    fadeClones.set(orig.id, c);
+  }
+  return c;
+}
+function updateFadeOpacity() {
+  const op = 1 - contextTransparency / 100;
+  for (const c of fadeClones.values()) c.opacity = op;
+  try { viewer?.impl.invalidate?.(false, true, false); } catch (e) {}
+}
+async function restoreContextFade() {
+  if (!fadedFrags || !viewer) { fadedFrags = null; fadedForKey = null; return; }
+  const frags = viewer.model.getFragmentList();
+  const entries = [...fadedFrags.entries()];
+  fadedFrags = null; fadedForKey = null;
+  for (let s = 0; s < entries.length; s += 40000) {
+    for (const [fid, orig] of entries.slice(s, s + 40000)) { try { frags.setMaterial(fid, orig); } catch (e) {} }
+    if (s + 40000 < entries.length) await new Promise(r => setTimeout(r, 0));
+  }
+  try { viewer.impl.invalidate?.(true); } catch (e) {}
+}
+// keepDbIds 以外の部材を透明化する。透明度0% のときは元に戻すだけ。
+async function applyContextFade(keepDbIds) {
+  if (!viewer || !geoLoaded) return;
+  if (contextTransparency === 0) { await restoreContextFade(); return; }
+  const key = viewerModelKey + '|' + [...keepDbIds].sort((a, b) => a - b).join(',');
+  if (fadedForKey === key) { updateFadeOpacity(); return; }
+  const run = ++fadeRunId;
+  await restoreContextFade();
+  if (run !== fadeRunId || !viewer) return;
   try {
-    const impl = viewer.impl;
-    const mat = impl.fadeMaterial ?? impl.renderer?.()?.fadeMaterial ?? impl._renderer?.fadeMaterial ?? impl.glrenderer?.()?.fadeMaterial ?? null;
-    if (mat && !off && ghostOpacityWritten !== ghostTransparency) {
-      // ゴースト用の単色マテリアルは不透明度を上げると全面がその色（濃いグレー）に染まるため、
-      // 0% のときはマテリアルではなく表示状態そのものを切り替える（下の境界処理）
-      const opacity = 1 - ghostTransparency / 100;
-      mat.opacity = opacity;
-      mat.transparent = true;
-      mat.depthWrite = false;
-      mat.needsUpdate = true;
-      mat.variants?.forEach(v => { v.opacity = opacity; v.transparent = true; v.depthWrite = false; v.needsUpdate = true; });
-      impl.invalidate?.(true); // 値が変わった時だけ全体再描画する（ロードイベント等での重複呼び出しで描き直さない）
-      ghostOpacityWritten = ghostTransparency;
+    const tree = viewer.model.getInstanceTree();
+    const frags = viewer.model.getFragmentList();
+    const keep = new Set();
+    for (const dbId of keepDbIds) tree.enumNodeFragments(dbId, (fid) => keep.add(fid), true);
+    const total = frags.getCount();
+    const map = new Map();
+    fadedFrags = map;
+    for (let s = 0; s < total; s += 40000) {
+      for (let fid = s; fid < Math.min(s + 40000, total); fid++) {
+        if (keep.has(fid)) continue;
+        const orig = frags.getMaterial(fid);
+        if (!orig) continue;
+        map.set(fid, orig);
+        frags.setMaterial(fid, fadeCloneFor(orig));
+      }
+      if (run !== fadeRunId) return; // 途中で別の選択に切り替わった。復元は次の適用が行う
+      if (s + 40000 < total) await new Promise(r => setTimeout(r, 0));
     }
+    fadedForKey = key;
+    try { viewer.impl.invalidate?.(true); } catch (e) {}
   } catch (e) {}
-  // 0% との境界を跨いだら、現在のモード（一覧／フォーカス）の表示を作り直す
-  if (ghostAppliedOff !== null && ghostAppliedOff !== off && geoLoaded) {
+}
+// 透明度の変更への追随：0% との境界を跨いだら表示を作り直し、それ以外は不透明度だけ更新する
+function onContextTransparencyChanged() {
+  const off = contextTransparency === 0;
+  if (contextAppliedOff !== null && contextAppliedOff !== off && geoLoaded) {
     if (overviewOn) enterOverview();
     else applySelection();
+  } else if (fadedFrags) {
+    updateFadeOpacity();
   }
-  ghostAppliedOff = off;
+  contextAppliedOff = off;
 }
 function syncGhostBtn() {
   const p = $('ghostPanel');
@@ -623,16 +677,36 @@ function toggleGhostPanel() {
   const p = $('ghostPanel');
   if (!p) return;
   p.hidden = !p.hidden;
-  if (!p.hidden) { $('ghostRange').value = ghostTransparency; $('ghostVal').textContent = ghostTransparency + '%'; }
+  if (!p.hidden) { $('ghostRange').value = contextTransparency; $('ghostVal').textContent = contextTransparency + '%'; }
   syncGhostBtn();
 }
 const ghostRangeEl = $('ghostRange');
 if (ghostRangeEl) ghostRangeEl.addEventListener('input', () => {
-  ghostTransparency = Number(ghostRangeEl.value);
-  $('ghostVal').textContent = ghostTransparency + '%';
-  localStorage.setItem(LS_GHOST, String(ghostTransparency));
-  applyGhostOpacity();
+  contextTransparency = Number(ghostRangeEl.value);
+  $('ghostVal').textContent = contextTransparency + '%';
+  localStorage.setItem(LS_GHOST, String(contextTransparency));
+  onContextTransparencyChanged();
 });
+
+// 対象要素へカメラを寄せる。Viewer 標準の fitToView だと部材が画面いっぱいに
+// なって近すぎるため、部材のボックスから距離を計算して「引き」で収める
+// （2026-11-16 ユーザー指示）。
+function fitToElement(dbId) {
+  const box = nodeWorldBox(dbId);
+  if (!box) { try { viewer.fitToView([dbId]); } catch (e) {} return; }
+  try {
+    const T = Autodesk.Viewing.Math;
+    const c = new T.Vector3((box.min.x + box.max.x) / 2, (box.min.y + box.max.y) / 2, (box.min.z + box.max.z) / 2);
+    const dx = box.max.x - box.min.x, dy = box.max.y - box.min.y, dz = box.max.z - box.min.z;
+    const radius = Math.max(0.5 * Math.sqrt(dx * dx + dy * dy + dz * dz), 0.5);
+    const fov = (((viewer.impl.camera.fov ?? 45) * Math.PI) / 180);
+    const dist = (radius / Math.tan(fov / 2)) * 1.9; // 1.9 は「引き」の余裕分
+    const dir = viewer.impl.camera.position.clone().sub(c);
+    if (dir.lengthSq() < 1e-9) dir.set(1, -1, 0.7);
+    dir.normalize();
+    viewer.navigation.setView(c.clone().add(dir.multiplyScalar(dist)), c);
+  } catch (e) { try { viewer.fitToView([dbId]); } catch (e2) {} }
+}
 
 // フォーカス中の Issue を Viewer に反映
 function applySelection() {
@@ -640,15 +714,13 @@ function applySelection() {
   const i = focusedIssue();
   if (!viewer || !rootLoaded || !i) return;
   if (!i.targetDbId || i.modelKey !== viewerModelKey) {
-    if (!i.targetDbId) { viewer.showAll(); viewer.clearThemingColors(); setStatV('この Issue は対象モデルへのピンがないため、モデル全体を表示しています。'); }
+    if (!i.targetDbId) { restoreContextFade(); viewer.showAll(); viewer.clearThemingColors(); setStatV('この Issue は対象モデルへのピンがないため、モデル全体を表示しています。'); }
     updateFocusPin();
     return;
   }
   if (!viewer.model?.getFragmentList?.()) return;
   try {
-    if (typeof viewer.setGhosting === 'function') viewer.setGhosting(true);
-    if (ghostTransparency === 0) viewer.showAll(); // 透明度0%＝ゴーストオフ：元のモデルをそのまま表示する
-    else viewer.isolate([i.targetDbId]); // 残すのは対象だけ：壁の向こう・地中の対象でもゴースト越しに見える
+    applyContextFade([i.targetDbId]); // 対象以外は材質のまま透明化する（isolate／ゴーストは使わない）
     viewer.clearThemingColors();
     // カメラのフィットは、形状の読み込みが終わってから対象ごとに1回だけ行う。
     // 読み込み途中のイベント（ルート読み込み時など）で繰り返すと、不完全な範囲への
@@ -656,12 +728,12 @@ function applySelection() {
     // 明示的なフォーカス操作（3D ボタン／ツールバーのフォーカスボタン）は fittedFor を
     // リセットするので、その場合はもう一度フィットする。
     const fkey = viewerModelKey + ':' + i.id;
-    if (geoLoaded && fittedFor !== fkey) { viewer.fitToView([i.targetDbId]); fittedFor = fkey; }
+    if (geoLoaded && fittedFor !== fkey) { fitToElement(i.targetDbId); fittedFor = fkey; }
   } catch (e) { return; }
   paintFocusTarget(i.targetDbId);
   updateFocusPin();
   if (geoLoaded) {
-    setStatV(`<b>#${i.displayId}</b> の対象要素を表示中（${ghostTransparency === 0 ? 'ゴーストオフ：モデル全体を表示' : '対象以外はゴースト表示'}）。`);
+    setStatV(`<b>#${i.displayId}</b> の対象要素を表示中（${contextTransparency === 0 ? '透明化オフ：モデル全体をそのまま表示' : '対象以外は透明表示（透明度 ' + contextTransparency + '%）'}）。`);
     scheduleCapture(i);
   }
 }
@@ -672,8 +744,8 @@ function setupViewer(modelKey) {
   if (viewer && viewerModelKey === modelKey) return;
   if (viewer) { clearMarkers(); try { viewer.finish(); } catch (e) {} viewer = null; }
   $('viewerWrap').innerHTML = '';
-  const msg = $('viewerMsg'); if (msg) msg.remove();
-  viewerModelKey = modelKey; rootLoaded = false; geoLoaded = false; fittedFor = null; ghostOpacityWritten = null;
+  setViewerLoading(`モデル（${esc(m.short)}）を読み込んでいます…`);
+  viewerModelKey = modelKey; rootLoaded = false; geoLoaded = false; fittedFor = null; fadedFrags = null; fadedForKey = null; fadeClones = new Map(); fadeRunId++;
   viewer = new Autodesk.Viewing.GuiViewer3D($('viewerWrap'));
   viewer.start();
   viewer.loadExtension('DemoToolbarExtension').catch(() => {});
@@ -684,25 +756,36 @@ function setupViewer(modelKey) {
   viewer.addEventListener(Autodesk.Viewing.SHOW_EVENT, updMarkers);
   viewer.addEventListener(Autodesk.Viewing.MODEL_ROOT_LOADED_EVENT, () => {
     rootLoaded = true;
-    applyGhostOpacity();
     applySelection();
     setStatV(`モデル（${esc(m.short)}）の読み込み中…`);
   });
   viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, () => {
     geoLoaded = true;
-    applyGhostOpacity();
+    setViewerLoading(null);
     if (overviewOn) { enterOverview(); return; }
     applySelection();
     const i = focusedIssue();
     setStatV(`モデルの読み込みが完了しました。` + (i?.targetDbId && i.modelKey === viewerModelKey ? ` <b>#${i.displayId}</b> の対象要素を表示中（選択から ${((performance.now() - tSelect) / 1000).toFixed(1)} 秒）。` : ''));
   });
   viewer.addEventListener(Autodesk.Viewing.PROGRESS_UPDATE_EVENT, (e) => {
-    if (!geoLoaded && typeof e.percent === 'number') setStatV(`モデル（${esc(m.short)}）を読み込んでいます（逐次配信）… ${Math.round(e.percent)}%`);
+    if (!geoLoaded && typeof e.percent === 'number') {
+      setStatV(`モデル（${esc(m.short)}）を読み込んでいます（逐次配信）… ${Math.round(e.percent)}%`);
+      setViewerLoading(`モデル（${esc(m.short)}）を読み込んでいます… ${Math.round(e.percent)}%`);
+    }
   });
   Autodesk.Viewing.Document.load('urn:' + m.urn, (doc) => {
     viewer.loadDocumentNode(doc, doc.getRoot().getDefaultGeometry());
     setStatV(`モデル（${esc(m.short)}）を読み込んでいます（逐次配信）…`);
-  }, (code, msg2) => setStatV('モデルの読み込みに失敗しました：' + code + ' ' + esc(msg2 ?? '')));
+  }, (code, msg2) => { setStatV('モデルの読み込みに失敗しました：' + code + ' ' + esc(msg2 ?? '')); setViewerLoading('モデルの読み込みに失敗しました：' + code); });
+}
+
+// ビューアの読み込み表示（#viewerMsg）を実際の状態に合わせて出し分ける。
+// 以前は HTML に静的に書かれた「モデルを読み込んでいます…」で、実際には読み込んで
+// いない時にも出続けていた（2026-11-16 ユーザー指摘）。
+function setViewerLoading(text) {
+  const msg = $('viewerMsg'); if (!msg) return;
+  if (text) { msg.style.display = ''; const t = $('viewerMsgText'); if (t) t.textContent = text; }
+  else msg.style.display = 'none';
 }
 
 function ensureViewerModel(modelKey) {
@@ -728,7 +811,7 @@ if (window.Autodesk?.Viewing?.Extension) {
         this.btnOverview.onClick = () => window.dispatchEvent(new CustomEvent('demo-toggle-overview'));
         window.addEventListener('demo-overview-state', (e) => { try { this.btnOverview.setState(e.detail ? 0 : 1); } catch (err) {} });
         this.btnGhost = new Autodesk.Viewing.UI.Button('demo-ghost-opacity');
-        this.btnGhost.setToolTip('ゴースト透明度');
+        this.btnGhost.setToolTip('まわりの透明度');
         this.btnGhost.addClass('tb-ghost-btn');
         this.btnGhost.onClick = () => window.dispatchEvent(new CustomEvent('demo-toggle-ghost-panel'));
         window.addEventListener('demo-ghost-state', (e) => { try { this.btnGhost.setState(e.detail ? 0 : 1); } catch (err) {} });
@@ -756,8 +839,7 @@ window.addEventListener('demo-toggle-ghost-panel', () => toggleGhostPanel());
 
 async function initViewer() {
   if (!window.Autodesk) {
-    const msg = $('viewerMsg');
-    if (msg) msg.textContent = 'Viewer ライブラリを読み込めませんでした（この環境からは Autodesk の CDN に届きません）。通常のブラウザ環境で開いてください。';
+    setViewerLoading('Viewer ライブラリを読み込めませんでした（この環境からは Autodesk の CDN に届きません）。通常のブラウザ環境で開いてください。');
     setStatV('Viewer：未初期化（CDN に到達できませんでした）');
     return;
   }
@@ -789,8 +871,13 @@ initViewer();
     buildTable();
     const first = DATA.issues.find(i => i.targetDbId) ?? DATA.issues[0];
     if (first) selectIssue(first.id); // 詳細だけ開く。ビューア表示は専用ボタンから
+    // 初期化の競合対策：Viewer の準備が先に終わっていて、データ未着でモデルを
+    // 作れなかった場合は、データが揃ったこの時点で必ずモデル読み込みを始める
+    if (viewerReady && !viewer) setupViewer(DATA.models[0]?.key ?? 'dach');
     watchIndexStatus();
   } catch (e) {
+    $('issueRows').innerHTML = '<tr><td colspan="99" style="color:#c0392b">Issue の取得に失敗しました。</td></tr>';
+    setViewerLoading('Issue データを読み込めませんでした。');
     setStatV('Issue の取得に失敗しました：' + e.message);
   }
 })();
