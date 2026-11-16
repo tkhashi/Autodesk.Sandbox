@@ -3,6 +3,7 @@ let DATA = null, selected = null, focusedId = null;
 let viewer = null, viewerModelKey = null, rootLoaded = false, geoLoaded = false, tSelect = 0;
 let viewerReady = false, desiredModelKey = null;
 let fittedFor = null; // カメラのフィットを実行済みの対象（モデル: Issue）。フィットは1回だけにする
+let pendingFocusId = null; // 読み込み中・モデル切替中に 3D ボタンで指定された Issue（読み込み完了時にカメラを寄せる）
 const captured = new Map(); // Issue ごとのビューアキャプチャ（スナップショットの代替）
 const $ = id => document.getElementById(id);
 const LS_COLS = 'sampled-cols-v2', LS_PAGE = 'sampled-pagesize-v2', LS_GHOST = 'sampled-ghost-transparency'; // ユーザー設定の保存キー（互換のため変更しない）
@@ -413,7 +414,6 @@ async function showObjForSelected() {
 // ---- ビューア表示（専用ボタンから） ----
 function showInViewer(id) {
   if (viewerMode === 'obj') { selectIssue(id); return; } // OBJ モードでは抽出表示に切り替える
-  exitOverview(false); // フォーカス表示に移るので一覧モードは解除
   selected = id;
   focusedId = id;
   fittedFor = null; // 明示的な表示操作なので、カメラのフィットをやり直してよい
@@ -421,7 +421,20 @@ function showInViewer(id) {
   selectIssue(id);
   const i = issue();
   if (i?.modelKey) ensureViewerModel(i.modelKey);
-  applySelection();
+  if (overviewOn) {
+    // 一覧モードは維持したまま、その Issue にカメラを寄せる（ラベル・引き出し線は残す）
+    if (viewer && geoLoaded && i?.targetDbId && i.modelKey === viewerModelKey) {
+      if (!fitToElement(i.targetDbId)) { try { viewer.fitToView([i.targetDbId]); } catch (e) {} }
+      colorIssueElements();
+      refreshMarkerSel();
+      applyOccluderClearing();
+      updateMarkers();
+    } else if (i?.targetDbId) {
+      pendingFocusId = id; // 読み込み中・モデル切替中は、完了した時点で寄せる
+    }
+  } else {
+    applySelection();
+  }
 }
 
 // ---- Viewer の対象ハイライト ----
@@ -738,6 +751,14 @@ function enterOverview() {
   const mkey = markersKey();
   if (markersBuiltFor !== mkey) { buildMarkers(); markersBuiltFor = mkey; }
   updateFocusPin(); // 一覧モード中はフォーカスピンを隠す
+  if (pendingFocusId) { // 読み込み中に 3D ボタンで指定されていたら、この時点でカメラを寄せる
+    const pi = DATA?.issues.find(x => x.id === pendingFocusId);
+    pendingFocusId = null;
+    if (pi?.targetDbId && pi.modelKey === viewerModelKey) {
+      if (!fitToElement(pi.targetDbId)) { try { viewer.fitToView([pi.targetDbId]); } catch (e) {} }
+      colorIssueElements(); refreshMarkerSel(); applyOccluderClearing(); updateMarkers();
+    }
+  }
   const n = issuesOnCurrentModel().length;
   setStatV(`指摘事項一覧を表示中（このモデルの Issue ${n} 件）。色はステータス別、選択中は赤。${occHiddenCount ? '選択中の Issue の手前にある部材 ' + occHiddenCount + ' 件を透明（フレームのみ表示）にして、奥を見通せるようにしています。' : ''}ラベルをクリックすると詳細が開きます。`);
   syncOverviewBtn();
