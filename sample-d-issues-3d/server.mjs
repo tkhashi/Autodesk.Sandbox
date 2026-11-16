@@ -235,6 +235,27 @@ async function fetchIssues() {
   }
   return all.filter(i => !i.deleted).map(i => enrich(i, types, users));
 }
+
+// Issue 一覧の短期キャッシュ（初回表示の待ちを削る）。
+// 取得済みの一覧を30秒使い回し、期限切れ後は手元の分を即座に返しながら裏で
+// 取り直す。編集（/api/issues/update）が成功したら即座に捨てる。
+// 索引の構築中は付与内容が変わるので、キャッシュせず毎回ライブで取る。
+const ISSUES_TTL = 30000;
+let issuesBox = null;      // { at, value }
+let issuesInflight = null; // 取得は同時に1本だけ
+function refreshIssues() {
+  if (issuesInflight) return issuesInflight;
+  issuesInflight = fetchIssues()
+    .then(value => { issuesBox = { at: Date.now(), value }; return value; })
+    .finally(() => { issuesInflight = null; });
+  return issuesInflight;
+}
+async function getIssuesCached() {
+  if (models.some(m => m.indexStatus !== 'ready')) return fetchIssues();
+  if (!issuesBox) return refreshIssues();
+  if (Date.now() - issuesBox.at >= ISSUES_TTL) refreshIssues().catch(() => {});
+  return issuesBox.value;
+}
 async function updateIssue(id, patch) {
   const token = await getToken3();
   const r = await fetch(`${BASE}/construction/issues/v1/projects/${PID}/issues/${id}`, {
@@ -373,7 +394,7 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { access_token: t.access_token, expires_in: remain });
     }
     if (url.pathname === '/api/issues') {
-      const issues = await fetchIssues();
+      const issues = await getIssuesCached();
       const vers = await Promise.all(models.map(getModelVersion));
       return sendJson(res, 200, {
         models: models.map((m, i) => ({ key: m.key, name: m.name, short: m.short, version: vers[i].versionNumber, urn: m.derivativeUrn, guid: m.viewableGuid, indexStatus: m.indexStatus })),
@@ -385,7 +406,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === '/api/extract') {
       // Issue の対象要素＋周辺（同じ階・隣接通り芯など）を OBJ で切り出す
-      const issues = await fetchIssues();
+      const issues = await getIssuesCached();
       const issue = issues.find(i => i.id === url.searchParams.get('issue'));
       if (!issue?.modelKey || !issue.pin?.externalId) return sendJson(res, 404, { error: 'この Issue には対象要素がありません' });
       const model = models.find(m => m.key === issue.modelKey);
@@ -409,6 +430,7 @@ const server = http.createServer(async (req, res) => {
       for (const k of ['title', 'description', 'status', 'dueDate']) if (body.patch && k in body.patch) patch[k] = body.patch[k];
       if (!body.id || !Object.keys(patch).length) return sendJson(res, 400, { error: 'id and patch required' });
       const r = await updateIssue(body.id, patch);
+      if (r.status >= 200 && r.status < 300) issuesBox = null; // 編集が通ったら一覧キャッシュを捨てて古い内容を見せない
       return sendJson(res, r.status, r.body ?? { error: 'empty response' });
     }
     if (url.pathname === '/api/thumbnail') {
@@ -437,3 +459,4 @@ const server = http.createServer(async (req, res) => {
 const port = process.env.PORT ?? 3000;
 initIndexes(); // 索引の非同期構築を開始（サーバーは待たずに起動する）
 server.listen(port, () => { console.log(`sample-d server: http://localhost:${port}`); });
+refreshIssues().catch(() => {}); // 初回表示の待ちを削るため、認証・タイプ・メンバー・一覧を先に温めておく
