@@ -569,8 +569,9 @@ function updateMarkers() {
       for (const cp of candPts) {
         const p = new T.Vector3(cp.x, cp.y, cp.z);
         if (cam && dir && p.clone().sub(cam.position).dot(dir) <= 0) continue;
-        v = viewer.worldToClient(p);
-        break;
+        const q = viewer.worldToClient(p);
+        // 画面内に指摘箇所がなければ、ラベルも表示しない（ユーザー指示）
+        if (q && q.x >= 0 && q.x <= W && q.y >= 0 && q.y <= H) { v = q; break; }
       }
       const visible = !!v;
       const disp = visible ? '' : 'none';
@@ -595,27 +596,64 @@ function updateMarkers() {
     else if (ex.side === 'left') o.lx -= w / 2 + 4;
     else o.lx += w / 2 + 4;
   }
-  // 同じ辺のラベル同士の重なりを解く（辺に沿ってずらす）
+  // ラベル同士は絶対に被らない（ユーザー指示）：辺ごとに最小間隔を保つ詰め込みを
+  // 前後両方向から繰り返し、最後は間隔を守ることを画面端より優先する。
+  const placedAll = [];
   for (const side of ['top', 'bottom', 'left', 'right']) {
     const g = vis.filter(o => o.side === side);
-    if (g.length < 2) continue;
+    if (!g.length) continue;
     const horiz = side === 'top' || side === 'bottom';
-    g.sort((a, b) => (horiz ? a.lx - b.lx : a.ly - b.ly));
-    for (let k = 1; k < g.length; k++) {
-      const prev = g[k - 1], cur = g[k];
-      const need = horiz
-        ? (prev.it.el.offsetWidth + cur.it.el.offsetWidth) / 2 + 6
-        : (prev.it.el.offsetHeight + cur.it.el.offsetHeight) / 2 + 5;
-      if (horiz) { if (cur.lx < prev.lx + need) cur.lx = prev.lx + need; }
-      else if (cur.ly < prev.ly + need) cur.ly = prev.ly + need;
+    const size = o => horiz ? o.it.el.offsetWidth : o.it.el.offsetHeight;
+    const L = horiz ? W : H;
+    const get = o => horiz ? o.lx : o.ly;
+    const set = (o, val) => { if (horiz) o.lx = val; else o.ly = val; };
+    g.sort((a, b) => get(a) - get(b));
+    for (let iter = 0; iter < 3; iter++) {
+      for (let k = 0; k < g.length; k++) {
+        const o = g[k], lo = size(o) / 2 + 6, hi = L - size(o) / 2 - 6;
+        const need = k ? get(g[k - 1]) + (size(g[k - 1]) + size(o)) / 2 + 6 : lo;
+        set(o, Math.min(Math.max(get(o), need), hi));
+      }
+      for (let k = g.length - 1; k >= 0; k--) {
+        const o = g[k], lo = size(o) / 2 + 6, hi = L - size(o) / 2 - 6;
+        const need = k < g.length - 1 ? get(g[k + 1]) - (size(g[k + 1]) + size(o)) / 2 - 6 : hi;
+        set(o, Math.max(Math.min(get(o), need), lo));
+      }
     }
+    // 最終保証：間隔だけは絶対に守る（少しはみ出しても重なりよりまし）
+    for (let k = 1; k < g.length; k++) {
+      const need = (size(g[k - 1]) + size(g[k])) / 2 + 6;
+      if (get(g[k]) < get(g[k - 1]) + need) set(g[k], get(g[k - 1]) + need);
+    }
+    const last = g[g.length - 1];
+    const over = get(last) + size(last) / 2 + 6 - L;
+    if (over > 0) for (const o of g) set(o, get(o) - over);
+    placedAll.push(...g);
   }
-  // 画面内に収めて配置し、引き出し線を結ぶ
+  // 辺をまたぐ隅での衝突を全体で最終チェックし、自分の辺方向へ逃がす
+  for (let pass = 0; pass < 4; pass++) {
+    let moved = false;
+    for (let a = 0; a < placedAll.length; a++) {
+      for (let b = a + 1; b < placedAll.length; b++) {
+        const A = placedAll[a], B = placedAll[b];
+        const aw = A.it.el.offsetWidth, ah = A.it.el.offsetHeight;
+        const bw = B.it.el.offsetWidth, bh = B.it.el.offsetHeight;
+        const ox = (aw + bw) / 2 - Math.abs(A.lx - B.lx);
+        const oy = (ah + bh) / 2 - Math.abs(A.ly - B.ly);
+        if (ox > 0 && oy > 0) {
+          const bHoriz = B.side === 'top' || B.side === 'bottom';
+          if (bHoriz) B.lx += (B.lx >= A.lx ? ox + 2 : -(ox + 2));
+          else B.ly += (B.ly >= A.ly ? oy + 2 : -(oy + 2));
+          moved = true;
+        }
+      }
+    }
+    if (!moved) break;
+  }
+  // 配置して引き出し線を結ぶ
   for (const o of vis) {
     const { it, v } = o;
     const w = it.el.offsetWidth, h = it.el.offsetHeight;
-    o.lx = Math.min(Math.max(o.lx, w / 2 + 6), W - w / 2 - 6);
-    o.ly = Math.min(Math.max(o.ly, h / 2 + 6), H - h / 2 - 6);
     it.el.style.left = Math.floor(o.lx - w / 2) + 'px';
     it.el.style.top = Math.floor(o.ly - h / 2) + 'px';
     it.line.setAttribute('points', `${v.x},${v.y} ${o.lx},${o.ly}`);
@@ -830,7 +868,11 @@ function fitToElement(dbId) {
     const dir = viewer.impl.camera.position.clone().sub(c);
     if (dir.lengthSq() < 1e-9) dir.set(1, -1, 0.7);
     dir.normalize();
-    viewer.navigation.setView(c.clone().add(dir.multiplyScalar(dist)), c);
+    // 上方向を現在のカメラから引き継いで明示的に渡す（フォーカスでビューが
+    // 斜めに回ってしまうのを防ぐ。実機報告 2026-11-16）
+    const camUp = viewer.impl.camera.up;
+    const up = camUp ? new T.Vector3(camUp.x, camUp.y, camUp.z) : null;
+    viewer.navigation.setView(c.clone().add(dir.multiplyScalar(dist)), c, up);
     return true;
   } catch (e) { return false; }
 }
