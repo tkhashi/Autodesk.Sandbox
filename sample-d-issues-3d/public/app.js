@@ -3,6 +3,7 @@ let DATA = null, selected = null, focusedId = null;
 let viewer = null, viewerModelKey = null, rootLoaded = false, geoLoaded = false, tSelect = 0;
 let viewerReady = false, desiredModelKey = null;
 let blinkTimer = null, blinkOn = false;
+let fittedFor = null; // カメラのフィットを実行済みの対象（モデル: Issue）。フィットは1回だけにする
 const captured = new Map(); // Issue ごとのビューアキャプチャ（スナップショットの代替）
 const $ = id => document.getElementById(id);
 const LS_COLS = 'sampled-cols-v2', LS_PAGE = 'sampled-pagesize-v2', LS_GHOST = 'sampled-ghost-transparency'; // ユーザー設定の保存キー（互換のため変更しない）
@@ -304,6 +305,13 @@ const LS_MODE = 'sampled-viewer-mode';
 let viewerMode = localStorage.getItem(LS_MODE) === 'obj' ? 'obj' : 'aps';
 const extractCache = new Map();
 let objViewFailed = false;
+let objLoading = null;
+// OBJ ビューア（three.js）は重いので常時読み込まない。OBJ モードが初めて必要になった
+// 時点でだけ読み込む（初回表示の軽さのため。2026-11-16 の「初回読み込みが重い」体感への対応）。
+function ensureObjViewer() {
+  if (window.ObjView || objViewFailed || objLoading) return;
+  objLoading = import('./obj-viewer.js').catch(() => { window.__objViewerFailed?.(); });
+}
 window.__objViewerReady = () => { if (viewerMode === 'obj') showObjForSelected(); };
 window.__objViewerFailed = () => { objViewFailed = true; if (viewerMode === 'obj') setStatV('OBJ ビューアのライブラリ（three.js）を読み込めませんでした。ネットワーク接続を確認してください。'); };
 function applyViewerModeVisual() {
@@ -317,11 +325,12 @@ function setViewerMode(m) {
   viewerMode = m;
   localStorage.setItem(LS_MODE, m);
   applyViewerModeVisual();
-  if (m === 'obj') showObjForSelected();
+  if (m === 'obj') { ensureObjViewer(); showObjForSelected(); }
   else { try { viewer?.resize(); } catch (e) {} }
 }
 for (const b of $('viewerSwitch').querySelectorAll('button')) b.addEventListener('click', () => setViewerMode(b.dataset.vm));
 applyViewerModeVisual();
+if (viewerMode === 'obj') ensureObjViewer(); // 前回 OBJ モードで終わっていた場合だけ、最初から読み込む
 async function showObjForSelected() {
   if (!DATA) return;
   const i = issue();
@@ -352,6 +361,7 @@ function showInViewer(id) {
   exitOverview(false); // フォーカス表示に移るので一覧モードは解除
   selected = id;
   focusedId = id;
+  fittedFor = null; // 明示的な表示操作なので、カメラのフィットをやり直してよい
   tSelect = performance.now();
   selectIssue(id);
   const i = issue();
@@ -370,11 +380,16 @@ function startBlink(dbId) {
   const V4 = window.THREE?.Vector4 ?? Autodesk.Viewing.Private.THREE.Vector4;
   const paint = (r, g, b) => { try { viewer.setThemingColor(dbId, new V4(r, g, b, 1)); } catch (e) {} };
   paint(1, 0.05, 0.05); blinkOn = true;
+  // 点滅は最初の数回だけにして、最後は濃い赤で止める。無限に続けると色替えのたびに
+  // 画面全体の再描画が走り、大きなモデルを遠景で見ている間「Rendering...」の表示と
+  // ちらつきが止まらなくなる（2026-11-15 報告→いったん収まったが 2026-11-16 に再発）。
+  let pulses = 0;
   blinkTimer = setInterval(() => {
     if (!viewer) { stopBlink(); return; }
     blinkOn = !blinkOn;
     if (blinkOn) paint(1, 0.05, 0.05);
     else paint(1, 0.78, 0.78);
+    if (++pulses >= 7) { stopBlink(); paint(1, 0.05, 0.05); blinkOn = true; }
   }, 650);
 }
 
@@ -624,7 +639,13 @@ function applySelection() {
     if (ghostTransparency === 0) viewer.showAll(); // 透明度0%＝ゴーストオフ：元のモデルをそのまま表示する
     else viewer.isolate([i.targetDbId]); // 残すのは対象だけ：壁の向こう・地中の対象でもゴースト越しに見える
     viewer.clearThemingColors();
-    viewer.fitToView([i.targetDbId]);
+    // カメラのフィットは、形状の読み込みが終わってから対象ごとに1回だけ行う。
+    // 読み込み途中のイベント（ルート読み込み時など）で繰り返すと、不完全な範囲への
+    // フィット（モデル全体の俯瞰表示など）と競合して画面が跳ぶ（2026-11-15/16 報告）。
+    // 明示的なフォーカス操作（3D ボタン／ツールバーのフォーカスボタン）は fittedFor を
+    // リセットするので、その場合はもう一度フィットする。
+    const fkey = viewerModelKey + ':' + i.id;
+    if (geoLoaded && fittedFor !== fkey) { viewer.fitToView([i.targetDbId]); fittedFor = fkey; }
   } catch (e) { return; }
   startBlink(i.targetDbId);
   if (geoLoaded) {
@@ -640,7 +661,7 @@ function setupViewer(modelKey) {
   if (viewer) { stopBlink(); clearMarkers(); try { viewer.finish(); } catch (e) {} viewer = null; }
   $('viewerWrap').innerHTML = '';
   const msg = $('viewerMsg'); if (msg) msg.remove();
-  viewerModelKey = modelKey; rootLoaded = false; geoLoaded = false;
+  viewerModelKey = modelKey; rootLoaded = false; geoLoaded = false; fittedFor = null;
   viewer = new Autodesk.Viewing.GuiViewer3D($('viewerWrap'));
   viewer.start();
   viewer.loadExtension('DemoToolbarExtension').catch(() => {});
@@ -717,7 +738,7 @@ if (window.Autodesk?.Viewing?.Extension) {
   }
   Autodesk.Viewing.theExtensionManager.registerExtension('DemoToolbarExtension', DemoToolbarExtension);
 }
-window.addEventListener('demo-focus-target', () => { exitOverview(false); applySelection(); });
+window.addEventListener('demo-focus-target', () => { exitOverview(false); fittedFor = null; applySelection(); });
 window.addEventListener('demo-toggle-overview', () => toggleOverview());
 window.addEventListener('demo-toggle-ghost-panel', () => toggleGhostPanel());
 
