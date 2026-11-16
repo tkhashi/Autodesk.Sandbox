@@ -36,7 +36,7 @@ node server.mjs   # http://localhost:3000
 
 ## モデルの追加方法
 
-`data/models.json` に1件追加してサーバーを再起動するだけです（索引は起動後に API から自動で構築されます）。viewableGuid は Model Derivative の metadata（3D ビュー一覧）から選びます。なお `tools/extract-model.mjs` は索引の中身をファイルとして確認したい場合の単体ツールとして残しています（サーバーの動作には不要）。
+`data/models.json` に1件追加してサーバーを再起動するだけです（索引は起動後に API から自動で構築されます）。viewableGuid は Model Derivative の metadata（3D ビュー一覧）から選びます。なお索引の中身をファイルとして確認したい場合の単体ツール `extract-model.mjs` は、アプリ本体とは分離して `sample-d-dev-tools`（開発・検証用ツール置き場）に置いています（サーバーの動作には不要）。
 
 変換ジョブの投入が必要なファイルでは、エンドポイントに注意してください。正しくは **`POST /modelderivative/v2/designdata/job`**（URN はボディに入れる）。`POST /modelderivative/v2/designdata/{urn}/job` は存在せず 404 になります。ACC ハブのファイルでは `x-ads-derivative-scopes` ヘッダ（`b360project.*`、`O2tenant.*`。値はバージョンの derivatives リンクから取得）が必要な場合があります。
 
