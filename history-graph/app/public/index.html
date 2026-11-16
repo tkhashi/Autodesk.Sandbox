@@ -286,6 +286,11 @@ footer{margin-top:16px;font-size:11.5px;color:var(--muted);text-align:center}
             <button type="button" class="ba-btn" data-bamode="after" disabled>After のみ</button>
           </div>
           <span class="ba-note" id="baNote">3D 差分を表示すると切り替えできます</span>
+          <span class="ba-label">表示範囲:</span>
+          <div class="ba-seg" role="group" aria-label="表示範囲切替">
+            <button type="button" class="ba-btn active" data-scope="focus" disabled>差分フォーカス</button>
+            <button type="button" class="ba-btn" data-scope="full" disabled>全体表示</button>
+          </div>
         </div>
         <div class="diff-legend" id="diffLegend"><p class="dl-empty">差分ペアを選ぶと、Before／After の対応と色の意味がここに出ます。</p></div>
       </section>

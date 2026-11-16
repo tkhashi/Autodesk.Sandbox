@@ -326,6 +326,7 @@ async function loadDiff(auto3d) {
       <span class="dc-status" id="diff3dStatus"></span>
     </div>
     <div class="legend"><span><i class="la"></i>追加（After のみ・緑）</span><span><i class="ld"></i>削除（Before のみ・赤ゴースト）</span><span><i class="lc"></i>変更（After・黄／Before はゴースト）</span><span>変更なしは After のみ表示</span><span>※ Before／After の対応表はビューア脇の凡例に常時表示</span></div>
+    ${diffMode === 'all' ? '<p class="diff-note">all モードでは 3D ビューアの色分けは行いません（色分けは geometry モードのみ）。all では件数とピン周辺の内訳が対象で、3D 側は版ペアの素表示（Before／After の切替のみ）になります。</p>' : '<p class="diff-note">3D は段階ロードです（After を先に表示し、Before が揃ったら色分けを適用）。表示範囲の既定は「差分フォーカス」（変更要素とその周辺のみ）で、ビューア脇のボタンで「全体表示」に切り替えられます。</p>'}
     <div class="diff-side">${side}</div>
   </div>`;
   for (const b of $('diffBody').querySelectorAll('[data-dmode]')) {
@@ -361,6 +362,7 @@ let diffPairShown = null;             // { from, to } 3D 差分を表示中の�
 let diffElements = null;              // /api/diff/elements の応答（現在のモード）
 let diffBusy = false;
 let diffViewMode = 'overlay';         // 3D 差分の見せ方: 'overlay'（重ねて表示）| 'before'（Before のみ）| 'after'（After のみ）
+let diffScope = 'focus';              // 3D 差分の表示範囲: 'focus'（差分フォーカス＝変更要素とその周辺のみ・既定）| 'full'（全体表示）
 let diffViewCtx = null;               // 分類済みの表示コンテキスト（モード切替時は再取得せずこれを使い回す）
 function updateViewerButton() {
   $('btnViewer').disabled = !selectedPair;
@@ -477,6 +479,9 @@ function baModeLabel() {
   if (diffViewMode === 'after') return `After のみ（V${selectedPair.to} の姿だけを表示）`;
   return '重ねて表示（Before と After を重ねる）';
 }
+function scopeLabel() {
+  return diffScope === 'focus' ? '差分フォーカス（変更要素とその周辺のみ表示）' : '全体表示（全要素を表示）';
+}
 function renderDiffLegend() {
   const el = $('diffLegend');
   if (!el) return;
@@ -485,12 +490,13 @@ function renderDiffLegend() {
     return;
   }
   const { from, to } = selectedPair;
+  const plain = !!diffViewCtx?.plain;
   el.innerHTML = `
     <div class="dl-head">
       <span class="dl-ver dl-before">Before = V${from}（旧版）</span>
       <span class="dl-arrow">→</span>
       <span class="dl-ver dl-after">After = V${to}（新版）</span>
-      <span class="dl-cur">現在の表示: ${esc(baModeLabel())}</span>
+      <span class="dl-cur">現在の表示: ${esc(baModeLabel())}${plain ? '（all モード: 色分けなし）' : `／${esc(scopeLabel())}`}</span>
     </div>
     <ul class="dl-list">
       <li><i class="sw sw-a"></i><b>追加</b>（After にのみ存在する要素）: After の要素を<b>緑</b>で表示</li>
@@ -498,17 +504,24 @@ function renderDiffLegend() {
       <li><i class="sw sw-c"></i><b>変更</b>（両版に存在し変化した要素）: After の要素を<b>黄</b>で表示し、Before の要素を<b>薄黄ゴースト</b>で重ねて表示（ゴースト OFF のときは After のみ）</li>
       <li><i class="sw sw-n"></i><b>変更なし</b>: After の要素を通常表示（Before の同要素は重ねない）</li>
     </ul>
-    ${diffViewCtx ? '' : '<p class="dl-note">「Before のみ／After のみ」の切り替えボタンは、3D 差分を表示したあと有効になります。</p>'}`;
+    ${diffMode === 'all' ? '<p class="dl-note">現在のモード（all）では 3D の色分けは行いません（色分けは geometry モードのみ）。all の件数と要素の内訳は差分ビュー側で確認してください。3D 側は版ペアの素表示（Before／After の切替のみ）になります。</p>' : ''}
+    ${diffViewCtx && !plain && diffScope === 'focus' ? '<p class="dl-note">差分フォーカス中: 変更要素とその周辺（同じグループの要素）だけを表示しています。全要素を見る場合は「全体表示」に切り替えてください。</p>' : ''}
+    ${diffViewCtx ? '' : '<p class="dl-note">「Before のみ／After のみ」「差分フォーカス／全体表示」の切り替えボタンは、3D 差分を表示したあと有効になります。</p>'}`;
 }
 function updateBaControls() {
   const has = !!diffViewCtx;
+  const plain = !!diffViewCtx?.plain;
   for (const b of document.querySelectorAll('[data-bamode]')) {
     b.disabled = !has;
     b.classList.toggle('active', b.dataset.bamode === diffViewMode);
   }
+  for (const b of document.querySelectorAll('[data-scope]')) {
+    b.disabled = !has || plain; // all モード（plain）では分類自体が無いため表示範囲は切り替えない
+    b.classList.toggle('active', b.dataset.scope === diffScope);
+  }
   const note = $('baNote');
   if (note) note.textContent = has
-    ? `表示中: ${pairLabel(diffViewCtx.from, diffViewCtx.to)}`
+    ? (plain ? `表示中: ${pairLabel(diffViewCtx.from, diffViewCtx.to)}（all モード: 3D 色分けなし）` : `表示中: ${pairLabel(diffViewCtx.from, diffViewCtx.to)}`)
     : '3D 差分を表示すると切り替えできます';
 }
 function setDiffViewMode(m) {
@@ -517,7 +530,41 @@ function setDiffViewMode(m) {
   renderDiffLegend();
   applyDiffViewMode();
 }
-// 分類済みコンテキスト（diffViewCtx）に対して、表示モードに応じた表示／非表示と色付けだけを適用する。
+function setDiffScope(s) {
+  if (diffScope === s) return;
+  diffScope = s;
+  updateBaControls();
+  renderDiffLegend();
+  applyDiffViewMode();
+}
+// ---- 差分フォーカスの「周辺」計算 ----
+// 変更要素の親グループ配下（兄弟サブツリー）を「周辺」とする。大きすぎるグループ
+// （階全体など）は周辺に含めるとフォーカスにならないため、サイズ上限を超えたら除外する。
+function subtreeIds(tree, root, limit) {
+  const out = [];
+  const walk = (id) => { if (out.length > limit) return; out.push(id); tree.enumNodeChildren(id, c => walk(c)); };
+  walk(root);
+  return out.length > limit ? null : out;
+}
+function siblingContextDbIds(model, seedIds) {
+  const tree = model.getInstanceTree();
+  if (!tree || !seedIds.length) return [];
+  const seeds = new Set(seedIds);
+  const ctx = new Set();
+  const parents = new Set();
+  for (const id of seeds) {
+    let p = null;
+    try { p = tree.getNodeParentId(id); } catch (e) {}
+    if (p != null && p !== tree.getRootId()) parents.add(p);
+  }
+  for (const p of parents) {
+    const sub = subtreeIds(tree, p, 3000);
+    if (!sub) continue;
+    for (const id of sub) if (!seeds.has(id)) ctx.add(id);
+  }
+  return [...ctx];
+}
+// 分類済みコンテキスト（diffViewCtx）に対して、表示モード×表示範囲に応じた表示／非表示と色付けだけを適用する。
 // モード切替ではモデルも要素リストも再取得しない。
 function applyDiffViewMode() {
   if (!viewer || !diffViewCtx) return;
@@ -535,24 +582,43 @@ function applyDiffViewMode() {
   try { viewer.isolate([], toM); } catch (e) {}
   try { viewer.clearThemingColors(fromM); } catch (e) {}
   try { viewer.clearThemingColors(toM); } catch (e) {}
+  if (ctx.plain) {
+    // all モード: 要素単位の分類・色付けはせず、モデル単位で Before／After を切り替えるだけ
+    if (diffViewMode === 'before') { show(fromM, ctx.allFrom); hide(toM, ctx.allTo); }
+    else if (diffViewMode === 'after') { show(toM, ctx.allTo); hide(fromM, ctx.allFrom); }
+    else { show(fromM, ctx.allFrom); show(toM, ctx.allTo); }
+    return;
+  }
+  // 表示集合: 表示範囲（全体／フォーカス）× Before/After モードで決める
+  let visFrom, visTo;
+  if (diffScope === 'focus') {
+    // 差分フォーカス: 変更要素とその周辺だけを出す。変更のない要素は両版とも隠す
+    visTo = diffViewMode === 'before' ? [] : [...ctx.addedToDb, ...ctx.changedToDb, ...ctx.contextToDb];
+    visFrom = diffViewMode === 'after' ? []
+      : (diffViewMode === 'before' || diffGhostOld)
+        ? [...ctx.removedDb, ...ctx.changedFromDb, ...ctx.contextFromDb]
+        : [...ctx.removedDb, ...ctx.contextFromDb];
+  } else {
+    // 全体表示: 従来どおり（After は全要素、Before はモードに応じて全要素 or 削除＋変更のみ重ねる）
+    visTo = diffViewMode === 'before' ? [] : ctx.allTo;
+    visFrom = diffViewMode === 'after' ? []
+      : diffViewMode === 'before' ? ctx.allFrom
+      : diffGhostOld ? [...ctx.removedDb, ...ctx.changedFromDb] : [...ctx.removedDb];
+  }
+  show(toM, visTo);
+  hide(toM, rest(ctx.allTo, visTo));
+  show(fromM, visFrom);
+  hide(fromM, rest(ctx.allFrom, visFrom));
   if (diffViewMode === 'before') {
-    // Before のみ: 旧版モデルを全表示（削除=赤、変更=黄でその版の姿を見せる）、新版は全て隠す
-    show(fromM, ctx.allFrom);
-    hide(toM, ctx.allTo);
+    // Before のみ: 旧版の姿で見せる（削除=赤、変更=黄）
     theme(fromM, ctx.removedDb, V4(0.85, 0.16, 0.1, 0.9));
     theme(fromM, ctx.changedFromDb, V4(0.95, 0.72, 0.08, 0.9));
   } else if (diffViewMode === 'after') {
-    // After のみ: 新版モデルを全表示（追加=緑、変更=黄でその版の姿を見せる）、旧版は全て隠す
-    show(toM, ctx.allTo);
-    hide(fromM, ctx.allFrom);
+    // After のみ: 新版の姿で見せる（追加=緑、変更=黄）
     theme(toM, ctx.addedToDb, V4(0.1, 0.65, 0.3, 1));
     theme(toM, ctx.changedToDb, V4(0.95, 0.72, 0.08, 1));
   } else {
-    // 重ねて表示: 新版を全表示し、旧版は削除（＋ゴースト ON 時は変更の旧形状）だけを重ねる
-    show(toM, ctx.allTo);
-    const keepFrom = diffGhostOld ? [...ctx.removedDb, ...ctx.changedFromDb] : [...ctx.removedDb];
-    show(fromM, keepFrom);
-    hide(fromM, rest(ctx.allFrom, keepFrom));
+    // 重ねて表示: 新版に色を付け、旧版は削除（＋ゴースト ON 時は変更の旧形状）を重ねる
     theme(toM, ctx.addedToDb, V4(0.1, 0.65, 0.3, 1));
     theme(toM, ctx.changedToDb, V4(0.95, 0.72, 0.08, 1));
     theme(fromM, ctx.removedDb, V4(0.85, 0.16, 0.1, 0.45));
@@ -565,14 +631,18 @@ async function applyDiffClassification() {
   if (!fromM || !toM || !diffElements) return;
   const [mapFrom, mapTo] = await Promise.all([extMapping(fromM), extMapping(toM)]);
   const dbOf = (map, e) => { const db = map[e.externalId]; return db != null ? db : null; };
-  // 分類結果を表示コンテキストとして保持し、見せ方の適用は applyDiffViewMode に寄せる
+  const removedDb = diffElements.removed.map(e => dbOf(mapFrom, e)).filter(db => db != null);
+  const changedFromDb = diffElements.changed.map(e => dbOf(mapFrom, e)).filter(db => db != null);
+  const addedToDb = diffElements.added.map(e => dbOf(mapTo, e)).filter(db => db != null);
+  const changedToDb = diffElements.changed.map(e => dbOf(mapTo, e)).filter(db => db != null);
+  // 分類結果を表示コンテキストとして保持し、見せ方の適用は applyDiffViewMode に寄せる。
+  // contextFromDb／contextToDb は差分フォーカス用の「周辺」（変更要素の兄弟サブツリー）
   diffViewCtx = {
     from: selectedPair.from, to: selectedPair.to, fromM, toM,
     allFrom: allDbIds(fromM), allTo: allDbIds(toM),
-    removedDb: diffElements.removed.map(e => dbOf(mapFrom, e)).filter(db => db != null),
-    changedFromDb: diffElements.changed.map(e => dbOf(mapFrom, e)).filter(db => db != null),
-    addedToDb: diffElements.added.map(e => dbOf(mapTo, e)).filter(db => db != null),
-    changedToDb: diffElements.changed.map(e => dbOf(mapTo, e)).filter(db => db != null),
+    removedDb, changedFromDb, addedToDb, changedToDb,
+    contextFromDb: siblingContextDbIds(fromM, [...removedDb, ...changedFromDb]),
+    contextToDb: siblingContextDbIds(toM, [...addedToDb, ...changedToDb]),
   };
   applyDiffViewMode();
   updateBaControls();
@@ -586,26 +656,66 @@ async function applyDiffClassification() {
     else if (mapFrom[ext] != null) { try { viewer.fitToView([mapFrom[ext]], fromM); fitted = true; } catch (e) {} }
   }
   if (!fitted) focusPin();
-  diffStatus(`3D 差分を表示中: V${selectedPair.from} → V${selectedPair.to}（追加 ${diffElements.counts.added}／削除 ${diffElements.counts.removed}／変更 ${diffElements.counts.changed}${diffMode === 'geometry' ? '・形状のみ' : '・プロパティのみ含む'}）`);
+  diffStatus(`色分け適用済み — 3D 差分を表示中: V${selectedPair.from} → V${selectedPair.to}（追加 ${diffElements.counts.added}／削除 ${diffElements.counts.removed}／変更 ${diffElements.counts.changed}${diffMode === 'geometry' ? '・形状のみ' : '・プロパティのみ含む'}／${scopeLabel()}）`);
 }
+// モデルの見た目を素の状態（全表示・色なし）に戻す。段階ロードで After を先に見せるときに使う
+function resetModelPresentation(model) {
+  try { viewer.isolate([], model); } catch (e) {}
+  try { viewer.clearThemingColors(model); } catch (e) {}
+  const ids = allDbIds(model);
+  if (ids.length) { try { viewer.show(ids, model); } catch (e) {} }
+}
+// 段階ロード: まず After（新版）だけを読み込んで表示し操作可能にする。Before（旧版）は
+// 裏で読み込み、要素リストの取得も並行して進め、揃った時点で分類・色分けを適用する。
+// all モードでは要素リスト自体を取得せず、色付けもしない（素表示＋Before/After 切替のみ）。
 async function showDiff3D() {
   if (!selectedPair || diffBusy) return;
   diffBusy = true;
+  const { from, to } = selectedPair;
+  const mode = diffMode;
+  const stale = () => !selectedPair || selectedPair.from !== from || selectedPair.to !== to || diffMode !== mode;
   try {
     await ensureViewer();
-    const { from, to } = selectedPair;
     // このペアに不要な版のモデルは破棄し、必要な2版は読み込み済みを再利用する
     for (const [v, m] of [...diffModelByVersion]) {
       if (v !== from && v !== to) { try { viewer.unloadModel(m); } catch (e) {} diffModelByVersion.delete(v); }
     }
-    if (!diffModelByVersion.has(from)) { diffStatus(`V${from}（旧版）を読み込み中…`); await loadVersionModel(from); }
-    if (!diffModelByVersion.has(to)) { diffStatus(`V${to}（新版）を読み込み中…`); await loadVersionModel(to); }
+    diffViewCtx = null; // 分類が済むまで切替ボタンは無効（古いペアの分類で切り替える事故防止）
+    updateBaControls();
+    renderDiffLegend();
+    // 段階 1: After を先に表示する
+    if (!diffModelByVersion.has(to)) { diffStatus(`After（V${to}・新版）を読み込み中…`); await loadVersionModel(to); }
+    if (stale()) return;
+    resetModelPresentation(diffModelByVersion.get(to));
     diffPairShown = { from, to };
-    diffStatus('要素リストを取得中…');
-    await fetchDiffElements();
+    diffStatus(`After（V${to}）を表示中 — Before（V${from}・旧版）を読み込み中…`);
+    focusPin();
+    // 要素リストの取得は Before のロードと並行して進める（geometry モードのみ）
+    let elementsPromise = null, elementsError = null;
+    if (mode === 'geometry') {
+      elementsPromise = fetchDiffElements().catch(e => { elementsError = e; return null; });
+    }
+    // 段階 2: Before を読み込む（この間も After は操作できる）
+    if (!diffModelByVersion.has(from)) await loadVersionModel(from);
+    if (stale()) return;
+    const fromM = diffModelByVersion.get(from);
+    const toM = diffModelByVersion.get(to);
+    if (mode === 'all') {
+      diffViewCtx = { plain: true, from, to, fromM, toM, allFrom: allDbIds(fromM), allTo: allDbIds(toM) };
+      applyDiffViewMode();
+      updateBaControls();
+      renderDiffLegend();
+      diffStatus(`3D 表示中: V${from} → V${to}（all モードのため 3D 色分けはなし — 色分けは geometry モードのみ）`);
+      return;
+    }
+    // 段階 3: 分類・色分けを適用する
+    diffStatus(`Before（V${from}）の読み込み完了 — 分類と色分けを適用中…`);
+    const els = await elementsPromise;
+    if (stale()) return;
+    if (!els) throw elementsError ?? new Error('要素リストを取得できませんでした');
     await applyDiffClassification();
   } catch (e) {
-    diffStatus('3D 差分を表示できませんでした: ' + e.message);
+    if (!stale()) diffStatus('3D 差分を表示できませんでした: ' + e.message);
   } finally { diffBusy = false; }
 }
 function reapplyDiff3D() {
@@ -688,6 +798,9 @@ $('btnNext').addEventListener('click', () => { flt.page++; buildTable(); });
 $('btnViewer').addEventListener('click', () => showDiff3D());
 for (const b of document.querySelectorAll('[data-bamode]')) {
   b.addEventListener('click', () => setDiffViewMode(b.dataset.bamode));
+}
+for (const b of document.querySelectorAll('[data-scope]')) {
+  b.addEventListener('click', () => setDiffScope(b.dataset.scope));
 }
 updateBaControls();
 $('btnPair').addEventListener('click', () => {
