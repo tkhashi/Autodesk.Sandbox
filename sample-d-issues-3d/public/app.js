@@ -900,11 +900,12 @@ function scheduleOccluderRecompute() {
   clearTimeout(occTimer);
   occTimer = setTimeout(() => {
     if (!viewer) return;
+    if (focusAnim) { scheduleOccluderRecompute(); return; } // 移動アニメーション中は終わるまで待つ
     try {
       const p = viewer.navigation.getPosition();
-      if (!occCamPos || Math.hypot(p.x - occCamPos.x, p.y - occCamPos.y, p.z - occCamPos.z) > 0.5) applyOccluderClearing();
+      if (!occCamPos || Math.hypot(p.x - occCamPos.x, p.y - occCamPos.y, p.z - occCamPos.z) > 2.0) applyOccluderClearing();
     } catch (e) {}
-  }, 400);
+  }, 600);
 }
 
 function syncGhostBtn() {
@@ -1004,7 +1005,14 @@ function applySelection() {
       if (fitToElement(i.targetDbId)) fittedFor = fkey;
       else if (geoLoaded) { try { viewer.fitToView([i.targetDbId]); } catch (e) {} fittedFor = fkey; }
     }
-    applyOccluderClearing(); // 対象の手前の部材だけを消す（材質には触らない）
+    if (focusAnim) {
+      // フォーカスの移動アニメーション中：透明化はまだ適用しない。
+      // 移動開始時点の視点で計算すると、到着後の再計算でもう一度付け替わり、
+      // 半透明の部材が一瞬ちらつく（実機報告）。到着後の再計算に1回で済ませる。
+      occTargetDbId = i.targetDbId;
+    } else {
+      applyOccluderClearing(); // 対象の手前の部材だけを透明にする（材質には触らない）
+    }
   } catch (e) { return; }
   paintFocusTarget(i.targetDbId);
   updateFocusPin();
