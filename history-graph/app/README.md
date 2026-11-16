@@ -18,10 +18,11 @@ sample-d（Issues 3D デモ）の流儀を土台に、モックデータを実 A
 1. `.env` に `APS_CLIENT_ID` / `APS_CLIENT_SECRET`（sample-d の `demo-issues-3d/app/.env` と同じもの）
 2. `.token.json` に 3-legged トークン（refresh token を含むもの。sample-d と同じもの）
 
-このワークスペース内では、`.env` / `.token.json` がアプリ直下に無い場合、
-`../demo-issues-3d/app/` のものを自動でフォールバック利用します。
-**トークンをリフレッシュした場合は、このアプリの `.token.json`、`demo-issues-3d/app/.token.json`、
-`sample-a-http-client/.token.json` の全てに書き戻します**（運用ルール）。
+`.env` / `.token.json` がアプリ直下に無い場合は、次の順で探索して自動利用します:
+①clone 配置で隣にある sample-d（`../../sample-d-issues-3d/`）
+②ワークスペース内の `forma-hands-on/demo-issues-3d/app/` と `sample-a-http-client/`。
+どれにも無い場合は、コピー手順の案内を表示して終了します。
+**トークンをリフレッシュした場合は、探索対象の全ての `.token.json` に書き戻します**（運用ルール）。
 
 ```bash
 cd history-graph-app

@@ -1,7 +1,8 @@
 // server.mjs — 履歴グラフ実アプリ v1: 実 Issue（APS Issues API）＋アプリ側スナップショット履歴
 //             ＋ モデル版一覧（DM API）＋ Model Properties Diff（種キャッシュ／実 API ジョブ）
 // 起動: node server.mjs（.env に APS_CLIENT_ID / APS_CLIENT_SECRET、.token.json に 3-legged トークンが必要。
-//       .env / .token.json が無い場合は sample-d（demo-issues-3d/app）のものをフォールバックで使う）
+//       認証情報の探索順: ①アプリ自身のフォルダ ②clone 配置で隣の sample-d（../../sample-d-issues-3d）
+//       ③ワークスペース内の demo-issues-3d/app と sample-a-http-client。どれにも無ければ案内を出して終了する）
 //
 // アプリ側で持つ状態は data/ のみ:
 //   data/snapshots.json — Issue の status／担当者のスナップショットと変化イベント（追記型）
@@ -9,6 +10,7 @@
 // 現在値は常に Forma から取得する（このアプリは「履歴の記録者」であり、状態の管理者ではない）。
 import http from 'node:http';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
@@ -24,18 +26,30 @@ const BASE = 'https://developer.api.autodesk.com';
 const IDX = `${BASE}/construction/index/v2`;
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png' };
 
-// sample-d と認証情報を共有する（このワークスペース内での運用前提。README 参照）
-const DEMO_DIR = path.join(root, '..', 'demo-issues-3d', 'app');
-const SAMPLE_A_DIR = path.join(root, '..', 'sample-a-http-client');
-function firstExisting(cands) { return cands.find(p => fs.existsSync(p)) ?? cands[0]; }
-const ENV_FILE = firstExisting([path.join(root, '.env'), path.join(DEMO_DIR, '.env')]);
+// 認証情報（.env / .token.json）は sample-d と共有する。探索順:
+//   ① アプリ自身のフォルダ
+//   ② clone 配置で隣にある sample-d（Autodesk.Sandbox/sample-d-issues-3d）
+//   ③ ワークスペース内の sample-d / sample-a（従来のフォールバック）
+const CRED_DIRS = [...new Set([
+  root,
+  path.join(root, '..', '..', 'sample-d-issues-3d'),
+  path.join(os.homedir(), 'workspace', 'forma-hands-on', 'demo-issues-3d', 'app'),
+  path.join(os.homedir(), 'workspace', 'forma-hands-on', 'sample-a-http-client'),
+].map(p => path.resolve(p)))];
+const ENV_FILE = CRED_DIRS.map(d => path.join(d, '.env')).find(p => fs.existsSync(p));
+if (!ENV_FILE) {
+  console.error('.env が見つかりません。sample-d のフォルダから .env と .token.json をこのフォルダにコピーしてください: ' + root);
+  console.error('探索した場所: ' + CRED_DIRS.map(d => path.join(d, '.env')).join(' / '));
+  process.exit(1);
+}
 const env = {};
 for (const line of fs.readFileSync(ENV_FILE, 'utf8').split('\n')) {
   const m = line.match(/^([A-Z_]+)=(.*)$/);
   if (m) env[m[1]] = m[2].trim();
 }
+console.log('credentials: .env =', ENV_FILE);
 // トークンファイルは複数箇所にあり、リフレッシュしたら全てに書き戻す（運用ルール）
-const TOKEN_FILES = [path.join(root, '.token.json'), path.join(DEMO_DIR, '.token.json'), path.join(SAMPLE_A_DIR, '.token.json')];
+const TOKEN_FILES = CRED_DIRS.map(d => path.join(d, '.token.json'));
 
 const PROJECT_ID = 'b.031a6e68-ccdf-4a29-b8a5-50a2a3ecac25'; // Snowdon Towers
 const PID = PROJECT_ID.replace(/^b\./, ''); // Issues API / Index API は b. なし
@@ -95,10 +109,16 @@ function loadTok3() {
       if (!best || (t.obtained_at ?? 0) > (best.obtained_at ?? 0)) best = t;
     } catch (e) {}
   }
-  if (!best) throw new Error('.token.json が見つかりません（sample-d と同じ配置が必要です）');
+  if (!best) throw new Error('.token.json が見つかりません');
   tok3 = best;
 }
-loadTok3();
+try {
+  loadTok3();
+} catch (e) {
+  console.error('.token.json が見つかりません。sample-d のフォルダから .env と .token.json をこのフォルダにコピーしてください: ' + root);
+  console.error('探索した場所: ' + TOKEN_FILES.join(' / '));
+  process.exit(1);
+}
 async function getToken3() {
   if (Date.now() - (tok3.obtained_at ?? 0) < 45 * 60000) return tok3.access_token;
   const r = await fetch(BASE + '/authentication/v2/token', {
