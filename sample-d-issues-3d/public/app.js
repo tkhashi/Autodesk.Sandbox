@@ -789,6 +789,19 @@ function segmentHitsBox(o, d, tMax, b) {
 // 判定：カメラから「拡大した対象ボックスの8隅＋中心」へ引いた線分のどれかが、
 // 要素のボックスと対象より手前で交わるか。対象自身・その祖先と子孫・この
 // モデルの他の Issue 要素は消さない。
+// 要素の祖先を除外集合へ追加する。LMV の正しいメソッド名は getNodeParentId
+// （getNodeParent は存在せず、呼び出すと例外で computeOccluders 全体が死ぬ。
+// v8.16 で祖先除外を入れた時に混入し、手前消去が全く効かなくなっていた）
+function addAncestors(tree, id, set) {
+  let cur = id;
+  for (let depth = 0; depth < 64; depth++) {
+    let p = null;
+    try { p = tree.getNodeParentId(cur); } catch (e) { break; }
+    if (p == null || p <= 0 || p === cur || set.has(p)) break;
+    set.add(p);
+    cur = p;
+  }
+}
 function computeOccluders(targetDbId) {
   const tree = viewer.model.getInstanceTree();
   const tBox = nodeWorldBox(targetDbId);
@@ -804,14 +817,12 @@ function computeOccluders(targetDbId) {
   const rays = ends.map(e => ({ o: C, d: { x: e.x - C.x, y: e.y - C.y, z: e.z - C.z } }));
   const distC = Math.hypot(center.x - C.x, center.y - C.y, center.z - C.z);
   const excluded = new Set([targetDbId]);
-  let par = targetDbId;
-  while (true) { const p = tree.getNodeParent(par); if (!p || p === par) break; excluded.add(p); par = p; }
+  addAncestors(tree, targetDbId, excluded);
   (function mark(id) { excluded.add(id); tree.enumNodeChildren(id, c => mark(c)); })(targetDbId);
   // 他の Issue 要素とその祖先も消さない（祖先を消すと配下の Issue 要素ごと消えてしまう）
   for (const i of issuesOnCurrentModel()) {
     excluded.add(i.targetDbId);
-    let q = i.targetDbId;
-    while (true) { const p = tree.getNodeParent(q); if (!p || p === q) break; excluded.add(p); q = p; }
+    addAncestors(tree, i.targetDbId, excluded);
   }
   const result = [];
   for (const cand of occluderCandidates()) {
@@ -925,14 +936,19 @@ function fitToElement(dbId) {
     const radius = Math.max(0.5 * Math.sqrt(dx * dx + dy * dy + dz * dz), 0.5);
     const fov = (((viewer.impl.camera.fov ?? 45) * Math.PI) / 180);
     const dist = (radius / Math.tan(fov / 2)) * 1.9; // 1.9 は「引き」の余裕分
-    const dir = viewer.impl.camera.position.clone().sub(c);
-    if (dir.lengthSq() < 1e-9) dir.set(1, -1, 0.7);
-    dir.normalize();
-    // 上方向を現在のカメラから引き継いで明示的に渡す（フォーカスでビューが
-    // 斜めに回ってしまうのを防ぐ。実機報告 2026-11-16）
-    const camUp = viewer.impl.camera.up;
-    const up = camUp ? new T.Vector3(camUp.x, camUp.y, camUp.z) : null;
-    viewer.navigation.setView(c.clone().add(dir.multiplyScalar(dist)), c, up);
+    // 方向は「現在の方位だけを引き継ぎ、仰角は 28° に固定」して作り直す。
+    // 以前は現在のカメラ方向と上方向をそのまま引き継いでいたため、全体表示の
+    // 急な斜め方向がそのまま近接ビューになり「斜め」に見えた（実機報告）。
+    // 上方向は常にワールド Z に固定し、水平が傾かないようにする。
+    const cur = viewer.impl.camera.position.clone().sub(c);
+    let az = Math.atan2(cur.y, cur.x);
+    if (!isFinite(az)) az = Math.PI / 4;
+    const el = (28 * Math.PI) / 180;
+    const dir = new T.Vector3(Math.cos(az) * Math.cos(el), Math.sin(az) * Math.cos(el), Math.sin(el));
+    viewer.navigation.setView(c.clone().add(dir.multiplyScalar(dist)), c, new T.Vector3(0, 0, 1));
+    // 回転中心（ピボット）も対象へ合わせる。setView はピボットを動かさないため、
+    // 放っておくと原点中心の回転になり、回すたびにビューが斜めに振れる（実測で確認）
+    try { viewer.navigation.setPivotPoint(c); } catch (e) {}
     return true;
   } catch (e) { return false; }
 }
