@@ -2,7 +2,6 @@
 let DATA = null, selected = null, focusedId = null;
 let viewer = null, viewerModelKey = null, rootLoaded = false, geoLoaded = false, tSelect = 0;
 let viewerReady = false, desiredModelKey = null;
-let blinkTimer = null, blinkOn = false;
 let fittedFor = null; // カメラのフィットを実行済みの対象（モデル: Issue）。フィットは1回だけにする
 const captured = new Map(); // Issue ごとのビューアキャプチャ（スナップショットの代替）
 const $ = id => document.getElementById(id);
@@ -327,6 +326,7 @@ function setViewerMode(m) {
   applyViewerModeVisual();
   if (m === 'obj') { ensureObjViewer(); showObjForSelected(); }
   else { try { viewer?.resize(); } catch (e) {} }
+  updateFocusPin();
 }
 for (const b of $('viewerSwitch').querySelectorAll('button')) b.addEventListener('click', () => setViewerMode(b.dataset.vm));
 applyViewerModeVisual();
@@ -369,28 +369,34 @@ function showInViewer(id) {
   applySelection();
 }
 
-// ---- Viewer の対象ハイライト：赤く点滅 ----
-function stopBlink() {
-  if (blinkTimer) { clearInterval(blinkTimer); blinkTimer = null; }
-  blinkOn = false;
-}
-function startBlink(dbId) {
-  stopBlink();
+// ---- Viewer の対象ハイライト ----
+// 色替え（theming）の点滅は、そのたびに画面全体の再描画が走って負荷が高いので使わない。
+// 対象要素は濃い赤で一度だけ塗り（再描画は1回）、「ここだよ」の合図は画面上のピン
+// （#focusPin。CSS アニメーションなので 3D 描画には触らない）で出す。
+function paintFocusTarget(dbId) {
   if (!viewer) return;
-  const V4 = window.THREE?.Vector4 ?? Autodesk.Viewing.Private.THREE.Vector4;
-  const paint = (r, g, b) => { try { viewer.setThemingColor(dbId, new V4(r, g, b, 1)); } catch (e) {} };
-  paint(1, 0.05, 0.05); blinkOn = true;
-  // 点滅は最初の数回だけにして、最後は濃い赤で止める。無限に続けると色替えのたびに
-  // 画面全体の再描画が走り、大きなモデルを遠景で見ている間「Rendering...」の表示と
-  // ちらつきが止まらなくなる（2026-11-15 報告→いったん収まったが 2026-11-16 に再発）。
-  let pulses = 0;
-  blinkTimer = setInterval(() => {
-    if (!viewer) { stopBlink(); return; }
-    blinkOn = !blinkOn;
-    if (blinkOn) paint(1, 0.05, 0.05);
-    else paint(1, 0.78, 0.78);
-    if (++pulses >= 7) { stopBlink(); paint(1, 0.05, 0.05); blinkOn = true; }
-  }, 650);
+  try { viewer.setThemingColor(dbId, v4(1, 0.05, 0.05, 1)); } catch (e) {}
+}
+// フォーカス中要素の位置にピンを重ねる。位置合わせはカメラ等のイベント時のみで、
+// アニメーション自体は CSS が担うため、3D の再描画は発生しない。
+function updateFocusPin() {
+  const el = $('focusPin');
+  if (!el) return;
+  const i = focusedIssue();
+  if (!viewer || !geoLoaded || overviewOn || viewerMode !== 'aps' || !i?.targetDbId || i.modelKey !== viewerModelKey) { el.hidden = true; return; }
+  const pos = anchorFor(i);
+  if (!pos) { el.hidden = true; return; }
+  try {
+    const T = Autodesk.Viewing.Math;
+    const p = new T.Vector3(pos.x, pos.y, pos.z);
+    const cam = viewer.impl.camera; const dir = new T.Vector3(); cam.getWorldDirection(dir);
+    if (p.clone().sub(cam.position).dot(dir) <= 0) { el.hidden = true; return; }
+    if (typeof viewer.isNodeVisible === 'function' && !viewer.isNodeVisible(i.targetDbId)) { el.hidden = true; return; }
+    const v = viewer.worldToClient(p);
+    el.style.left = Math.floor(v.x) + 'px';
+    el.style.top = Math.floor(v.y) + 'px';
+    el.hidden = false;
+  } catch (e) { el.hidden = true; }
 }
 
 // ビューアの実描画をキャプチャして、その Issue のサムネイルにする（API ではスナップショットを生成できないため）
@@ -438,7 +444,9 @@ function nodeWorldBox(dbId) {
     const tree = viewer.model.getInstanceTree();
     const box = new Autodesk.Viewing.Private.THREE.Box3();
     tree.getNodeBox(dbId, box);
-    if (box && !(box.isEmpty && box.isEmpty())) return { min: { x: box.min.x, y: box.min.y, z: box.min.z }, max: { x: box.max.x, y: box.max.y, z: box.max.z } };
+    // 注意：isEmpty はメソッド。() を付けずに関数オブジェクトで判定すると常に真になり、
+    // このフォールバックが永久に空を返してラベル・引き出し線が全て消える（2026-11-16 実機報告で発覚）
+    if (box && !box.isEmpty()) return { min: { x: box.min.x, y: box.min.y, z: box.min.z }, max: { x: box.max.x, y: box.max.y, z: box.max.z } };
   } catch (e) {}
   return null;
 }
@@ -542,7 +550,6 @@ function updateMarkers() {
 }
 function enterOverview() {
   if (!viewer || !geoLoaded) return;
-  stopBlink();
   try {
     if (typeof viewer.setGhosting === 'function') viewer.setGhosting(true);
     const dbIds = issuesOnCurrentModel().map(i => i.targetDbId);
@@ -553,6 +560,7 @@ function enterOverview() {
   viewer.clearThemingColors();
   colorIssueElements();
   buildMarkers();
+  updateFocusPin(); // 一覧モード中はフォーカスピンを隠す
   const n = issuesOnCurrentModel().length;
   setStatV(`指摘事項一覧を表示中（このモデルの Issue ${n} 件）。色はステータス別、選択中は赤。${ghostTransparency === 0 ? 'ゴーストオフ：モデル全体を表示しています。' : 'Issue の要素以外はゴースト表示です。'}ラベルをクリックすると詳細が開きます。`);
   syncOverviewBtn();
@@ -571,7 +579,7 @@ function toggleOverview() {
   if (viewer && geoLoaded) enterOverview();
   else setStatV('モデルの読み込みが終わったら、指摘事項一覧を表示します。');
 }
-window.addEventListener('resize', () => { if (overviewOn) updateMarkers(); });
+window.addEventListener('resize', () => { if (overviewOn) updateMarkers(); updateFocusPin(); });
 
 // ---- ゴースト透明度（ゴースト表示に使うフェード用マテリアルの不透明度を調整する） ----
 let ghostTransparency = (() => {
@@ -580,13 +588,14 @@ let ghostTransparency = (() => {
   return Number.isFinite(n) ? Math.min(97, Math.max(0, n)) : 90;
 })();
 let ghostAppliedOff = null; // 直前に適用した「透明度0%（ゴーストオフ）」かどうか
+let ghostOpacityWritten = null; // マテリアルへ書き込み済みの透明度（同じ値の再書き込み＋全体再描画をしないため）
 function applyGhostOpacity() {
   if (!viewer) return;
   const off = ghostTransparency === 0;
   try {
     const impl = viewer.impl;
     const mat = impl.fadeMaterial ?? impl.renderer?.()?.fadeMaterial ?? impl._renderer?.fadeMaterial ?? impl.glrenderer?.()?.fadeMaterial ?? null;
-    if (mat && !off) {
+    if (mat && !off && ghostOpacityWritten !== ghostTransparency) {
       // ゴースト用の単色マテリアルは不透明度を上げると全面がその色（濃いグレー）に染まるため、
       // 0% のときはマテリアルではなく表示状態そのものを切り替える（下の境界処理）
       const opacity = 1 - ghostTransparency / 100;
@@ -595,8 +604,9 @@ function applyGhostOpacity() {
       mat.depthWrite = false;
       mat.needsUpdate = true;
       mat.variants?.forEach(v => { v.opacity = opacity; v.transparent = true; v.depthWrite = false; v.needsUpdate = true; });
+      impl.invalidate?.(true); // 値が変わった時だけ全体再描画する（ロードイベント等での重複呼び出しで描き直さない）
+      ghostOpacityWritten = ghostTransparency;
     }
-    impl.invalidate?.(true);
   } catch (e) {}
   // 0% との境界を跨いだら、現在のモード（一覧／フォーカス）の表示を作り直す
   if (ghostAppliedOff !== null && ghostAppliedOff !== off && geoLoaded) {
@@ -630,7 +640,8 @@ function applySelection() {
   const i = focusedIssue();
   if (!viewer || !rootLoaded || !i) return;
   if (!i.targetDbId || i.modelKey !== viewerModelKey) {
-    if (!i.targetDbId) { stopBlink(); viewer.showAll(); viewer.clearThemingColors(); setStatV('この Issue は対象モデルへのピンがないため、モデル全体を表示しています。'); }
+    if (!i.targetDbId) { viewer.showAll(); viewer.clearThemingColors(); setStatV('この Issue は対象モデルへのピンがないため、モデル全体を表示しています。'); }
+    updateFocusPin();
     return;
   }
   if (!viewer.model?.getFragmentList?.()) return;
@@ -647,7 +658,8 @@ function applySelection() {
     const fkey = viewerModelKey + ':' + i.id;
     if (geoLoaded && fittedFor !== fkey) { viewer.fitToView([i.targetDbId]); fittedFor = fkey; }
   } catch (e) { return; }
-  startBlink(i.targetDbId);
+  paintFocusTarget(i.targetDbId);
+  updateFocusPin();
   if (geoLoaded) {
     setStatV(`<b>#${i.displayId}</b> の対象要素を表示中（${ghostTransparency === 0 ? 'ゴーストオフ：モデル全体を表示' : '対象以外はゴースト表示'}）。`);
     scheduleCapture(i);
@@ -658,14 +670,14 @@ function setupViewer(modelKey) {
   const m = DATA?.models.find(x => x.key === modelKey);
   if (!m || !window.Autodesk) return;
   if (viewer && viewerModelKey === modelKey) return;
-  if (viewer) { stopBlink(); clearMarkers(); try { viewer.finish(); } catch (e) {} viewer = null; }
+  if (viewer) { clearMarkers(); try { viewer.finish(); } catch (e) {} viewer = null; }
   $('viewerWrap').innerHTML = '';
   const msg = $('viewerMsg'); if (msg) msg.remove();
-  viewerModelKey = modelKey; rootLoaded = false; geoLoaded = false; fittedFor = null;
+  viewerModelKey = modelKey; rootLoaded = false; geoLoaded = false; fittedFor = null; ghostOpacityWritten = null;
   viewer = new Autodesk.Viewing.GuiViewer3D($('viewerWrap'));
   viewer.start();
   viewer.loadExtension('DemoToolbarExtension').catch(() => {});
-  const updMarkers = () => { if (overviewOn) updateMarkers(); };
+  const updMarkers = () => { if (overviewOn) updateMarkers(); updateFocusPin(); };
   viewer.addEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, updMarkers);
   viewer.addEventListener(Autodesk.Viewing.ISOLATE_EVENT, updMarkers);
   viewer.addEventListener(Autodesk.Viewing.HIDE_EVENT, updMarkers);

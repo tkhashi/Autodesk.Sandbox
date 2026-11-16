@@ -79,7 +79,11 @@ table.issues tbody tr.sel { background: #e8f2fa; }
 #viewerSwitch { position: absolute; top: 8px; left: 8px; z-index: 9; display: flex; gap: 4px; opacity: .82; }
 #viewerSwitch button { padding: 3px 9px; font-size: 11px; border: 1px solid #9db4c6; background: rgba(255,255,255,.88); color: #41586c; border-radius: 999px; cursor: pointer; }
 #viewerSwitch button.on { background: #2b7bbb; border-color: #2b7bbb; color: #fff; font-weight: 700; }
-#viewerOuter.obj-mode #markers, #viewerOuter.obj-mode #leaders, #viewerOuter.obj-mode #ghostPanel { display: none !important; }
+#viewerOuter.obj-mode #markers, #viewerOuter.obj-mode #leaders, #viewerOuter.obj-mode #ghostPanel, #viewerOuter.obj-mode #focusPin { display: none !important; }
+#focusPin { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; z-index: 7; pointer-events: none; }
+#focusPin .fp-dot { position: absolute; inset: 2px; border-radius: 50%; background: #e03131; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.45); }
+#focusPin .fp-ring { position: absolute; inset: 0; border-radius: 50%; border: 2px solid rgba(224,49,49,.75); animation: fp-pulse 1.6s ease-out infinite; }
+@keyframes fp-pulse { 0% { transform: scale(.6); opacity: 1; } 100% { transform: scale(2.6); opacity: 0; } }
 #ghostPanel { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 8; background: rgba(255,255,255,.97); border: 1px solid #cfd9e2; border-radius: 10px; box-shadow: 0 4px 16px rgba(20,40,60,.18); padding: 9px 14px; display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: #33475c; white-space: nowrap; }
 #ghostPanel[hidden] { display: none; }
 #ghostPanel input[type=range] { width: 180px; accent-color: #2b7bbb; cursor: pointer; }
@@ -144,6 +148,7 @@ table.issues tbody tr.sel { background: #e8f2fa; }
 </div>
 <svg id="leaders"></svg>
 <div id="markers"></div>
+<div id="focusPin" hidden><span class="fp-ring"></span><span class="fp-dot"></span></div>
 <div id="ghostPanel" hidden>
   <span style="font-weight:700">ゴースト透明度</span>
   <input type="range" id="ghostRange" min="0" max="97" step="1" value="90">
