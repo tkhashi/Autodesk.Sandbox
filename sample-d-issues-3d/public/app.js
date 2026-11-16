@@ -726,7 +726,7 @@ function enterOverview() {
   if (markersBuiltFor !== mkey) { buildMarkers(); markersBuiltFor = mkey; }
   updateFocusPin(); // 一覧モード中はフォーカスピンを隠す
   const n = issuesOnCurrentModel().length;
-  setStatV(`指摘事項一覧を表示中（このモデルの Issue ${n} 件）。色はステータス別、選択中は赤。${occHiddenCount ? '選択中の Issue の手前にある部材 ' + occHiddenCount + ' 件を消して、奥を見通せるようにしています。' : ''}ラベルをクリックすると詳細が開きます。`);
+  setStatV(`指摘事項一覧を表示中（このモデルの Issue ${n} 件）。色はステータス別、選択中は赤。${occHiddenCount ? '選択中の Issue の手前にある部材 ' + occHiddenCount + ' 件を透明（フレームのみ表示）にして、奥を見通せるようにしています。' : ''}ラベルをクリックすると詳細が開きます。`);
   syncOverviewBtn();
 }
 function exitOverview(restore = true) {
@@ -745,7 +745,7 @@ function toggleOverview() {
 }
 window.addEventListener('resize', () => { if (overviewOn) updateMarkers(); updateFocusPin(); });
 
-// ---- 対象の手前の部材を消す（オクルーダ除去） ----
+// ---- 対象の手前の部材を透明にする（ゴースト表示でフレームだけ残す） ----
 // 目的（2026-11-16 ユーザー定義）：建物の奥にある部材や、部材と部材の間にある
 // 部材を見えるようにすること。方式は、カメラと対象の間にある部材だけを特定して
 // Viewer 標準の非表示（hide）で消す。材質には一切触らないため、全体透明化で
@@ -884,7 +884,7 @@ function applyOccluderClearing() {
     occTargetDbId = i.targetDbId;
     const p = viewer.navigation.getPosition();
     occCamPos = { x: p.x, y: p.y, z: p.z };
-    if (overviewOn) setStatV(`<b>#${i.displayId}</b> の見通しのため、手前の部材 <b>${occ.length} 件</b>を非表示にしています（範囲 ${occluderRange}%）。`);
+    if (overviewOn) setStatV(`<b>#${i.displayId}</b> の見通しのため、手前の部材 <b>${occ.length} 件</b>を透明にしています（フレームのみ表示・範囲 ${occluderRange}%）。`);
     return occ.length;
   } catch (e) {
     console.error('手前の部材の特定に失敗しました', e);
@@ -1009,7 +1009,7 @@ function applySelection() {
   paintFocusTarget(i.targetDbId);
   updateFocusPin();
   if (geoLoaded) {
-    setStatV(`<b>#${i.displayId}</b> の対象要素を表示中（${occHiddenCount ? '手前の部材 ' + occHiddenCount + ' 件を非表示にして見通しを確保' : '手前の部材は非表示にしていません'}）。`);
+    setStatV(`<b>#${i.displayId}</b> の対象要素を表示中（${occHiddenCount ? '手前の部材 ' + occHiddenCount + ' 件を透明にして見通しを確保' : '手前の部材は透明にしていません'}）。`);
     scheduleCapture(i);
   }
 }
@@ -1024,6 +1024,9 @@ function setupViewer(modelKey) {
   viewerModelKey = modelKey; rootLoaded = false; geoLoaded = false; fittedFor = null; hiddenOccluders = new Set(); occHiddenCount = 0; occTargetDbId = null; occCache = null; streamingNow = true;
   viewer = new Autodesk.Viewing.GuiViewer3D($('viewerWrap'));
   viewer.start();
+  // 手前の部材は「消す」のではなく透明にする：Viewer のゴースト表示を有効にすると、
+  // hide した部材がフレーム（輪郭）だけを残して透けて見える（ユーザー指定 2026-11-16）
+  try { viewer.setGhosting(true); } catch (e) {}
   viewer.loadExtension('DemoToolbarExtension').then(() => syncOverviewBtn()).catch(() => {});
   let markersRaf = 0;
   const updMarkers = () => {
