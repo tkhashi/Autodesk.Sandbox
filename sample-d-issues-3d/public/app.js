@@ -431,14 +431,15 @@ function nodeWorldCenter(dbId) {
   const b = nodeWorldBox(dbId);
   return b ? { x: (b.min.x + b.max.x) / 2, y: (b.min.y + b.max.y) / 2, z: (b.min.z + b.max.z) / 2 } : null;
 }
-// 引き出し線の先端は、ハイライトされる部材の上の点にする（ピンの位置を部材の範囲内に寄せた点。ピンが無ければ部材の中心）
+// 引き出し線の先端は、ハイライトされる部材そのものの中心にする。
+// ピンの保存座標は使わない：Forma で付けたピンの座標は、デモの Viewer のワールド座標と
+// 原点がずれた別空間で記録されていることが数値照合で判明したため（2026-11-16 調査。
+// Forma ピン #1・#3 は部材の実形状に対し約 (+20.2, +0.84, -24.0) ft の平行移動分だけ外側にあった）。
+// 部材ボックスは Viewer 実行時 API から取るので、ハイライトや fitToView と同じ空間で必ず部材の上に来る。
 function anchorFor(issue) {
   const box = nodeWorldBox(issue.targetDbId);
-  if (!box) return issue.pin?.position ?? null;
-  const p = issue.pin?.position;
-  if (!p) return { x: (box.min.x + box.max.x) / 2, y: (box.min.y + box.max.y) / 2, z: (box.min.z + box.max.z) / 2 };
-  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-  return { x: clamp(p.x, box.min.x, box.max.x), y: clamp(p.y, box.min.y, box.max.y), z: clamp(p.z, box.min.z, box.max.z) };
+  if (!box) return null;
+  return { x: (box.min.x + box.max.x) / 2, y: (box.min.y + box.max.y) / 2, z: (box.min.z + box.max.z) / 2 };
 }
 function colorIssueElements() {
   if (!viewer) return;
