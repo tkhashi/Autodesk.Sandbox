@@ -218,6 +218,7 @@ function selectIssue(id) {
     colorIssueElements();
     refreshMarkerSel();
   }
+  if (viewerMode === 'obj') showObjForSelected();
 }
 $('dtClose').addEventListener('click', () => { $('detailPanel').hidden = true; });
 $('dtShow3d').addEventListener('click', () => { if (selected) showInViewer(selected); });
@@ -298,8 +299,56 @@ function watchIndexStatus() {
   tick();
 }
 
+// ---- ビューア切り替え（APS Viewer / OBJ ビューア） ----
+const LS_MODE = 'sampled-viewer-mode';
+let viewerMode = localStorage.getItem(LS_MODE) === 'obj' ? 'obj' : 'aps';
+const extractCache = new Map();
+let objViewFailed = false;
+window.__objViewerReady = () => { if (viewerMode === 'obj') showObjForSelected(); };
+window.__objViewerFailed = () => { objViewFailed = true; if (viewerMode === 'obj') setStatV('OBJ ビューアのライブラリ（three.js）を読み込めませんでした。ネットワーク接続を確認してください。'); };
+function applyViewerModeVisual() {
+  const obj = viewerMode === 'obj';
+  $('viewerOuter').classList.toggle('obj-mode', obj);
+  $('objWrap').hidden = !obj;
+  $('viewerWrap').style.display = obj ? 'none' : '';
+  for (const b of $('viewerSwitch').querySelectorAll('button')) b.classList.toggle('on', b.dataset.vm === viewerMode);
+}
+function setViewerMode(m) {
+  viewerMode = m;
+  localStorage.setItem(LS_MODE, m);
+  applyViewerModeVisual();
+  if (m === 'obj') showObjForSelected();
+  else { try { viewer?.resize(); } catch (e) {} }
+}
+for (const b of $('viewerSwitch').querySelectorAll('button')) b.addEventListener('click', () => setViewerMode(b.dataset.vm));
+applyViewerModeVisual();
+async function showObjForSelected() {
+  if (!DATA) return;
+  const i = issue();
+  if (!window.ObjView) { if (objViewFailed) setStatV('OBJ ビューアを読み込めませんでした。'); return; }
+  if (!i?.targetDbId) { ObjView.showMessage('この Issue には対象要素がないため、OBJ で切り出せません。'); setStatV('OBJ 表示：対象要素のない Issue です。'); return; }
+  const t0 = performance.now();
+  try {
+    let res = extractCache.get(i.id);
+    if (!res) {
+      ObjView.showMessage('指摘箇所と周辺を OBJ で抽出しています…');
+      setStatV(`<b>#${i.displayId}</b> の箇所＋周辺を OBJ で抽出中…`);
+      res = await (await fetch('/api/extract?issue=' + encodeURIComponent(i.id))).json();
+      if (res.error) throw new Error(res.error);
+      extractCache.set(i.id, res);
+    }
+    ObjView.show(res.obj, res.targetDbId);
+    const secs = ((performance.now() - t0) / 1000).toFixed(1);
+    setStatV(`<b>#${i.displayId}</b> の箇所＋周辺を表示中（対象1件＋周辺 ${Math.max(0, res.included.length - 1)} 件、同じ階・隣接通り芯などで抽出、${secs} 秒）。対象は赤で表示しています。`);
+  } catch (e) {
+    ObjView.showMessage('OBJ の抽出に失敗しました：' + (e?.message ?? e));
+    setStatV('OBJ の抽出に失敗しました：' + esc(String(e?.message ?? e)));
+  }
+}
+
 // ---- ビューア表示（専用ボタンから） ----
 function showInViewer(id) {
+  if (viewerMode === 'obj') { selectIssue(id); return; } // OBJ モードでは抽出表示に切り替える
   exitOverview(false); // フォーカス表示に移るので一覧モードは解除
   selected = id;
   focusedId = id;

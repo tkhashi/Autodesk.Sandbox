@@ -273,6 +273,96 @@ async function getSnapshot(urn) {
   return snapCache.get(urn);
 }
 
+// ============ 要素＋周辺の OBJ 抽出（OBJ ビューア用。Model Derivative の OBJ ジョブで objectIds を指定する） ============
+import { createHash } from 'node:crypto';
+let tokenJobsCache = null; // 変換ジョブ投入用の広いスコープの 2-legged トークン
+async function getTokenJobs() {
+  if (tokenJobsCache && Date.now() < tokenJobsCache.expiresAt) return tokenJobsCache.access_token;
+  const r = await fetch(BASE + '/authentication/v2/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: basicAuth() },
+    body: new URLSearchParams({ grant_type: 'client_credentials', scope: 'data:read data:write data:create viewables:read' }),
+  });
+  if (!r.ok) throw new Error('jobs token failed: ' + r.status);
+  const j = await r.json();
+  tokenJobsCache = { access_token: j.access_token, expiresAt: Date.now() + (j.expires_in - 300) * 1000 };
+  return tokenJobsCache.access_token;
+}
+const LEVEL_KEYS = ['Level', 'Reference Level', 'Base Level', 'Base Constraint', 'Top Level']; // 壁は Base Constraint が階に相当する
+function levelOf(e) { for (const k of LEVEL_KEYS) if (e?.[k]) return String(e[k]); return null; }
+function parseMark(mark) {
+  const m = String(mark ?? '').match(/^([A-Za-z]+(?:\.\d+)?)-(\d+)$/);
+  return m ? { g: m[1], n: Number(m[2]) } : null;
+}
+function markAdjacent(a, b) {
+  if (a.g === b.g) return Math.abs(a.n - b.n) === 1;
+  return a.n === b.n && a.g.length === 1 && b.g.length === 1 && Math.abs(a.g.charCodeAt(0) - b.g.charCodeAt(0)) === 1;
+}
+// 周辺要素の簡易抽出：隣接する通り芯を最優先し、同タイプ・同じ階で補う（最大48件）
+function pickNeighbors(model, targetExtId) {
+  const idx = model.propsIndex;
+  const t = idx[targetExtId];
+  if (!t) return [];
+  const tLevel = levelOf(t);
+  const tMark = parseMark(t['Column Location Mark']);
+  const scored = [];
+  for (const [ext, e] of Object.entries(idx)) {
+    if (ext === targetExtId || e.objectid == null) continue;
+    const mk = parseMark(e['Column Location Mark']);
+    let score = null;
+    if (tMark && mk && (markAdjacent(tMark, mk) || (mk.g === tMark.g && mk.n === tMark.n))) score = 0;
+    else if (tLevel && levelOf(e) === tLevel && t['Type Name'] && e['Type Name'] === t['Type Name']) score = 1;
+    else if (tLevel && levelOf(e) === tLevel) score = 2;
+    if (score !== null) scored.push({ extId: ext, score });
+  }
+  scored.sort((a, b) => a.score - b.score);
+  return scored.slice(0, 48);
+}
+function objGroupDbIds(objText) {
+  return [...objText.matchAll(/^g Obj\.(\d+)\s*$/gm)].map(m => Number(m[1]));
+}
+async function extractObj(model, objectIds, expectedDbIds, targetDbId) {
+  const hash = createHash('sha1').update(model.key + ':' + [...objectIds].sort((a, b) => a - b).join(',')).digest('hex').slice(0, 16);
+  const cacheFile = path.join(indexCacheDir, 'extract-' + hash + '.json');
+  try { const c = JSON.parse(fs.readFileSync(cacheFile, 'utf8')); if (c?.obj) return c.obj; } catch (e) {}
+  const token = await getTokenJobs();
+  const jr = await fetch(BASE + '/modelderivative/v2/designdata/job', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      input: { urn: model.derivativeUrn },
+      output: { destination: { region: 'us' }, formats: [{ type: 'obj', advanced: { modelGuid: model.viewableGuid, objectIds, exportFileStructure: 'single' } }] },
+    }),
+  });
+  if (!jr.ok) throw new Error('obj job failed: ' + jr.status);
+  const tried = new Set();
+  for (let i = 0; i < 48; i++) {
+    await new Promise(s => setTimeout(s, 5000));
+    const mj = await apsGet(`${BASE}/modelderivative/v2/designdata/${model.derivativeUrn}/manifest`, token);
+    const ders = (mj.derivatives ?? []).filter(d => d.outputType === 'obj' && d.status === 'success');
+    for (const der of ders) {
+      // OBJ の成果物は同じ derivative の children に蓄積されるため、先頭ではなく .obj の子をすべて照合する
+      for (const child of der.children ?? []) {
+        const urn = child.urn;
+        if (!urn || !urn.toLowerCase().endsWith('.obj') || tried.has(urn)) continue;
+        tried.add(urn);
+        const dr = await fetch(`${BASE}/modelderivative/v2/designdata/${model.derivativeUrn}/manifest/${encodeURIComponent(urn)}`, { headers: { Authorization: 'Bearer ' + token } });
+        if (!dr.ok) continue;
+        const obj = await dr.text();
+        const groups = objGroupDbIds(obj);
+        // 要求した要素集合と中身が一致するか、内容で照合する（過去のジョブの成果物と取り違えないため）
+        if (groups.includes(targetDbId) && groups.every(g => expectedDbIds.has(g)) && groups.length >= Math.ceil(expectedDbIds.size * 0.5)) {
+          fs.writeFileSync(cacheFile, JSON.stringify({ obj }));
+          return obj;
+        }
+      }
+    }
+    const anyObj = (mj.derivatives ?? []).find(d => d.outputType === 'obj');
+    if (anyObj?.status === 'failed') throw new Error('obj job failed in translation');
+  }
+  throw new Error('obj job timeout');
+}
+
 // ============ HTTP ルーティング ============
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -292,6 +382,26 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === '/api/index-status') { // 索引の構築状態だけを返す軽いエンドポイント（画面のポーリング用）
       return sendJson(res, 200, { models: models.map(m => ({ key: m.key, short: m.short, indexStatus: m.indexStatus })) });
+    }
+    if (url.pathname === '/api/extract') {
+      // Issue の対象要素＋周辺（同じ階・隣接通り芯など）を OBJ で切り出す
+      const issues = await fetchIssues();
+      const issue = issues.find(i => i.id === url.searchParams.get('issue'));
+      if (!issue?.modelKey || !issue.pin?.externalId) return sendJson(res, 404, { error: 'この Issue には対象要素がありません' });
+      const model = models.find(m => m.key === issue.modelKey);
+      if (!model.propsIndex || !model.ext2dbid) return sendJson(res, 409, { error: 'モデル情報を構築中です', indexStatus: model.indexStatus });
+      const targetEntry = model.propsIndex[issue.pin.externalId];
+      if (!targetEntry?.objectid) return sendJson(res, 404, { error: '対象要素が索引にありません' });
+      const neighbors = pickNeighbors(model, issue.pin.externalId);
+      const objectIds = [...new Set([targetEntry.objectid, ...neighbors.map(n => model.propsIndex[n.extId].objectid)])];
+      const oidToDbId = new Map();
+      for (const [ext, e] of Object.entries(model.propsIndex)) if (e.objectid != null && model.ext2dbid[ext] != null) oidToDbId.set(e.objectid, model.ext2dbid[ext]);
+      const expectedDbIds = new Set(objectIds.map(oid => oidToDbId.get(oid)).filter(x => x != null));
+      const obj = await extractObj(model, objectIds, expectedDbIds, issue.targetDbId);
+      const dbIdToName = new Map();
+      for (const [ext, dbId] of Object.entries(model.ext2dbid)) dbIdToName.set(dbId, model.propsIndex[ext]?.name ?? null);
+      const included = objGroupDbIds(obj).map(dbId => ({ dbId, name: dbIdToName.get(dbId) ?? null, target: dbId === issue.targetDbId }));
+      return sendJson(res, 200, { modelKey: model.key, targetDbId: issue.targetDbId, neighborCount: neighbors.length, included, obj });
     }
     if (url.pathname === '/api/issues/update' && req.method === 'POST') {
       const body = JSON.parse(await readBody(req));

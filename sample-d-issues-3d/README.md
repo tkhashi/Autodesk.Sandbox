@@ -39,3 +39,10 @@ node server.mjs   # http://localhost:3000
 `data/models.json` に1件追加してサーバーを再起動するだけです（索引は起動後に API から自動で構築されます）。viewableGuid は Model Derivative の metadata（3D ビュー一覧）から選びます。なお `tools/extract-model.mjs` は索引の中身をファイルとして確認したい場合の単体ツールとして残しています（サーバーの動作には不要）。
 
 変換ジョブの投入が必要なファイルでは、エンドポイントに注意してください。正しくは **`POST /modelderivative/v2/designdata/job`**（URN はボディに入れる）。`POST /modelderivative/v2/designdata/{urn}/job` は存在せず 404 になります。ACC ハブのファイルでは `x-ads-derivative-scopes` ヘッダ（`b360project.*`、`O2tenant.*`。値はバージョンの derivatives リンクから取得）が必要な場合があります。
+
+## ビューア切り替えと OBJ 抽出表示（v8.9）
+- ビューア左上の小さなボタンで「APS Viewer」と「OBJ」を切り替えられる（選択は localStorage に保存）。
+- OBJ モードでは、選択した Issue の対象要素＋周辺をサーバーが Model Derivative の OBJ ジョブ（objectIds 指定）で切り出し、three.js の軽量ビューアで表示する（対象は赤、周辺はグレー）。APS Viewer 側の処理は従来どおり。
+- 周辺の抽出は簡易版：隣接する通り芯（Column Location Mark）を最優先し、同タイプ・同じ階（Level／Reference Level／Base Level／Base Constraint）で補う（最大48件）。
+- サーバー API：`GET /api/extract?issue=<Issue ID>`（ジョブ投入→manifest ポーリング→OBJ ダウンロード→内容照合。結果は要素集合単位でディスクキャッシュ）。
+- 実測の対応状況：Snowdon 3モデルは抽出成功（構造 49件／建築 29件など）。DACH と sample_architecture は OBJ 変換自体が「No Geometries to extract」で失敗する（ファイル固有。Data Exchange の処理エラーと同じファイル）。その場合は画面にエラーを表示する。
