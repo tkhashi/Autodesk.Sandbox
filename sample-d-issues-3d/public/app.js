@@ -762,6 +762,8 @@ function updateEdges() {
 
 // この機能が消した要素をすべて戻す
 function clearOccluders() {
+  for (const t of occSettleTimers) clearTimeout(t);
+  occSettleTimers = [];
   if (viewer && hiddenOccluders.size) { try { viewer.show([...hiddenOccluders]); } catch (e) {} }
   hiddenOccluders = new Set();
   occHiddenCount = 0;
@@ -844,7 +846,8 @@ function occluderCandidates() {
 }
 
 // 選択中の Issue の要素について、手前の部材を消し直す
-function applyOccluderClearing() {
+let occSettleTimers = [];
+function applyOccluderClearing(settle = false) {
   clearOccluders();
   if (!viewer || !geoLoaded || viewerMode !== 'aps' || occluderRange <= 0) return 0;
   const i = issue() ?? focusedIssue();
@@ -857,6 +860,16 @@ function applyOccluderClearing() {
     occTargetDbId = i.targetDbId;
     const p = viewer.navigation.getPosition();
     occCamPos = { x: p.x, y: p.y, z: p.z };
+    if (overviewOn) setStatV(`<b>#${i.displayId}</b> の見通しのため、手前の部材 <b>${occ.length} 件</b>を非表示にしています（範囲 ${occluderRange}%）。`);
+    // 大きなモデルでは形状のストリーミングが続き、後から届いた部材が
+    // 非表示をすり抜けて表示されることがある（実機報告：DACH で 0% と 100% が同じ見た目）。
+    // 適用直後に数回、再計算して追いかける。
+    if (!settle) {
+      for (const t of occSettleTimers) clearTimeout(t);
+      occSettleTimers = [1200, 3500].map(ms => setTimeout(() => {
+        if (viewer && occTargetDbId === i.targetDbId && occluderRange > 0 && viewerMode === 'aps') applyOccluderClearing(true);
+      }, ms));
+    }
     return occ.length;
   } catch (e) {
     console.error('手前の部材の特定に失敗しました', e);
@@ -971,6 +984,19 @@ function setupViewer(modelKey) {
   const updMarkers = () => { if (overviewOn) updateMarkers(); updateFocusPin(); };
   viewer.addEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, updMarkers);
   viewer.addEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, scheduleOccluderRecompute);
+  // ストリーミングで後から届いた部材が非表示をすり抜けないよう、進捗のたびに
+  // 現在の非表示セットを再主張する（スロットル付き）
+  if (!viewer.__occProgressHooked) {
+    viewer.__occProgressHooked = true;
+    let lastReassert = 0;
+    viewer.addEventListener(Autodesk.Viewing.PROGRESS_UPDATE_EVENT, () => {
+      if (!hiddenOccluders.size || viewerMode !== 'aps') return;
+      const now = performance.now();
+      if (now - lastReassert < 500) return;
+      lastReassert = now;
+      try { viewer.hide([...hiddenOccluders]); } catch (e) {}
+    });
+  }
   viewer.addEventListener(Autodesk.Viewing.ISOLATE_EVENT, updMarkers);
   viewer.addEventListener(Autodesk.Viewing.HIDE_EVENT, updMarkers);
   viewer.addEventListener(Autodesk.Viewing.SHOW_EVENT, updMarkers);
@@ -982,6 +1008,7 @@ function setupViewer(modelKey) {
   viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, () => {
     geoLoaded = true;
     streamingNow = false;
+    occCache = null; // 候補（要素ボックス）キャッシュは形状確定後に作り直す
     updateEdges();
     setViewerLoading(null);
     if (overviewOn) { enterOverview(); return; }
