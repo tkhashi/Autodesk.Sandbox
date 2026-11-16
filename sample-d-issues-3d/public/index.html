@@ -12,8 +12,12 @@ body { font-family: "Hiragino Sans", "Noto Sans JP", sans-serif; margin: 0; padd
 h1 { font-size: 18px; margin: 0 0 10px; }
 .panel { background: #fff; border-radius: 10px; padding: 12px 16px; box-shadow: 0 1px 3px rgba(20,40,60,.08); }
 .panel h2 { font-size: 15px; margin: 0 0 8px; }
-.bottom { display: flex; gap: 14px; flex: 1 1 auto; min-height: 0; margin-top: 14px; }
-.viewer-panel { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.layout { display: flex; gap: 14px; flex: 1 1 auto; min-height: 0; margin-top: 14px; }
+.left-col { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.table-panel { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+.table-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.table-scroll table.issues th { position: sticky; top: 0; z-index: 2; }
+.viewer-panel { flex: 1.15 1 0; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
 /* ---- Issue 表（Forma の Issues 一覧に寄せた見た目） ---- */
 table.issues { width: 100%; border-collapse: collapse; font-size: 13px; }
 table.issues th { background: #fff; color: #3c4a57; text-align: left; padding: 7px 10px; font-weight: 600; white-space: nowrap; border-bottom: 2px solid #d9e2ea; }
@@ -106,7 +110,9 @@ table.issues tbody tr.sel { background: #e8f2fa; }
 <body>
 <h1>指摘事項 拡張デモ②：実 Issue → 要素情報の自動付与 → 3D 表示</h1>
 
-<div class="panel">
+<div class="layout">
+<div class="left-col">
+<div class="panel table-panel">
 <h2>Issues</h2>
 <div class="toolbar">
 <input type="text" id="fltQ" placeholder="Title, ID, or description">
@@ -124,10 +130,12 @@ table.issues tbody tr.sel { background: #e8f2fa; }
 </span>
 </div>
 <div id="idxStat" hidden style="font-size:12.5px;color:#8a5a13;background:#fdf6e0;border:1px solid #ecd9a0;border-radius:6px;padding:6px 10px;margin-bottom:8px"></div>
+<div class="table-scroll">
 <table class="issues">
 <thead id="issueHead"></thead>
 <tbody id="issueRows"><tr class="skel"><td colspan="99"><div class="skel-line"><span class="skel-bar" style="width:44%"></span><span class="skel-bar" style="width:14%"></span><span class="skel-bar" style="width:20%"></span><span class="skel-bar" style="width:10%"></span></div><div class="skel-line"><span class="skel-bar" style="width:44%"></span><span class="skel-bar" style="width:14%"></span><span class="skel-bar" style="width:20%"></span><span class="skel-bar" style="width:10%"></span></div><div class="skel-line"><span class="skel-bar" style="width:44%"></span><span class="skel-bar" style="width:14%"></span><span class="skel-bar" style="width:20%"></span><span class="skel-bar" style="width:10%"></span></div><div class="skel-line"><span class="skel-bar" style="width:44%"></span><span class="skel-bar" style="width:14%"></span><span class="skel-bar" style="width:20%"></span><span class="skel-bar" style="width:10%"></span></div><div class="skel-line"><span class="skel-bar" style="width:44%"></span><span class="skel-bar" style="width:14%"></span><span class="skel-bar" style="width:20%"></span><span class="skel-bar" style="width:10%"></span></div></td></tr></tbody>
 </table>
+</div>
 <div class="pager">
 <button id="btnPrev">前へ</button>
 <span id="pagerInfo">—</span>
@@ -145,7 +153,6 @@ table.issues tbody tr.sel { background: #e8f2fa; }
 </div>
 </div>
 
-<div class="bottom">
 <div class="panel viewer-panel">
 <h2>3D 表示（APS Viewer）</h2>
 <div class="view" id="viewerOuter">
@@ -167,6 +174,7 @@ table.issues tbody tr.sel { background: #e8f2fa; }
 <div class="msg" id="viewerMsg"><span class="vl-spin"></span><span id="viewerMsgText">Issue データを読み込んでいます…</span></div>
 </div>
 <div class="stat" id="statV">—</div>
+</div>
 </div>
 
 <aside class="panel detail" id="detailPanel" hidden>

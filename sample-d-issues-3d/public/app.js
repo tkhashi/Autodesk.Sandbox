@@ -237,12 +237,20 @@ function setDetailThumb(i) {
   else if (i.modelKey) img.src = '/api/thumbnail?model=' + encodeURIComponent(i.modelKey);
   else img.hidden = true;
 }
+// 詳細パネルの表示切替。右カラムの出現・消滅でビューアの幅が変わるため、
+// レイアウト確定後に Viewer へリサイズを伝える
+function setDetailVisible(on) {
+  const p = $('detailPanel');
+  if (p.hidden === !on) return;
+  p.hidden = !on;
+  requestAnimationFrame(() => { try { viewer?.resize(); } catch (e) {} });
+}
 function selectIssue(id) {
   selected = id;
   markSelectedRow();
   const i = issue();
-  if (!i) { $('detailPanel').hidden = true; return; }
-  $('detailPanel').hidden = false;
+  if (!i) { setDetailVisible(false); return; }
+  setDetailVisible(true);
   $('dtId').textContent = `Issue #${i.displayId}`;
   $('dtTitle').value = i.title ?? '';
   $('dtStatus').innerHTML = statusOptions(i).map(s => `<option value="${esc(s)}" ${s === i.status ? 'selected' : ''}>${esc(STATUS[s] ?? s)}</option>`).join('');
@@ -267,7 +275,7 @@ function selectIssue(id) {
   }
   if (viewerMode === 'obj') showObjForSelected();
 }
-$('dtClose').addEventListener('click', () => { $('detailPanel').hidden = true; });
+$('dtClose').addEventListener('click', () => setDetailVisible(false));
 $('dtShow3d').addEventListener('click', () => { if (selected) showInViewer(selected); });
 $('dtSave').addEventListener('click', async () => {
   const i = issue();
