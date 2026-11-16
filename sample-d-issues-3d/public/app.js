@@ -509,7 +509,7 @@ function buildMarkers() {
     el.title = `#${i.displayId} ${i.title}`;
     el.addEventListener('click', () => {
       selectIssue(i.id);
-      if (overviewOn) { colorIssueElements(); refreshMarkerSel(); }
+      if (overviewOn) { colorIssueElements(); refreshMarkerSel(); applyOccluderClearing(); }
     });
     layer.appendChild(el);
     // 引き出し線（ピン位置の点＋線）で、ラベルがどの箇所を指すかを示す
@@ -555,15 +555,13 @@ function updateMarkers() {
 }
 function enterOverview() {
   if (!viewer || !geoLoaded) return;
-  const dbIds = issuesOnCurrentModel().map(i => i.targetDbId);
-  if (dbIds.length) applyContextFade(dbIds); // Issue の要素以外は材質のまま透明化する
-  else restoreContextFade();
+  applyOccluderClearing(); // 選択中の Issue の手前の部材だけを消す
   viewer.clearThemingColors();
   colorIssueElements();
   buildMarkers();
   updateFocusPin(); // 一覧モード中はフォーカスピンを隠す
   const n = issuesOnCurrentModel().length;
-  setStatV(`指摘事項一覧を表示中（このモデルの Issue ${n} 件）。色はステータス別、選択中は赤。${contextTransparency === 0 ? '透明化オフ：モデル全体をそのまま表示しています。' : 'Issue の要素以外は透明表示（透明度 ' + contextTransparency + '%）です。'}ラベルをクリックすると詳細が開きます。`);
+  setStatV(`指摘事項一覧を表示中（このモデルの Issue ${n} 件）。色はステータス別、選択中は赤。${occHiddenCount ? '選択中の Issue の手前にある部材 ' + occHiddenCount + ' 件を消して、奥を見通せるようにしています。' : ''}ラベルをクリックすると詳細が開きます。`);
   syncOverviewBtn();
 }
 function exitOverview(restore = true) {
@@ -582,113 +580,134 @@ function toggleOverview() {
 }
 window.addEventListener('resize', () => { if (overviewOn) updateMarkers(); updateFocusPin(); });
 
-// ---- まわりの部材の透明化（ゴースト表示は使わない） ----
-// LMV のゴースト表示は、対象外を単色のフェード用マテリアルで描くため、部材が重なる
-// 箇所でエッジが重なって見づらくなる。ここでは isolate もゴーストも使わず、対象外の
-// フラグメントのマテリアルを「元の材質のまま透明にした複製」に差し替える
-// （FragmentList.setMaterial。LMV 本体の実装で確認）。色・質感は元のまま薄くなる。
-// 透明度はスライダ（0〜97%）で調整し、0% は透明化オフ（元の表示）。
-let contextTransparency = (() => {
-  const raw = localStorage.getItem(LS_GHOST);
+// ---- 対象の手前の部材を消す（オクルーダ除去） ----
+// 目的（2026-11-16 ユーザー定義）：建物の奥にある部材や、部材と部材の間にある
+// 部材を見えるようにすること。方式は、カメラと対象の間にある部材だけを特定して
+// Viewer 標準の非表示（hide）で消す。材質には一切触らないため、全体透明化で
+// 頻発した描画の不安定さ（材質書き換えの競合・描画順の乱れ）が起きない。
+// 消す範囲はスライダで調整する（対象のボックスを広げた分だけ広く消す。0% はオフ）。
+// カメラを動かしたら見通しが追随するよう、移動後に再計算する（デバウンス付き）。
+const LS_OCC = 'sampled-occluder-range';
+let occluderRange = (() => {
+  const raw = localStorage.getItem(LS_OCC);
   const n = raw === null ? NaN : Number(raw);
-  return Number.isFinite(n) ? Math.min(97, Math.max(0, n)) : 90;
+  return Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : 50;
 })();
-let contextAppliedOff = null; // 直前に適用した「透明度0%（透明化オフ）」かどうか
-let fadedMats = null;        // Map<material, {t, o, d}> 書き換えた材質と元の値
-let streamingNow = false;    // 逐次配信中か（エッジ制御用）
+let hiddenOccluders = new Set(); // この機能が消した要素（戻す時に使う）
+let occHiddenCount = 0;          // 直近の消去件数（ステータス表示用）
+let occTargetDbId = null;        // 消去の対象要素
+let occCamPos = null;            // 前回計算時のカメラ位置
+let streamingNow = false;        // 逐次配信中か（エッジ制御用）
 
-// エッジ（部材の輪郭線）は配信中と透明化中は切る。輪郭線は不透明なまま残るため、
-// 透明化しても「線の檻」に見えてしまう（ユーザー指摘の見づらさの主因）。
+// エッジ（部材の輪郭線）は逐次配信中だけ切る（描画負荷の軽減）。
 function updateEdges() {
   if (!viewer) return;
-  try { viewer.setDisplayEdges(!streamingNow && !fadedMats); } catch (e) {}
+  try { viewer.setDisplayEdges(!streamingNow); } catch (e) {}
 }
 
-// 材質の変更を描画へ反映させるための「再描画キック」。
-// LMV は材質プロパティを変えただけでは描画リストを作り直さず、画面が古いままに
-// なる（ローカル Viewer リグで実測：invalidate だけでは不変、カメラを動かすと
-// 初めて反映される）。同じ位置・注視点で setView すると描画リストが再構築され、
-// カメラは実質動かずに変更が反映される。
-let kickTimer = 0;
-function kickRender(immediate = false) {
-  if (!viewer) return;
-  const run = () => {
-    try {
-      const nav = viewer.navigation;
-      nav.setView(nav.getPosition(), nav.getTarget());
-    } catch (e) { try { viewer.impl.invalidate(false, true, false); } catch (e2) {} }
-  };
-  if (immediate) { run(); return; }
-  clearTimeout(kickTimer);
-  kickTimer = setTimeout(run, 120);
+// この機能が消した要素をすべて戻す
+function clearOccluders() {
+  if (viewer && hiddenOccluders.size) { try { viewer.show([...hiddenOccluders]); } catch (e) {} }
+  hiddenOccluders = new Set();
+  occHiddenCount = 0;
+  occTargetDbId = null;
 }
 
-function restoreContextFade() {
-  if (fadedMats) {
-    for (const [m, orig] of fadedMats) { m.transparent = orig.t; m.opacity = orig.o; m.depthWrite = orig.d; }
-    fadedMats = null;
-  }
-  updateEdges();
-  kickRender(true);
-}
-
-// keepDbIds 以外の部材を透明化する。keepDbIds が空なら何もしない。
-// 方式は「材質のその場変更」：元の材質自体の transparent / opacity / depthWrite を
-// 書き換える（LMV 自身のフェード実装もこの方式で、描画への反映は kickRender で担保）。
-// 適用と復元は必ず同期的に一括で行う。以前の非同期チャンク適用＋対象材質の clone
-// 保護は、スライダ操作や再入と競合して「書き換え途中の材質が残る」壊れた描画を
-// 招いた（2026-11-16 実機報告）。clone は使わず、対象だけが使う材質は書き換え対象
-// から外す。対象と周囲で共有される材質は周囲と一緒に薄くなるが、対象は別途
-// テーマカラー（赤／ステータス色）で塗るため識別は保たれる。
-function applyContextFade(keepDbIds) {
-  try {
-    restoreContextFade();
-    if (!viewer || !geoLoaded || !keepDbIds.length || contextTransparency <= 0) { updateEdges(); return; }
-    const frags = viewer.model.getFragmentList();
-    const tree = viewer.model.getInstanceTree();
-    if (!frags || !tree) return;
-    const keepFrags = new Set();
-    for (const dbId of keepDbIds) tree.enumNodeFragments(dbId, (f) => keepFrags.add(f), true);
-    // 書き換えるのは「対象以外のフラグメントが使う材質」だけ。対象だけが使う材質は
-    // この走査では拾われないため自動的に保護される。対象と共有される材質は一緒に
-    // 薄くなる（対象はテーマカラーで識別できる）。
-    const opacity = 1 - contextTransparency / 100;
-    fadedMats = new Map();
-    const total = frags.getCount();
-    for (let fid = 0; fid < total; fid++) {
-      if (keepFrags.has(fid)) continue;
-      const m = frags.getMaterial(fid);
-      if (!m || fadedMats.has(m)) continue;
-      fadedMats.set(m, { t: m.transparent, o: m.opacity, d: m.depthWrite });
+// 線分（始点 o、方向 d、パラメータ 0..tMax）がボックス b と交わるか（スラブ法）
+function segmentHitsBox(o, d, tMax, b) {
+  let tmin = 0, tmax = tMax;
+  for (const ax of ['x', 'y', 'z']) {
+    if (Math.abs(d[ax]) < 1e-9) { if (o[ax] < b.min[ax] || o[ax] > b.max[ax]) return false; }
+    else {
+      let t1 = (b.min[ax] - o[ax]) / d[ax], t2 = (b.max[ax] - o[ax]) / d[ax];
+      if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
+      tmin = Math.max(tmin, t1); tmax = Math.min(tmax, t2);
+      if (tmin > tmax) return false;
     }
-    for (const m of fadedMats.keys()) { m.transparent = true; m.opacity = opacity; m.depthWrite = false; }
-    updateEdges();
-    kickRender(true);
+  }
+  return true;
+}
+
+// カメラと対象（targetDbId）の間にある要素の dbId 一覧を返す。
+// 判定：カメラから「拡大した対象ボックスの8隅＋中心」へ引いた線分のどれかが、
+// 要素のボックスと対象より手前で交わるか。対象自身・その祖先と子孫・この
+// モデルの他の Issue 要素は消さない。
+function computeOccluders(targetDbId) {
+  const tree = viewer.model.getInstanceTree();
+  const tBox = nodeWorldBox(targetDbId);
+  if (!tree || !tBox) return [];
+  const cam = viewer.navigation.getPosition();
+  const C = { x: cam.x, y: cam.y, z: cam.z };
+  const center = { x: (tBox.min.x + tBox.max.x) / 2, y: (tBox.min.y + tBox.max.y) / 2, z: (tBox.min.z + tBox.max.z) / 2 };
+  const f = 1 + occluderRange / 100 * 2; // 消す範囲（対象ボックスの拡大率。50%→2倍、100%→3倍）
+  const exMin = { x: center.x - (center.x - tBox.min.x) * f, y: center.y - (center.y - tBox.min.y) * f, z: center.z - (center.z - tBox.min.z) * f };
+  const exMax = { x: center.x + (tBox.max.x - center.x) * f, y: center.y + (tBox.max.y - center.y) * f, z: center.z + (tBox.max.z - center.z) * f };
+  const ends = [center];
+  for (const x of [exMin.x, exMax.x]) for (const y of [exMin.y, exMax.y]) for (const z of [exMin.z, exMax.z]) ends.push({ x, y, z });
+  const rays = ends.map(e => ({ o: C, d: { x: e.x - C.x, y: e.y - C.y, z: e.z - C.z } }));
+  const distC = Math.hypot(center.x - C.x, center.y - C.y, center.z - C.z);
+  const excluded = new Set([targetDbId]);
+  let par = targetDbId;
+  while (true) { const p = tree.getNodeParent(par); if (!p || p === par) break; excluded.add(p); par = p; }
+  (function mark(id) { excluded.add(id); tree.enumNodeChildren(id, c => mark(c)); })(targetDbId);
+  for (const i of issuesOnCurrentModel()) excluded.add(i.targetDbId);
+  const result = [];
+  (function walk(id) {
+    if (!excluded.has(id)) {
+      let own = 0;
+      tree.enumNodeFragments(id, () => own++, false);
+      if (own > 0) {
+        const b = nodeWorldBox(id);
+        if (b) {
+          const bcx = (b.min.x + b.max.x) / 2, bcy = (b.min.y + b.max.y) / 2, bcz = (b.min.z + b.max.z) / 2;
+          const br = Math.hypot(b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z) / 2;
+          if (Math.hypot(bcx - C.x, bcy - C.y, bcz - C.z) - br < distC) {
+            for (const r of rays) { if (segmentHitsBox(r.o, r.d, 1, b)) { result.push(id); break; } }
+          }
+        }
+      }
+    }
+    tree.enumNodeChildren(id, c => walk(c));
+  })(tree.getRootId());
+  return result;
+}
+
+// 選択中の Issue の要素について、手前の部材を消し直す
+function applyOccluderClearing() {
+  clearOccluders();
+  if (!viewer || !geoLoaded || viewerMode !== 'aps' || occluderRange <= 0) return 0;
+  const i = issue() ?? focusedIssue();
+  if (!i?.targetDbId || i.modelKey !== viewerModelKey) return 0;
+  try {
+    const occ = computeOccluders(i.targetDbId);
+    if (occ.length) viewer.hide(occ);
+    hiddenOccluders = new Set(occ);
+    occHiddenCount = occ.length;
+    occTargetDbId = i.targetDbId;
+    const p = viewer.navigation.getPosition();
+    occCamPos = { x: p.x, y: p.y, z: p.z };
+    return occ.length;
   } catch (e) {
-    console.error('透明化に失敗しました', e);
-    setStatV('透明化に失敗しました：' + esc(e?.message ?? e));
+    console.error('手前の部材の特定に失敗しました', e);
+    setStatV('手前の部材の特定に失敗しました：' + esc(e?.message ?? e));
+    return 0;
   }
 }
 
-// スライダ変更時：書き換え済み材質の opacity だけを更新する（軽い）
-function updateFadeOpacity() {
-  if (!fadedMats) return;
-  const opacity = 1 - contextTransparency / 100;
-  for (const m of fadedMats.keys()) m.opacity = opacity;
-  kickRender(); // デバウンスして反映（材質変更だけでは画面が変わらないため）
+// カメラ移動後に見通しを追随させる（デバウンス＋移動量のしきい値）
+let occTimer = 0;
+function scheduleOccluderRecompute() {
+  if (!occTargetDbId || occluderRange <= 0 || viewerMode !== 'aps') return;
+  clearTimeout(occTimer);
+  occTimer = setTimeout(() => {
+    if (!viewer) return;
+    try {
+      const p = viewer.navigation.getPosition();
+      if (!occCamPos || Math.hypot(p.x - occCamPos.x, p.y - occCamPos.y, p.z - occCamPos.z) > 0.5) applyOccluderClearing();
+    } catch (e) {}
+  }, 220);
 }
 
-
-function onContextTransparencyChanged() {
-  const off = contextTransparency === 0;
-  if (contextAppliedOff !== null && contextAppliedOff !== off && geoLoaded) {
-    if (overviewOn) enterOverview();
-    else applySelection();
-  } else if (fadedMats) {
-    updateFadeOpacity();
-  }
-  contextAppliedOff = off;
-}
 function syncGhostBtn() {
   const p = $('ghostPanel');
   window.dispatchEvent(new CustomEvent('demo-ghost-state', { detail: p ? !p.hidden : false }));
@@ -697,15 +716,16 @@ function toggleGhostPanel() {
   const p = $('ghostPanel');
   if (!p) return;
   p.hidden = !p.hidden;
-  if (!p.hidden) { $('ghostRange').value = contextTransparency; $('ghostVal').textContent = contextTransparency + '%'; }
+  if (!p.hidden) { $('ghostRange').value = occluderRange; $('ghostVal').textContent = occluderRange + '%'; }
   syncGhostBtn();
 }
 const ghostRangeEl = $('ghostRange');
 if (ghostRangeEl) ghostRangeEl.addEventListener('input', () => {
-  contextTransparency = Number(ghostRangeEl.value);
-  $('ghostVal').textContent = contextTransparency + '%';
-  localStorage.setItem(LS_GHOST, String(contextTransparency));
-  onContextTransparencyChanged();
+  occluderRange = Number(ghostRangeEl.value);
+  $('ghostVal').textContent = occluderRange + '%';
+  localStorage.setItem(LS_OCC, String(occluderRange));
+  if (occluderRange <= 0) clearOccluders();
+  else applyOccluderClearing();
 });
 
 // 対象要素へカメラを寄せる。Viewer 標準の fitToView だと部材が画面いっぱいに
@@ -735,13 +755,13 @@ function applySelection() {
   const i = focusedIssue();
   if (!viewer || !rootLoaded || !i) return;
   if (!i.targetDbId || i.modelKey !== viewerModelKey) {
-    if (!i.targetDbId) { restoreContextFade(); viewer.showAll(); viewer.clearThemingColors(); setStatV('この Issue は対象モデルへのピンがないため、モデル全体を表示しています。'); }
+    if (!i.targetDbId) { clearOccluders(); viewer.showAll(); viewer.clearThemingColors(); setStatV('この Issue は対象モデルへのピンがないため、モデル全体を表示しています。'); }
     updateFocusPin();
     return;
   }
   if (!viewer.model?.getFragmentList?.()) return;
   try {
-    applyContextFade([i.targetDbId]); // 対象以外は材質のまま透明化する（isolate／ゴーストは使わない）
+    applyOccluderClearing(); // 対象の手前の部材だけを消す（材質には触らない）
     viewer.clearThemingColors();
     // カメラのフィットは、形状の読み込みが終わってから対象ごとに1回だけ行う。
     // 読み込み途中のイベント（ルート読み込み時など）で繰り返すと、不完全な範囲への
@@ -757,7 +777,7 @@ function applySelection() {
   paintFocusTarget(i.targetDbId);
   updateFocusPin();
   if (geoLoaded) {
-    setStatV(`<b>#${i.displayId}</b> の対象要素を表示中（${contextTransparency === 0 ? '透明化オフ：モデル全体をそのまま表示' : '対象以外は透明表示（透明度 ' + contextTransparency + '%）'}）。`);
+    setStatV(`<b>#${i.displayId}</b> の対象要素を表示中（${occHiddenCount ? '手前の部材 ' + occHiddenCount + ' 件を非表示にして見通しを確保' : '手前の部材は非表示にしていません'}）。`);
     scheduleCapture(i);
   }
 }
@@ -769,12 +789,13 @@ function setupViewer(modelKey) {
   if (viewer) { clearMarkers(); try { viewer.finish(); } catch (e) {} viewer = null; }
   $('viewerWrap').innerHTML = '';
   setViewerLoading(`モデル（${esc(m.short)}）を読み込んでいます…`);
-  viewerModelKey = modelKey; rootLoaded = false; geoLoaded = false; fittedFor = null; fadedMats = null; streamingNow = true;
+  viewerModelKey = modelKey; rootLoaded = false; geoLoaded = false; fittedFor = null; hiddenOccluders = new Set(); occHiddenCount = 0; occTargetDbId = null; streamingNow = true;
   viewer = new Autodesk.Viewing.GuiViewer3D($('viewerWrap'));
   viewer.start();
   viewer.loadExtension('DemoToolbarExtension').then(() => syncOverviewBtn()).catch(() => {});
   const updMarkers = () => { if (overviewOn) updateMarkers(); updateFocusPin(); };
   viewer.addEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, updMarkers);
+  viewer.addEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, scheduleOccluderRecompute);
   viewer.addEventListener(Autodesk.Viewing.ISOLATE_EVENT, updMarkers);
   viewer.addEventListener(Autodesk.Viewing.HIDE_EVENT, updMarkers);
   viewer.addEventListener(Autodesk.Viewing.SHOW_EVENT, updMarkers);
@@ -837,7 +858,7 @@ if (window.Autodesk?.Viewing?.Extension) {
         this.btnOverview.onClick = () => window.dispatchEvent(new CustomEvent('demo-toggle-overview'));
         window.addEventListener('demo-overview-state', (e) => { try { this.btnOverview.setState(e.detail ? 0 : 1); } catch (err) {} });
         this.btnGhost = new Autodesk.Viewing.UI.Button('demo-ghost-opacity');
-        this.btnGhost.setToolTip('まわりの透明度');
+        this.btnGhost.setToolTip('対象の手前を消す');
         this.btnGhost.addClass('tb-ghost-btn');
         this.btnGhost.onClick = () => window.dispatchEvent(new CustomEvent('demo-toggle-ghost-panel'));
         window.addEventListener('demo-ghost-state', (e) => { try { this.btnGhost.setState(e.detail ? 0 : 1); } catch (err) {} });
@@ -899,7 +920,7 @@ initViewer();
     if (first) selectIssue(first.id); // 詳細だけ開く。ビューア表示は専用ボタンから
     // 初期化の競合対策：Viewer の準備が先に終わっていて、データ未着でモデルを
     // 作れなかった場合は、データが揃ったこの時点で必ずモデル読み込みを始める
-    if (viewerReady && !viewer) setupViewer(DATA.models[0]?.key ?? 'dach');
+    if (viewerReady && !viewer) setupViewer(focusedIssue()?.modelKey ?? DATA.models[0]?.key ?? 'dach');
     watchIndexStatus();
   } catch (e) {
     $('issueRows').innerHTML = '<tr><td colspan="99" style="color:#c0392b">Issue の取得に失敗しました。</td></tr>';
