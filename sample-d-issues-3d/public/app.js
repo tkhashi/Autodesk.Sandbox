@@ -1110,6 +1110,30 @@ function applySelection() {
   }
 }
 
+// 表示する viewable の geometry ノードを選ぶ。
+// models.json の guid はグラフィックスリソース（SVF）の guid で、geometry ノード自身の
+// guid とは別物。findByGuid(guid) はリソースノードを返してしまい、それをそのまま
+// loadDocumentNode に渡すと Viewer が「The file extension loaded into the Viewer is
+// not supported」エラーになる（v8.34 初版の回帰、2026-11-17 実機報告）。
+// そのため「配下にその guid のリソースを含む geometry ノード」を探して返す。
+// 見つからなければ既定ジオメトリにフォールバックする。
+function pickViewableNode(doc, guid) {
+  const root = doc.getRoot();
+  if (guid && root.traverse) {
+    let found = null;
+    root.traverse((n) => {
+      if (found) return true;
+      if (n.isGeometry && n.isGeometry()) {
+        let hit = false;
+        n.traverse((c) => { if (c.data && c.data.guid === guid) { hit = true; return true; } });
+        if (hit) { found = n; return true; }
+      }
+    });
+    if (found) return found;
+  }
+  return root.getDefaultGeometry();
+}
+
 function setupViewer(modelKey) {
   const m = DATA?.models.find(x => x.key === modelKey);
   if (!m || !window.Autodesk) return;
@@ -1162,10 +1186,8 @@ function setupViewer(modelKey) {
   Autodesk.Viewing.Document.load('urn:' + m.urn, (doc) => {
     // 既定ジオメトリ任せにしない：Snowdon 建築の既定は壁だけの viewable「Coord - Arch Walls」で、
     // 外灯・藤棚・植栽などがそもそも描画されなかった（2026-11-17 ユーザー指摘）。
-    // models.json で指定した viewable（全カテゴリの「New Construction」等）を GUID で明示的に開く。
-    const root = doc.getRoot();
-    const node = (m.guid && root.findByGuid?.(m.guid)) || root.getDefaultGeometry();
-    viewer.loadDocumentNode(doc, node);
+    // models.json で指定した viewable（全カテゴリの「New Construction」等）を明示的に開く。
+    viewer.loadDocumentNode(doc, pickViewableNode(doc, m.guid));
     setStatV(`モデル（${esc(m.short)}）を読み込んでいます（逐次配信）…`);
   }, (code, msg2) => { setStatV('モデルの読み込みに失敗しました：' + code + ' ' + esc(msg2 ?? '')); setViewerLoading('モデルの読み込みに失敗しました：' + code); });
 }

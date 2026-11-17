@@ -221,7 +221,7 @@ Forma（Autodesk Construction Cloud、以下 ACC）の実 Issue を Issues API �
 
 ### 6.4 ビューア共通
 
-- Viewer は APS Viewer（GuiViewer3D）。モデルは SVF の逐次配信で読み込む（遅延読み込み）。読み込むビューは既定ジオメトリ任せにせず、`data/models.json` の viewableGuid で指定した viewable を `findByGuid` で明示的に開く（v8.34。Snowdon 建築の既定は壁だけの viewable で、全カテゴリが表示されなかった）。GUID で見つからない場合のみ既定ジオメトリにフォールバックする。
+- Viewer は APS Viewer（GuiViewer3D）。モデルは SVF の逐次配信で読み込む（遅延読み込み）。読み込むビューは既定ジオメトリ任せにせず、`data/models.json` の viewableGuid で指定した viewable を明示的に開く（v8.34。Snowdon 建築の既定は壁だけの viewable で、全カテゴリが表示されなかった）。viewableGuid はグラフィックスリソース（SVF）の GUID で geometry ノード自身の GUID とは別物のため、選択は「配下にその GUID のリソースを含む geometry ノード」を探して行う（`findByGuid` が返すリソースノードを直接開くと Viewer が未対応エラーになる）。見つからない場合のみ既定ジオメトリにフォールバックする。
 - **ピン座標の座標系（v8.34）**：Forma 画面で起票されたピンは Viewer のワールド座標。一方、API 起票のピン（スナップショットなし）には SVF2 側の座標系（Revit 内部座標 − refPoint）で記録されたものがある（履歴グラフ実験の #43〜47 で実測）。対象要素が表示モデル内に解決できる場合は読み込み完了後に要素ボックスへ付け直すため影響しない。解決できない場合に限り、モデルに pinFrame（実測した変換：world ＝ affine・(pin ＋ refPoint)、シーン座標 ＝ world − globalOffset）があれば変換して先行表示する。変換は snowdonarch のみ（他モデルは対象ピンなし）。
 - **初期化シーケンス（v8.28）**：Viewer の初期化と `/api/issues` の取得は並行するが、**データが届く前に初期化だけ終わった場合はモデルを読み始めない**。データ到着側の初期処理が、選択中の Issue のモデルで読み込みを開始する（先頭モデルで読み始めて切り替える二重読み込みの防止）。
 - **初期選択**：データ到着時、対象要素を持つ先頭の Issue を選択して詳細だけを開く（ビューア表示はしない）。ビューアの初期モデルはその Issue のモデル。
