@@ -368,6 +368,10 @@ async function reloadIssuesSoft() {
   buildTable();
   const editing = $('detailPanel').contains(document.activeElement);
   if (keep && !editing) selectIssue(keep);
+  // 先行表示の段階（形状の読み込み前）で一覧を取り直したら、ピンアンカーのマーカーも
+  // 作り直す（サーバーボックスの到着で、先行表示の位置が最初から正しくなるため。v8.36。
+  // 読み込み完了後は実ジオメトリのボックスアンカーが正なので作り直さない）
+  if (viewer && overviewOn && rootLoaded && !geoLoaded) { buildMarkers(); markersBuiltFor = markersKey(); }
   // 表示中のモデルが重ね表示に対応したのに、ビューアが通常表示で作られていたら作り直す
   const cm = DATA.models.find(x => x.key === viewerModelKey);
   if (viewer && viewerMode === 'aps' && cm?.latest && !overlayExpected && !overlayDisabledKeys.has(cm.key)) {
@@ -383,12 +387,12 @@ function watchIndexStatus() {
     el.textContent = '一部のモデル情報の構築に失敗しました（そのモデルの Issue は要素情報なしで表示しています）。';
   };
   if ((DATA?.models ?? []).some(m => m.indexStatus === 'error')) showFailed();
-  if (!(DATA?.models ?? []).some(m => m.indexStatus === 'building' || m.indexStatus === 'idle' || m.diffStatus === 'building' || m.overlayStatus === 'building')) return;
+  if (!(DATA?.models ?? []).some(m => m.indexStatus === 'building' || m.indexStatus === 'idle' || m.diffStatus === 'building' || m.overlayStatus === 'building' || m.pinBoxStatus === 'building')) return;
   let tries = 0;
   const tick = async () => {
     let ms = [];
     try { ms = (await (await fetch('/api/index-status')).json()).models ?? []; } catch (e) {}
-    const pending = ms.filter(m => m.indexStatus === 'building' || m.indexStatus === 'idle' || m.diffStatus === 'building' || m.overlayStatus === 'building');
+    const pending = ms.filter(m => m.indexStatus === 'building' || m.indexStatus === 'idle' || m.diffStatus === 'building' || m.overlayStatus === 'building' || m.pinBoxStatus === 'building');
     const maxTries = pending.some(m => m.diffStatus === 'building') ? 400 : 60; // Diff は索引より時間がかかるため長めに待つ
     if (pending.length && tries++ < maxTries) {
       el.hidden = false;
@@ -612,24 +616,59 @@ function anchorFor(issue) {
 // ただし API 起票のピン（スナップショットなし）には例外がある：履歴グラフ実験で起票された
 // #43〜47 は SVF2 側の座標系（Revit 内部座標 − refPoint）で記録されており、そのまま投影すると
 // 実物から大きくずれる（2026-11-17 実測。ピンの値は「内部座標中心 − refPoint」と小数第2位まで
-// 一致）。対象要素が表示中のモデルに存在しない（＝ボックスへ付け直せない）場合に限り、
-// models.json の pinFrame（実測した変換）でシーン座標へ変換して先行表示する。
-// サーバー側の索引は使わず、Forma（Issues API）が持つデータだけで先行表示する。
+// 一致）。
+// ピンの座標系は API のフィールドからは判別できない（2026-11-17 実測）ため、候補を2つ
+// 用意して幾何的に判定する（v8.36）：
+//   候補A（クラシック系）＝ 生のピン値そのまま
+//   候補B（SVF2 系）＝ models.json の pinFrame（実測した変換）でシーン座標へ変換した値
+// サーバーが対象要素のボックス（ピン時点の版の Model Properties 索引 bbox をワールドへ
+// 変換した elemBoxWorld）を返している場合は、読み込んだルートの globalOffset でシーン
+// 座標に直し、ボックス内（マージン付き）に入る候補を採用する。ボックスが無い／どちらも
+// 入らない／両方入る場合は、従来の判定（スナップショットなし＆要素が解決できないピン
+// だけ変換する）にフォールバックする。
+// 重ね表示（最新版が主表示）の間も同じ判定を使う：サーバーボックスは基準版側のワールド
+// 座標だが、版間でモデルの配置（globalOffset・内部座標系）が変わらなければ、候補も
+// ボックスも同じシーンに載る。配置が変わった場合はどちらもボックスに入らず従来挙動に
+// 落ちる（安全側）。effTarget の「重ね表示の準備中はボックスアンカーを返さない」ガード
+// には触らない（ここはあくまでピン座標による先行表示の判定）。
+function pinConvertedPos(p, mf, go) {
+  const [rx, ry, rz] = mf.refPoint, A = mf.affine;
+  const sx = p.x + rx, sy = p.y + ry, sz = p.z + rz;
+  return {
+    x: A[0][0] * sx + A[0][1] * sy + A[0][2] * sz + A[0][3] - go.x,
+    y: A[1][0] * sx + A[1][1] * sy + A[1][2] * sz + A[1][3] - go.y,
+    z: A[2][0] * sx + A[2][1] * sy + A[2][2] * sz + A[2][3] - go.z,
+  };
+}
+function pinInBox(pos, box, margin) {
+  return pos.x >= box.min.x - margin && pos.x <= box.max.x + margin
+    && pos.y >= box.min.y - margin && pos.y <= box.max.y + margin
+    && pos.z >= box.min.z - margin && pos.z <= box.max.z + margin;
+}
 function pinAnchorFor(issue) {
   const p = issue?.pin?.position;
   if (!p || typeof p.x !== 'number' || typeof p.y !== 'number' || typeof p.z !== 'number') return null;
+  const classic = { x: p.x, y: p.y, z: p.z };
   const mf = DATA?.models.find(x => x.key === issue.modelKey)?.pinFrame;
   const go = viewer?.model?.getData?.()?.globalOffset;
-  if (mf && go && !issue.snapshotUrn && !issue.targetDbId) {
-    const [rx, ry, rz] = mf.refPoint, A = mf.affine;
-    const sx = p.x + rx, sy = p.y + ry, sz = p.z + rz;
-    return {
-      x: A[0][0] * sx + A[0][1] * sy + A[0][2] * sz + A[0][3] - go.x,
-      y: A[1][0] * sx + A[1][1] * sy + A[1][2] * sz + A[1][3] - go.y,
-      z: A[2][0] * sx + A[2][1] * sy + A[2][2] * sz + A[2][3] - go.z,
+  if (!mf || !go) return classic; // 変換の材料がないモデルでは候補は1つだけ（従来どおり）
+  const conv = pinConvertedPos(p, mf, go);
+  const bw = issue.elemBoxWorld;
+  if (bw && Array.isArray(bw.min) && Array.isArray(bw.max)) {
+    const box = {
+      min: { x: bw.min[0] - go.x, y: bw.min[1] - go.y, z: bw.min[2] - go.z },
+      max: { x: bw.max[0] - go.x, y: bw.max[1] - go.y, z: bw.max[2] - go.z },
     };
+    // マージンはシーン単位（フィート、約30cm）。2候補は座標系が違うため桁違いに
+    // 離れており、この程度のマージンで判定が揺れることはない
+    const inClassic = pinInBox(classic, box, 1);
+    const inConv = pinInBox(conv, box, 1);
+    if (inConv && !inClassic) return conv;
+    if (inClassic && !inConv) return classic;
+    // 両方入る／どちらも入らない場合は従来の判定へフォールバックする
   }
-  return { x: p.x, y: p.y, z: p.z };
+  if (!issue.snapshotUrn && !issue.targetDbId) return conv;
+  return classic;
 }
 // マーカー構築済みキーは段階も含める：読み込み中（ピン座標アンカー）→ 完了後
 // （ボックスアンカー）でキーが変わり、完了時に作り直されて線の先が部材に合い直す。

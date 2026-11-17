@@ -271,6 +271,7 @@ function enrich(issue, types, users, tips) {
     permittedStatuses: issue.permittedStatuses ?? null, customAttributes: issue.customAttributes ?? [],
     attachmentCount: issue.attachmentCount ?? 0, commentCount: issue.commentCount ?? 0,
     pin: null, element: null, targetDbId: null, targetDbIdLatest: null, modelKey: null, modelName: null, modelFullName: null,
+    elemBoxWorld: null,
     changeState: 'na', change: null, tipVersion: null,
   };
   const ld = (issue.linkedDocuments ?? [])[0];
@@ -282,6 +283,13 @@ function enrich(issue, types, users, tips) {
   out.modelKey = m.key;
   out.modelName = m.short;
   out.modelFullName = m.name;
+  // ピン候補判定用ボックス（v8.36）：対象要素のボックスを、ピン時点の版の Model Properties
+  // 索引 bbox から pinFrame のアフィンで SVF ワールドへ変換したもの。要素索引（§5.4）の
+  // 有無とは独立に付与する。取得できていない間は null（クライアントは従来挙動に落ちる）
+  if (m.pinFrame) {
+    const bb = pinBoxFor(m, ld.createdAtVersion ?? null, d.externalId);
+    if (bb) out.elemBoxWorld = worldBoxFromInternal(m.pinFrame.affine, bb);
+  }
   // 最新版のシーンでの対象要素（重ね表示のアンカー用。最新版の索引が用意できている場合のみ）
   if (m.latest?.ext2dbid && d.externalId) out.targetDbIdLatest = m.latest.ext2dbid[d.externalId] ?? null;
   // バージョン間 Diff（ピン時点の版 → 最新版）による対象要素の変更。索引の有無とは独立に判定する
@@ -326,6 +334,7 @@ async function fetchIssues() {
   }
   const enriched = all.filter(i => !i.deleted).map(i => enrich(i, types, users, tips));
   planDiffs(enriched); // 必要な Diff ペア（ピン時点 → 最新）が無ければ裏で開始する
+  planPinBoxes(enriched); // ピン候補判定用ボックス（ピン時点の版の索引）が無ければ裏で開始する
   for (const m of models) { // 重ね表示用に「基準版 → 最新版」のペアも用意する
     const tip = tips.get(m.key);
     if (tip != null && tip > m.baseVersion) ensureDiffPair(m, m.baseVersion, tip);
@@ -351,6 +360,7 @@ async function getIssuesCached() {
   if (models.some(m => m.indexStatus !== 'ready')) return fetchIssues();
   if (models.some(m => m.latest && m.latest.status === 'building')) return fetchIssues(); // 最新版の索引構築中も付与（targetDbIdLatest）が変わるのでライブで取る
   if ([...diffStore.values()].some(p => p.state === 'building')) return fetchIssues(); // Diff 取得中も付与が変わるのでライブで取る
+  if ([...bboxState.values()].some(s => s === 'building')) return fetchIssues(); // ピン候補判定用ボックスの取得中も付与（elemBoxWorld）が変わるのでライブで取る
   if (!issuesBox) return refreshIssues();
   if (Date.now() - issuesBox.at >= ISSUES_TTL) refreshIssues().catch(() => {});
   return issuesBox.value;
@@ -578,6 +588,133 @@ function modelDiffStatus(key) {
   return any ? (failed ? 'failed' : 'ready') : 'na';
 }
 
+// ============ ピン候補判定用ボックス（v8.36、Model Properties 索引） ============
+// 読み込み中のピン先行表示では、ピンの座標系（クラシック SVF のシーン座標か、
+// SVF2 系＝Revit 内部座標 − refPoint か）を API から判別できない。そこで判定材料として、
+// 対象要素のボックスを「ピン時点の版」の Model Properties 索引から取得し、
+// pinFrame のアフィン（実測）で SVF ワールドへ変換して Issue に付ける（elemBoxWorld）。
+// クライアントは2候補のうちボックスに入る方を採用する。
+// 取得は Diff と同じ索引（ensureDiffIndex で確保済みのもの）へのクエリだけで行い、
+// Model Derivative の変換ジョブは投げない。対象は pinFrame を持つモデルのみ。
+// 結果は cache/bbox-{key}.json に残す（再起動後はそれを読む）。
+const bboxStore = new Map(); // `${key}:${version}` → Map(externalId → [minx,miny,minz,maxx,maxy,maxz]（Revit 内部座標）)
+const bboxMiss = new Set();  // `${key}:${version}:${ext}`（取得済みだが索引に無い、または bbox を持たない）
+const bboxState = new Map(); // `${key}:${version}:${ext}` → 'building' | 'failed'
+const bboxCacheFile = key => path.join(indexCacheDir, `bbox-${key}.json`);
+function loadBBoxCaches() {
+  for (const m of models) {
+    if (!m.pinFrame) continue;
+    try {
+      const c = JSON.parse(fs.readFileSync(bboxCacheFile(m.key), 'utf8'));
+      for (const [v, entries] of Object.entries(c?.versions ?? {})) bboxStore.set(`${m.key}:${v}`, new Map(Object.entries(entries)));
+      for (const miss of c?.misses ?? []) bboxMiss.add(miss);
+    } catch (e) {}
+  }
+}
+loadBBoxCaches();
+function saveBBoxCache(m) {
+  const versions = {};
+  for (const [k, map] of bboxStore) if (k.startsWith(m.key + ':')) versions[k.slice(m.key.length + 1)] = Object.fromEntries(map);
+  const misses = [...bboxMiss].filter(x => x.startsWith(m.key + ':'));
+  try { fs.writeFileSync(bboxCacheFile(m.key), JSON.stringify({ versions, misses })); } catch (e) {}
+}
+async function queryIndexRange(indexId, a, b) { // 索引への範囲クエリ（Diff の行取得と同じ手順）
+  const base = `${IDX}/projects/${PID}/indexes/${indexId}`;
+  const create = await apsCall3('POST', `${base}/queries`, { query: { $between: ['s.SVF2Id', a, b] } });
+  if (create.status !== 200 && create.status !== 201) throw new Error(`index query create ${create.status}`);
+  const qid = create.json.queryId;
+  let st = create.json.state;
+  for (let i = 0; i < 60 && st !== 'FINISHED'; i++) {
+    await sleepMs(3000);
+    const { json } = await apsCall3('GET', `${base}/queries/${qid}`);
+    st = json?.state;
+    if (st === 'FAILED') throw new Error('index query FAILED');
+  }
+  if (st !== 'FINISHED') throw new Error('index query timeout');
+  const text = await apsText3(`${base}/queries/${qid}/properties`);
+  const rows = [];
+  for (const line of text.split('\n')) if (line.trim()) rows.push(JSON.parse(line));
+  return rows;
+}
+// 指定版の索引から対象要素の行を引く。externalId の直接クエリは API が受理しないため、
+// ピンの objectId（＝索引の svf2Id。実測で一致）をヒントに範囲を広げながら探し、
+// 最後は全域スキャンで「存在しない」ことまで確定させる（履歴グラフと同一手順）。
+async function fetchPinBoxRow(m, version, ext, hint) {
+  const indexId = await ensureDiffIndex(m, version);
+  const scan = async (lo, hi) => (await queryIndexRange(indexId, lo, hi)).find(r => r.externalId === ext) ?? null;
+  let row = null;
+  if (Number.isFinite(hint)) {
+    for (const w of [256, 2048]) { row = await scan(Math.max(0, hint - w), hint + w); if (row) break; }
+  }
+  if (!row) { for (let a = 0; a <= 48000 && !row; a += 4000) row = await scan(a, a + 3999); }
+  return row;
+}
+let bboxQueue = Promise.resolve(); // ボックス取得も1本ずつ直列に流す
+function ensurePinBox(m, version, ext, hint) {
+  const jk = `${m.key}:${version}:${ext}`;
+  if (bboxStore.get(`${m.key}:${version}`)?.has(ext) || bboxMiss.has(jk)) return;
+  const st = bboxState.get(jk);
+  if (st === 'building' || st === 'failed') return;
+  bboxState.set(jk, 'building');
+  bboxQueue = bboxQueue.then(async () => {
+    try {
+      const row = await fetchPinBoxRow(m, version, ext, hint);
+      if (row?.bboxMin && row?.bboxMax) {
+        const vk = `${m.key}:${version}`;
+        if (!bboxStore.has(vk)) bboxStore.set(vk, new Map());
+        bboxStore.get(vk).set(ext, [row.bboxMin.x, row.bboxMin.y, row.bboxMin.z, row.bboxMax.x, row.bboxMax.y, row.bboxMax.z]);
+        console.log(`pin box ready: ${jk}`);
+      } else {
+        bboxMiss.add(jk);
+        console.log(`pin box not found: ${jk}`);
+      }
+      bboxState.delete(jk);
+      saveBBoxCache(m);
+    } catch (e) {
+      bboxState.set(jk, 'failed');
+      console.error('pin box failed:', jk, e);
+    }
+  }).catch(() => {});
+}
+function planPinBoxes(enriched) {
+  for (const i of enriched) {
+    if (!i.modelKey || !i.pin?.externalId || i.pin.createdAtVersion == null) continue;
+    const m = models.find(x => x.key === i.modelKey);
+    if (m?.pinFrame) ensurePinBox(m, i.pin.createdAtVersion, i.pin.externalId, i.pin.objectId);
+  }
+}
+// 対象要素のボックス（Revit 内部座標）。ピン時点の版を優先し、無ければ同じモデルの
+// 他の版で取得済みのものを使う（要素が動いていなければ判定材料として十分なため）
+function pinBoxFor(m, version, ext) {
+  if (version != null) {
+    const exact = bboxStore.get(`${m.key}:${version}`)?.get(ext);
+    if (exact) return exact;
+  }
+  for (const [k, map] of bboxStore) if (k.startsWith(m.key + ':') && map.has(ext)) return map.get(ext);
+  return null;
+}
+// 内部座標のボックス → SVF ワールドのボックス（アフィンは回転を含むため8隅を変換して取り直す）
+function worldBoxFromInternal(affine, bb) {
+  const mins = [Infinity, Infinity, Infinity], maxs = [-Infinity, -Infinity, -Infinity];
+  for (const x of [bb[0], bb[3]]) for (const y of [bb[1], bb[4]]) for (const z of [bb[2], bb[5]]) {
+    const w = [0, 1, 2].map(i => affine[i][0] * x + affine[i][1] * y + affine[i][2] * z + affine[i][3]);
+    for (let i = 0; i < 3; i++) { mins[i] = Math.min(mins[i], w[i]); maxs[i] = Math.max(maxs[i], w[i]); }
+  }
+  const r3 = v => Math.round(v * 1000) / 1000;
+  return { min: mins.map(r3), max: maxs.map(r3) };
+}
+function modelPinBoxStatus(key) {
+  let any = false;
+  for (const [jk, s] of bboxState) {
+    if (!jk.startsWith(key + ':')) continue;
+    any = true;
+    if (s === 'building') return 'building';
+  }
+  for (const k of bboxStore.keys()) if (k.startsWith(key + ':')) any = true;
+  if (!any) for (const miss of bboxMiss) if (miss.startsWith(key + ':')) { any = true; break; }
+  return any ? 'ready' : 'na';
+}
+
 // ============ 画像（モデルサムネイル／Issue スナップショット。メモリキャッシュ） ============
 const thumbCache = new Map();
 const snapCache = new Map();
@@ -711,12 +848,12 @@ const server = http.createServer(async (req, res) => {
       const issues = await getIssuesCached();
       const vers = await Promise.all(models.map(getModelVersion));
       return sendJson(res, 200, {
-        models: models.map((m, i) => ({ key: m.key, name: m.name, short: m.short, version: vers[i].versionNumber, baseVersion: m.baseVersion, urn: m.derivativeUrn, guid: m.viewableGuid, latest: m.latest?.guid ? { version: m.latest.version, urn: m.latest.urn, guid: m.latest.guid } : null, overlayStatus: overlayStatus(m), pinFrame: m.pinFrame ?? null, indexStatus: m.indexStatus, diffStatus: modelDiffStatus(m.key) })),
+        models: models.map((m, i) => ({ key: m.key, name: m.name, short: m.short, version: vers[i].versionNumber, baseVersion: m.baseVersion, urn: m.derivativeUrn, guid: m.viewableGuid, latest: m.latest?.guid ? { version: m.latest.version, urn: m.latest.urn, guid: m.latest.guid } : null, overlayStatus: overlayStatus(m), pinFrame: m.pinFrame ?? null, indexStatus: m.indexStatus, diffStatus: modelDiffStatus(m.key), pinBoxStatus: modelPinBoxStatus(m.key) })),
         issues, fetchedAt: new Date().toISOString(),
       });
     }
     if (url.pathname === '/api/index-status') { // 索引の構築状態だけを返す軽いエンドポイント（画面のポーリング用）
-      return sendJson(res, 200, { models: models.map(m => ({ key: m.key, short: m.short, indexStatus: m.indexStatus, diffStatus: modelDiffStatus(m.key), overlayStatus: overlayStatus(m), latestVersion: m.latest?.version ?? null })) });
+      return sendJson(res, 200, { models: models.map(m => ({ key: m.key, short: m.short, indexStatus: m.indexStatus, diffStatus: modelDiffStatus(m.key), overlayStatus: overlayStatus(m), pinBoxStatus: modelPinBoxStatus(m.key), latestVersion: m.latest?.version ?? null })) });
     }
     if (url.pathname === '/api/overlay') {
       // 重ね表示用：基準版 → 最新版の Diff を、両版のシーンの dbId 集合に変換して返す
@@ -785,7 +922,8 @@ const server = http.createServer(async (req, res) => {
   const rel = url.pathname === '/' ? 'index.html' : url.pathname.replace(/^\//, '');
   const file = path.join(pub, rel);
   if (!file.startsWith(pub) || !fs.existsSync(file)) { res.writeHead(404); return res.end('not found'); }
-  res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] ?? 'application/octet-stream' });
+  // 静的ファイルはキャッシュさせない（デモの更新がブラウザに残って「直ってない」ように見えるのを防ぐ）
+  res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] ?? 'application/octet-stream', 'Cache-Control': 'no-cache' });
   fs.createReadStream(file).pipe(res);
 });
 const port = process.env.PORT ?? 3000;
