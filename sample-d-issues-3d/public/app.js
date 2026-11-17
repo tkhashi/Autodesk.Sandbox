@@ -25,6 +25,17 @@ function levelOf(e) { return e?.['Level'] ?? e?.['Base Level'] ?? e?.['Reference
 function nameOf(e) { return /\[\d+\]\s*$/.test(e.name) ? e.name : `${e.name} [${e.revitId}]`; }
 function locOf(e) { return e?.['Column Location Mark'] ?? e?.['Mark'] ?? e?.['Type Mark'] ?? '—'; }
 function modelVersion(i) { const m = DATA?.models.find(x => x.key === i.modelKey); return m?.version != null ? 'V' + m.version : ''; }
+// バージョン間 Diff（ピン時点 → 最新）による対象要素の変更表示
+function changeText(i) {
+  if (i.changeState === 'building') return '取得中';
+  if (i.changeState === 'failed') return '取得失敗';
+  if (i.changeState !== 'ready' || !i.change) return '—';
+  if (i.change.type === 'added') return '追加';
+  if (i.change.type === 'removed') return '削除';
+  if (i.change.type === 'modified') return '変更あり';
+  return '変更なし';
+}
+const CHG_COLOR = { '変更あり': '#d97706', '削除': '#c0453e', '追加': '#4caf7d', '変更なし': '#8a9aa8', '取得中': '#3b82c4', '取得失敗': '#c0453e' };
 function setStatV(t) { $('statV').innerHTML = t; }
 
 // ---- 列定義：Forma の列＋モデル情報から自動追加される列 ----
@@ -38,7 +49,8 @@ const PROP_LABELS = {
 let COLUMNS = [];
 let sortCol = null;
 try { sortCol = JSON.parse(localStorage.getItem('sampled-sort') ?? 'null'); } catch (e) { sortCol = null; }
-let visibleCols = new Set(JSON.parse(localStorage.getItem(LS_COLS) ?? 'null') ?? ['title', 'status', 'type', 'assignee', 'due', 'start', 'placement']);
+let visibleCols = new Set(JSON.parse(localStorage.getItem(LS_COLS) ?? 'null') ?? ['title', 'status', 'type', 'assignee', 'due', 'start', 'placement', 'change']);
+if (!localStorage.getItem('sampled-change-col')) { visibleCols.add('change'); localStorage.setItem('sampled-change-col', '1'); } // 「変更」列の追加に伴う一度きりのマージ
 function buildColumns() {
   const cols = [
     { id: 'title', label: 'Title', grp: 'Issue', cell: 'title', get: i => i.title },
@@ -55,6 +67,7 @@ function buildColumns() {
     { id: 'attachments', label: '添付', grp: 'Issue', cell: 'text', get: i => i.attachmentCount ?? 0, mono: true },
     { id: 'element', label: '対象要素', grp: 'モデル情報', cell: 'text', get: i => i.element ? nameOf(i.element) : (i.pin ? '対象外モデルのピン' : 'ピンなし') },
     { id: 'model', label: 'モデル', grp: 'モデル情報', cell: 'text', get: i => i.modelName ?? '—' },
+    { id: 'change', label: '変更', grp: 'モデル情報', cell: 'change', get: i => changeText(i) },
     { id: 'level', label: '階', grp: 'モデル情報', cell: 'text', get: i => i.element ? levelOf(i.element) : '—' },
     { id: 'loc', label: '位置', grp: 'モデル情報', cell: 'text', get: i => i.element ? locOf(i.element) : '—' },
   ];
@@ -170,6 +183,7 @@ function cellHtml(c, i) {
     case 'type': return i.typeLabel ? `<span class="tchip"><span class="code">${esc(i.typeCode ?? '')}</span><span class="lbl">${esc(i.typeLabel)}</span></span>` : '—';
     case 'assignee': return i.assignedToName ? esc(i.assignedToName) : '<span class="unspec">Unspecified</span>';
     case 'placement': return i.modelFullName ? `<span class="place">${esc(i.modelFullName)}</span>${modelVersion(i) ? `<span class="vpill">${esc(modelVersion(i))}</span>` : ''}` : '-';
+    case 'change': { const t = changeText(i); return t === '—' ? '—' : `<span class="fst"><i style="background:${CHG_COLOR[t]}"></i>${esc(t)}</span>`; }
     case 'title': return `<span class="titlecell">${i.targetDbId ? `<button class="vbtn" data-view="${i.id}">3D</button>` : '<span class="vbtn-spacer"></span>'}<b style="font-weight:600">${esc(v)}</b></span>`;
     default: return esc(v);
   }
@@ -269,12 +283,40 @@ function selectIssue(id) {
     .filter(([k]) => !['revitId', 'objectid'].includes(k))
     .map(([k, v]) => `<dt>${esc(PROP_LABELS[k] ?? k)}</dt><dd>${esc(v)}</dd>`).join('')
     : '<dd style="color:#68798a">対象要素なし（ピンなし、または対象外モデル）</dd>';
+  renderDetailChange(i);
   $('dtShow3d').disabled = !i.targetDbId;
   if (overviewOn) { // 一覧モード中は選択の赤とラベルの強調を追随させる
     colorIssueElements();
     refreshMarkerSel();
   }
   if (viewerMode === 'obj') showObjForSelected();
+}
+function fmtChgVal(v) { if (v == null) return '（なし）'; const s = String(v); return s.length > 60 ? s.slice(0, 60) + '…' : s; }
+function renderDetailChange(i) {
+  const el = $('dtChange');
+  const c = i.change;
+  if (i.changeState === 'building' && c) { el.innerHTML = `変更情報を取得中…（V${c.fromVersion} → V${c.toVersion}）`; return; }
+  if (i.changeState === 'failed' && c) { el.innerHTML = `変更情報の取得に失敗しました（V${c.fromVersion} → V${c.toVersion}）`; return; }
+  if (i.changeState !== 'ready' || !c) {
+    el.innerHTML = (i.pin && i.modelKey) ? '比較対象なし（ピン時点と最新が同じバージョンです）' : '—';
+    return;
+  }
+  let verdict, color;
+  if (c.type === 'added') { verdict = '対象要素は最新版で追加された要素です'; color = CHG_COLOR['追加']; }
+  else if (c.type === 'removed') { verdict = '対象要素は最新版では削除されています'; color = CHG_COLOR['削除']; }
+  else if (c.type === 'modified') { verdict = '対象要素に変更があります'; color = CHG_COLOR['変更あり']; }
+  else { verdict = '対象要素に実質的な変更はありません'; color = CHG_COLOR['変更なし']; }
+  let h = `<span class="fst"><i style="background:${color}"></i>V${c.fromVersion} → V${c.toVersion}：${esc(verdict)}</span>`;
+  if (c.type === 'modified') {
+    const sig = [];
+    if (c.geomChanged) sig.push('形状の変更');
+    if (c.moved) sig.push('移動' + (c.moveMeters ? `（約 ${c.moveMeters} m）` : ''));
+    if (c.valueChanged) sig.push('プロパティの変更');
+    if (sig.length) h += `<br>${esc(sig.join('／'))}`;
+    if (c.changedProps?.length) h += '<br>' + c.changedProps.map(p => `${esc(p.name)}：${esc(fmtChgVal(p.prev))} → ${esc(fmtChgVal(p.cur))}`).join('<br>');
+  }
+  if (c.pairCounts) h += `<br><span style="color:#68798a">モデル全体では 追加 ${c.pairCounts.added}・削除 ${c.pairCounts.removed}・実質変更 ${c.pairCounts.modifiedReal} 件（見かけ上の変更 ${c.pairCounts.modifiedRaw - c.pairCounts.modifiedReal} 件は判定から除外）</span>`;
+  el.innerHTML = h;
 }
 $('dtClose').addEventListener('click', () => setDetailVisible(false));
 $('dtShow3d').addEventListener('click', () => { if (selected) showInViewer(selected); });
@@ -331,15 +373,16 @@ function watchIndexStatus() {
     el.textContent = '一部のモデル情報の構築に失敗しました（そのモデルの Issue は要素情報なしで表示しています）。';
   };
   if ((DATA?.models ?? []).some(m => m.indexStatus === 'error')) showFailed();
-  if (!(DATA?.models ?? []).some(m => m.indexStatus === 'building' || m.indexStatus === 'idle')) return;
+  if (!(DATA?.models ?? []).some(m => m.indexStatus === 'building' || m.indexStatus === 'idle' || m.diffStatus === 'building')) return;
   let tries = 0;
   const tick = async () => {
     let ms = [];
     try { ms = (await (await fetch('/api/index-status')).json()).models ?? []; } catch (e) {}
-    const pending = ms.filter(m => m.indexStatus === 'building' || m.indexStatus === 'idle');
-    if (pending.length && tries++ < 60) {
+    const pending = ms.filter(m => m.indexStatus === 'building' || m.indexStatus === 'idle' || m.diffStatus === 'building');
+    const maxTries = pending.some(m => m.diffStatus === 'building') ? 400 : 60; // Diff は索引より時間がかかるため長めに待つ
+    if (pending.length && tries++ < maxTries) {
       el.hidden = false;
-      el.textContent = `モデル情報を API から構築中…（${pending.map(m => m.short).join('、')}）`;
+      el.textContent = `モデル情報・変更情報を API から構築中…（${pending.map(m => m.short).join('、')}）`;
       setTimeout(tick, 3000);
       return;
     }

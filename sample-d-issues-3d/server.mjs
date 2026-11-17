@@ -188,7 +188,7 @@ async function loadProjectUsers(token) {
   return map;
 }
 
-function enrich(issue, types, users) {
+function enrich(issue, types, users, tips) {
   const st = issue.issueSubtypeId ? types.get(issue.issueSubtypeId) ?? null : null;
   const out = {
     id: issue.id, displayId: issue.displayId, title: issue.title, description: issue.description,
@@ -203,16 +203,35 @@ function enrich(issue, types, users) {
     permittedStatuses: issue.permittedStatuses ?? null, customAttributes: issue.customAttributes ?? [],
     attachmentCount: issue.attachmentCount ?? 0, commentCount: issue.commentCount ?? 0,
     pin: null, element: null, targetDbId: null, modelKey: null, modelName: null, modelFullName: null,
+    changeState: 'na', change: null, tipVersion: null,
   };
   const ld = (issue.linkedDocuments ?? [])[0];
   if (!ld) return out;
   const d = ld.details ?? {};
-  out.pin = { modelUrn: ld.urn, viewName: d.viewable?.name ?? null, objectId: d.objectId ?? null, externalId: d.externalId ?? null, position: d.position ?? null };
+  out.pin = { modelUrn: ld.urn, viewName: d.viewable?.name ?? null, objectId: d.objectId ?? null, externalId: d.externalId ?? null, position: d.position ?? null, createdAtVersion: ld.createdAtVersion ?? null };
   const m = models.find(x => x.lineage === ld.urn);
   if (!m || !d.externalId) return out;
   out.modelKey = m.key;
   out.modelName = m.short;
   out.modelFullName = m.name;
+  // バージョン間 Diff（ピン時点の版 → 最新版）による対象要素の変更。索引の有無とは独立に判定する
+  const tip = tips?.get(m.key) ?? null;
+  out.tipVersion = tip;
+  const from = ld.createdAtVersion ?? null;
+  if (from != null && tip != null && from < tip) {
+    const pair = diffStore.get(diffPairKey(m.key, from, tip));
+    if (!pair || pair.state === 'building') { out.changeState = 'building'; out.change = { fromVersion: from, toVersion: tip }; }
+    else if (pair.state === 'failed') { out.changeState = 'failed'; out.change = { fromVersion: from, toVersion: tip }; }
+    else {
+      const e = pair.byExt.get(d.externalId) ?? null;
+      out.changeState = 'ready';
+      out.change = {
+        fromVersion: from, toVersion: tip, type: e?.type ?? null,
+        geomChanged: !!e?.geomChanged, moved: !!e?.moved, moveMeters: e?.moveMeters ?? null,
+        valueChanged: !!e?.valueChanged, changedProps: e?.changedProps ?? [], pairCounts: pair.counts,
+      };
+    }
+  }
   if (!m.ext2dbid || !m.propsIndex) return out; // 索引を構築中（または失敗）のモデルは、付与なしで返す
   const dbId = m.ext2dbid[d.externalId];
   if (dbId === undefined) return out;
@@ -222,10 +241,12 @@ function enrich(issue, types, users) {
 }
 async function fetchIssues() {
   const token = await getToken3();
-  const [types, users] = await Promise.all([
+  const [types, users, vers] = await Promise.all([
     getIssueTypes(() => loadIssueTypes(token)),
     getProjectUsers(() => loadProjectUsers(token)),
+    Promise.all(models.map(m => getModelVersion(m).catch(() => null))),
   ]);
+  const tips = new Map(models.map((m, ix) => [m.key, vers[ix]?.versionNumber ?? null]));
   const all = [];
   for (let offset = 0; offset < 200; offset += 50) { // ページング（最大200件まで）
     const j = await apsGet(`${BASE}/construction/issues/v1/projects/${PID}/issues?limit=50&offset=${offset}`, token);
@@ -233,7 +254,9 @@ async function fetchIssues() {
     all.push(...page);
     if (page.length < 50) break;
   }
-  return all.filter(i => !i.deleted).map(i => enrich(i, types, users));
+  const enriched = all.filter(i => !i.deleted).map(i => enrich(i, types, users, tips));
+  planDiffs(enriched); // 必要な Diff ペア（ピン時点 → 最新）が無ければ裏で開始する
+  return enriched;
 }
 
 // Issue 一覧の短期キャッシュ（初回表示の待ちを削る）。
@@ -252,6 +275,7 @@ function refreshIssues() {
 }
 async function getIssuesCached() {
   if (models.some(m => m.indexStatus !== 'ready')) return fetchIssues();
+  if ([...diffStore.values()].some(p => p.state === 'building')) return fetchIssues(); // Diff 取得中も付与が変わるのでライブで取る
   if (!issuesBox) return refreshIssues();
   if (Date.now() - issuesBox.at >= ISSUES_TTL) refreshIssues().catch(() => {});
   return issuesBox.value;
@@ -262,6 +286,221 @@ async function updateIssue(id, patch) {
     method: 'PATCH', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
   });
   return { status: r.status, body: await r.json().catch(() => null) };
+}
+
+// ============ バージョン間 Diff（Model Properties API：ピン時点の版 → 最新版） ============
+// Issue の対象要素が「ピンした時点の版」から「最新版」の間にどう変わったかを、
+// Model Properties API（construction/index/v2）の索引＋Diff ジョブで取得する。
+// ペア単位で非同期に実行し、結果は cache/diff-{key}-v{from}-v{to}.json に残す（再起動後はそれを読む）。
+// 判定基準は履歴グラフでの実測に合わせる：ロケール差異（英語ロケール保存→日本語ロケール保存等）で
+// フィールドキーが付け替わると、無変更の要素でも大量に OBJECT_CHANGED に現れる（V1→V2 で34,718件）。
+// そのノイズ行は「片側にしか無いキーに同じ値」か「共有キーでも旧側が null」のどちらかで値自体は
+// 変わっていないため、形状ハッシュ・bbox の移動・値の実質変化でふるい分ける。
+const IDX = `${BASE}/construction/index/v2`;
+const diffStore = new Map(); // `${key}:${from}:${to}` → { state, counts, byExt, error, runAt }
+const diffPairKey = (key, from, to) => `${key}:${from}:${to}`;
+const diffCacheFile = (key, from, to) => path.join(indexCacheDir, `diff-${key}-v${from}-v${to}.json`);
+function loadDiffCaches() {
+  for (const f of fs.readdirSync(indexCacheDir)) {
+    const mm = f.match(/^diff-(.+)-v(\d+)-v(\d+)\.json$/);
+    if (!mm) continue;
+    try {
+      const c = JSON.parse(fs.readFileSync(path.join(indexCacheDir, f), 'utf8'));
+      if (c?.entries) diffStore.set(diffPairKey(mm[1], +mm[2], +mm[3]), { state: 'ready', counts: c.counts ?? null, byExt: new Map(c.entries), error: null, runAt: c.runAt ?? null });
+    } catch (e) {}
+  }
+}
+loadDiffCaches();
+const sleepMs = ms => new Promise(s => setTimeout(s, ms));
+async function apsCall3(method, url, body) {
+  const t = await getToken3();
+  const r = await fetch(url, {
+    method, headers: { Authorization: 'Bearer ' + t, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await r.text();
+  let json = null; try { json = JSON.parse(text); } catch (e) {}
+  return { status: r.status, json, text };
+}
+async function apsText3(url) {
+  const t = await getToken3();
+  const r = await fetch(url, { headers: { Authorization: 'Bearer ' + t } });
+  if (!r.ok) throw new Error('GET ' + url.split('/').slice(-2).join('/') + ' failed: ' + r.status);
+  return r.text(); // fields / properties は gzip の NDJSON で返ることがある（fetch が解凍する）
+}
+function versionUrn(m, n) { return `urn:adsk.wipprod:fs.file:vf.${m.lineage.replace('urn:adsk.wipprod:dm.lineage:', '')}?version=${n}`; }
+async function ensureDiffIndex(m, n) {
+  const { json } = await apsCall3('POST', `${IDX}/projects/${PID}/indexes:batch-status`, { versions: [{ versionUrn: versionUrn(m, n) }] });
+  const ix = json?.indexes?.[0];
+  if (!ix?.indexId) throw new Error(`V${n} の索引 ID が返りませんでした`);
+  for (let i = 0; i < 80; i++) {
+    const { json: j2 } = await apsCall3('GET', `${IDX}/projects/${PID}/indexes/${ix.indexId}`);
+    if (j2?.state === 'FINISHED') return ix.indexId;
+    if (j2?.state === 'FAILED') throw new Error(`V${n} の索引が FAILED になりました`);
+    await sleepMs(15000);
+  }
+  throw new Error(`V${n} の索引がタイムアウトしました`);
+}
+function isMovedRow(r) { // bbox の純平行移動（最小・最大が同じベクトルで動いた）
+  if (!r.bboxMin || !r.prev?.bboxMin || !r.bboxMax || !r.prev?.bboxMax) return false;
+  const d = ['x', 'y', 'z'].map(k => Math.round((r.bboxMin[k] - r.prev.bboxMin[k]) * 1000));
+  const d2 = ['x', 'y', 'z'].map(k => Math.round((r.bboxMax[k] - r.prev.bboxMax[k]) * 1000));
+  return d.join() === d2.join() && d.some(v => v !== 0);
+}
+function moveMetersOf(r) { // bbox 中心の移動距離（索引の座標はフィート → メートル換算）
+  if (!r.bboxMin || !r.prev?.bboxMin || !r.bboxMax || !r.prev?.bboxMax) return null;
+  const c = (mn, mx) => [(mn.x + mx.x) / 2, (mn.y + mx.y) / 2, (mn.z + mx.z) / 2];
+  const a = c(r.bboxMin, r.bboxMax), b = c(r.prev.bboxMin, r.prev.bboxMax);
+  return Math.round(Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) * 0.3048 * 100) / 100;
+}
+// プロパティの「実質的な値の変化」判定（ロケールノイズとの切り分け。履歴グラフと同一基準）
+// 実質変化とみなすのは: (1) システムフィールド以外で、同一キーに両側とも非 null の異なる値
+// (2) 新版側の値（ASCII 文字列または数値。システムフィールド以外）が旧版側の値集合に存在しない
+function computeValueChanged(r, fmap) {
+  const cur = r.props ?? {}, prev = r.prev?.props ?? {};
+  const isSys = k => { const f = fmap.get(k); return !!f && String(f.category ?? '').startsWith('__'); };
+  for (const k of Object.keys(cur)) {
+    if (isSys(k)) continue;
+    if (k in prev && prev[k] != null && cur[k] != null && JSON.stringify(prev[k]) !== JSON.stringify(cur[k])) return true;
+  }
+  const prevVals = new Set();
+  for (const v of Object.values(prev)) if (v != null) prevVals.add(JSON.stringify(v));
+  for (const [k, v] of Object.entries(cur)) {
+    if (isSys(k) || v == null || v === '') continue;
+    if (typeof v === 'number' || (typeof v === 'string' && /^[\x00-\x7F]+$/.test(v))) {
+      if (!prevVals.has(JSON.stringify(v))) return true;
+    }
+  }
+  return false;
+}
+function realChangedProps(r, fmap) { // 実質変化したプロパティだけを（名前, 旧値, 新値）で返す
+  const cur = r.props ?? {}, prev = r.prev?.props ?? {};
+  const isSys = k => { const f = fmap.get(k); return !!f && String(f.category ?? '').startsWith('__'); };
+  const prevVals = new Set();
+  for (const v of Object.values(prev)) if (v != null) prevVals.add(JSON.stringify(v));
+  const clip = v => typeof v === 'string' && v.length > 200 ? v.slice(0, 200) + '…' : v;
+  const out = [];
+  for (const k of Object.keys(cur)) {
+    if (isSys(k)) continue;
+    const f = fmap.get(k);
+    if (!f) continue;
+    if (k in prev && prev[k] != null && cur[k] != null && JSON.stringify(prev[k]) !== JSON.stringify(cur[k])) {
+      out.push({ name: f.name, prev: clip(prev[k]), cur: clip(cur[k]) });
+    } else if (!(k in prev) || prev[k] == null) {
+      const v = cur[k];
+      if (v != null && v !== '' && (typeof v === 'number' || (typeof v === 'string' && /^[\x00-\x7F]+$/.test(v))) && !prevVals.has(JSON.stringify(v))) {
+        out.push({ name: f.name, prev: null, cur: clip(v) });
+      }
+    }
+  }
+  return out.slice(0, 12);
+}
+const DIFF_TYPE = { OBJECT_ADDED: 'added', OBJECT_REMOVED: 'removed', OBJECT_CHANGED: 'modified' };
+function normalizeDiffRows(rows, fieldsText) {
+  const fmap = new Map();
+  for (const line of fieldsText.split('\n')) {
+    if (!line.trim()) continue;
+    try { const d = JSON.parse(line); fmap.set(d.key, d); } catch (e) {}
+  }
+  let nameKey = null;
+  for (const [k, v] of fmap) if (v.category === '__name__') nameKey = k;
+  const byExt = new Map();
+  const counts = { added: 0, removed: 0, modifiedReal: 0, modifiedRaw: 0 };
+  for (const r of rows) {
+    const type = DIFF_TYPE[r.type] ?? r.type;
+    if (!r.externalId) continue;
+    const cur = r.props ?? {}, prev = r.prev?.props ?? {};
+    const name = cur[nameKey] ?? prev[nameKey] ?? null;
+    if (type === 'added') { counts.added++; byExt.set(r.externalId, { type, name }); }
+    else if (type === 'removed') { counts.removed++; byExt.set(r.externalId, { type, name }); }
+    else if (type === 'modified') {
+      counts.modifiedRaw++;
+      const geomChanged = !!(r.geomHash && r.prev?.geomHash && r.geomHash !== r.prev.geomHash);
+      const moved = isMovedRow(r);
+      const valueChanged = computeValueChanged(r, fmap);
+      if (!(geomChanged || moved || valueChanged)) continue; // 見かけ上の変更は保持しない（＝実質変更なしとして扱う）
+      counts.modifiedReal++;
+      byExt.set(r.externalId, {
+        type, name, geomChanged, moved, moveMeters: moveMetersOf(r), valueChanged,
+        changedProps: valueChanged ? realChangedProps(r, fmap) : [],
+      });
+    }
+  }
+  return { byExt, counts };
+}
+async function runDiffPair(m, from, to) {
+  const pk = diffPairKey(m.key, from, to);
+  const job = { state: 'building', counts: null, byExt: null, error: null, runAt: null };
+  diffStore.set(pk, job);
+  const t0 = Date.now();
+  try {
+    await ensureDiffIndex(m, from);
+    await ensureDiffIndex(m, to);
+    const { json } = await apsCall3('POST', `${IDX}/projects/${PID}/diffs:batch-status`, { diffs: [{ prevVersionUrn: versionUrn(m, from), curVersionUrn: versionUrn(m, to) }] });
+    const d = Array.isArray(json) ? json[0] : json?.diffs?.[0];
+    if (!d?.diffId) throw new Error('diffId が返りませんでした');
+    const durl = `${IDX}/projects/${PID}/diffs/${d.diffId}`;
+    let stats = null;
+    for (let i = 0; i < 80; i++) {
+      const { json: j2 } = await apsCall3('GET', durl);
+      if (j2?.state === 'FINISHED') { stats = j2.stats; break; }
+      if (j2?.state === 'FAILED') throw new Error('diff FAILED: ' + JSON.stringify(j2.errors ?? null));
+      await sleepMs(15000);
+    }
+    if (!stats) throw new Error('diff がタイムアウトしました');
+    const fieldsText = await apsText3(`${durl}/fields`);
+    const rows = [];
+    let emptyStreak = 0;
+    for (let a = 0; a <= 46000; a += 2000) { // SVF2Id の範囲ごとに全行を取得する（履歴グラフと同一手順）
+      const create = await apsCall3('POST', `${durl}/queries`, { query: { $between: ['s.SVF2Id', a, a + 1999] } });
+      if (create.status !== 200 && create.status !== 201) throw new Error(`range ${a}: query create ${create.status}`);
+      const qid = create.json.queryId;
+      let st = create.json.state;
+      for (let i = 0; i < 60 && st !== 'FINISHED'; i++) {
+        await sleepMs(4000);
+        const { json: qj } = await apsCall3('GET', `${durl}/queries/${qid}`);
+        st = qj?.state;
+        if (st === 'FAILED') throw new Error(`range ${a}: query FAILED`);
+      }
+      if (st !== 'FINISHED') throw new Error(`range ${a}: query timeout`);
+      const text = await apsText3(`${durl}/queries/${qid}/properties`);
+      for (const line of text.split('\n')) if (line.trim()) rows.push(JSON.parse(line));
+      if (!text.trim()) { emptyStreak++; if (emptyStreak >= 2 && a > 36000) break; } else emptyStreak = 0;
+    }
+    const { byExt, counts } = normalizeDiffRows(rows, fieldsText);
+    job.state = 'ready'; job.counts = counts; job.byExt = byExt; job.runAt = new Date().toISOString();
+    fs.writeFileSync(diffCacheFile(m.key, from, to), JSON.stringify({ from, to, runAt: job.runAt, stats, counts, entries: [...byExt] }));
+    console.log(`diff ready: ${m.key} V${from}->V${to} counts=${JSON.stringify(counts)} rows=${rows.length} in ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+  } catch (e) {
+    job.state = 'failed'; job.error = String(e?.message ?? e);
+    console.error('diff failed:', pk, e);
+  }
+}
+let diffQueue = Promise.resolve(); // Diff ジョブは1本ずつ直列に流す
+function ensureDiffPair(m, from, to) {
+  const pk = diffPairKey(m.key, from, to);
+  const cur = diffStore.get(pk);
+  if (cur && (cur.state === 'ready' || cur.state === 'building')) return;
+  diffStore.set(pk, { state: 'building', counts: null, byExt: null, error: null, runAt: null });
+  diffQueue = diffQueue.then(() => runDiffPair(m, from, to)).catch(() => {});
+}
+function planDiffs(enriched) {
+  for (const i of enriched) {
+    if (!i.modelKey || !i.pin?.externalId || i.pin.createdAtVersion == null || i.tipVersion == null) continue;
+    if (i.pin.createdAtVersion >= i.tipVersion) continue;
+    const m = models.find(x => x.key === i.modelKey);
+    if (m) ensureDiffPair(m, i.pin.createdAtVersion, i.tipVersion);
+  }
+}
+function modelDiffStatus(key) {
+  let any = false, failed = false;
+  for (const [pk, p] of diffStore) {
+    if (!pk.startsWith(key + ':')) continue;
+    any = true;
+    if (p.state === 'building') return 'building';
+    if (p.state === 'failed') failed = true;
+  }
+  return any ? (failed ? 'failed' : 'ready') : 'na';
 }
 
 // ============ 画像（モデルサムネイル／Issue スナップショット。メモリキャッシュ） ============
@@ -397,12 +636,12 @@ const server = http.createServer(async (req, res) => {
       const issues = await getIssuesCached();
       const vers = await Promise.all(models.map(getModelVersion));
       return sendJson(res, 200, {
-        models: models.map((m, i) => ({ key: m.key, name: m.name, short: m.short, version: vers[i].versionNumber, urn: m.derivativeUrn, guid: m.viewableGuid, indexStatus: m.indexStatus })),
+        models: models.map((m, i) => ({ key: m.key, name: m.name, short: m.short, version: vers[i].versionNumber, urn: m.derivativeUrn, guid: m.viewableGuid, indexStatus: m.indexStatus, diffStatus: modelDiffStatus(m.key) })),
         issues, fetchedAt: new Date().toISOString(),
       });
     }
     if (url.pathname === '/api/index-status') { // 索引の構築状態だけを返す軽いエンドポイント（画面のポーリング用）
-      return sendJson(res, 200, { models: models.map(m => ({ key: m.key, short: m.short, indexStatus: m.indexStatus })) });
+      return sendJson(res, 200, { models: models.map(m => ({ key: m.key, short: m.short, indexStatus: m.indexStatus, diffStatus: modelDiffStatus(m.key) })) });
     }
     if (url.pathname === '/api/extract') {
       // Issue の対象要素＋周辺（同じ階・隣接通り芯など）を OBJ で切り出す

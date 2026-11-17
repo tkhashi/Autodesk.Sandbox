@@ -41,6 +41,7 @@ Forma（Autodesk Construction Cloud、以下 ACC）の実 Issue を Issues API �
 3. **3D 表示（APS Viewer）**：Issue のピン先に応じてモデルを自動で切り替える。単独フォーカス表示と、モデル上に全 Issue を表示する「一覧モード」（既定 ON）の2形態。
 4. **手前の部材の透明化**：選択中の Issue の対象要素について、カメラと対象の間にある部材だけをゴースト表示（フレームのみ表示）にして見通しを確保する。
 5. **OBJ 表示モード**：対象要素＋周辺要素を OBJ で切り出して軽量ビューア（three.js）で表示する切り替え機能。
+6. **バージョン間 Diff による変更表示（v8.33）**：ピン時点のモデルバージョンと最新バージョンを Model Properties API の Diff で比べ、対象要素の変更（追加／削除／形状・移動・プロパティの実質変化）を Issue の表と詳細に表示する。比較ペアは「ピン時点 → 最新」に固定（ユーザー決定）。
 
 ### 1.5 既存手段との関係（差別化の前提）
 
@@ -143,7 +144,8 @@ Forma（Autodesk Construction Cloud、以下 ACC）の実 Issue を Issues API �
   - Issue タイプ：`GET .../issue-types?include=subtypes` で subtype ID → {タイプ名、subtype 名、コード}。**コードは Forma 画面のチップ文字と一致する**（例：Observation > Quality → `OQ`）。
   - メンバー：`GET /construction/admin/v1/projects/{projectId}/users`（limit 200）で autodeskId → 表示名。メールアドレスは画面に出さない。
 - 画面へ返す Issue オブジェクトの主なフィールド：`id`、`displayId`、`title`、`description`、`status`、`dueDate`、`startDate`、`assignedTo`／`assignedToName`、`watcherNames`、`published`、`typeLabel`（「タイプ > subtype」）、`typeCode`、`createdAt`、`openedBy`／`openedAt`、`createdBy`、`snapshotUrn`、`snapshotHasMarkups`、`permittedStatuses`、`customAttributes`、`attachmentCount`、`commentCount`。
-- ピンと要素の解決：`pin = { modelUrn, viewName, objectId, externalId, position }`（linkedDocuments の先頭から）。modelUrn が登録簿の lineage と一致するモデルを `modelKey` とし、索引が ready なら externalId から `targetDbId` と `element`（プロパティ一式）を付与する。
+- ピンと要素の解決：`pin = { modelUrn, viewName, objectId, externalId, position, createdAtVersion }`（linkedDocuments の先頭から。`createdAtVersion` はピンが置かれた時点のモデルバージョン）。modelUrn が登録簿の lineage と一致するモデルを `modelKey` とし、索引が ready なら externalId から `targetDbId` と `element`（プロパティ一式）を付与する。
+- バージョン間 Diff の結果（§5.9）があれば、`changeState`（`na`／`building`／`ready`／`failed`）と `change`（ペアの版番号、対象要素の変更種別とシグナル、ペア全体の件数）を付与する。索引の有無とは独立に判定する。
 
 ### 5.6 Issue 一覧の短期キャッシュ（v8.30）
 
@@ -152,7 +154,7 @@ Forma（Autodesk Construction Cloud、以下 ACC）の実 Issue を Issues API �
 - 取得済み一覧を **30秒** 使い回す。期限切れ後は手元の一覧を即座に返し、裏で取り直す（stale-while-revalidate）。取得は同時に1本だけ。
 - サーバー起動時に先回り取得（warm-up）する。
 - 編集（`/api/issues/update`）が成功したらキャッシュを即座に破棄する。
-- **索引の構築中はキャッシュしない**（付与内容が変わるため、従来どおりライブ取得する）。
+- **索引の構築中はキャッシュしない**（付与内容が変わるため、従来どおりライブ取得する）。バージョン間 Diff（§5.9）の取得中も同様にキャッシュしない。
 - 実測：変更前は冷えた初回 約2.75秒／温まった2回目 約0.23秒 → 変更後は定常時・TTL 切れ直後とも約2ミリ秒。
 
 ### 5.7 画像の取得
@@ -169,6 +171,17 @@ Forma（Autodesk Construction Cloud、以下 ACC）の実 Issue を Issues API �
 - 結果は要素集合単位（モデル key＋objectIds のハッシュ）で `cache/extract-{hash}.json` にディスクキャッシュする。
 - **対応状況（実測）**：Snowdon 3モデルは成功。**DACH と sample_architecture は OBJ 変換自体が「No Geometries to extract」で失敗する**（ファイル固有の問題）。その場合は画面にエラーを表示する。
 
+### 5.9 バージョン間 Diff（v8.33、Model Properties API）
+
+ピン時点のモデルバージョンから最新バージョンの間に、Issue の対象要素がどう変わったかを表示するための仕組み。
+
+- **比較ペア**：Issue ごとに「ピン時点の版（`pin.createdAtVersion`）→ そのモデルの最新版」に固定する（ユーザー決定 2026-11-17。任意ペアの選択はしない）。ピン時点と最新が同じ版の Issue、ピンなし・対象外モデルの Issue は比較対象なし（`changeState: 'na'`）。
+- **取得フロー**（3-legged）：Model Properties API（`construction/index/v2`）で ①両版の索引を `indexes:batch-status` で確保し FINISHED までポーリング、②`diffs:batch-status` で Diff ジョブを作り FINISHED までポーリング、③`fields` と、全行を SVF2Id 範囲（2,000 件刻み）のクエリで取得する。ペア単位で非同期に実行し、ジョブは直列に1本ずつ流す。必要なペアは Issue の取得時に自動で洗い出して開始する（`planDiffs`）。
+- **判定（ロケールノイズの除外）**：ロケール差異でフィールドキーが付け替わると、無変更の要素でも大量に「変更」として現れる（実測：Snowdon 建築 V1→V5 で生の変更 34,719 件）。そのため対象要素の変更は次のシグナルで判定し、どれも無ければ「実質的な変更なし」とする：追加（OBJECT_ADDED）／削除（OBJECT_REMOVED）／形状ハッシュ（geomHash）の変化／bbox の純平行移動（移動距離はフィート→メートル換算で併記）／プロパティ値の実質変化（同一キーで両側とも非 null の異なる値、または新版側の ASCII 文字列・数値が旧版側の値集合に存在しないこと。履歴グラフ側と同一基準）。
+- **保持する結果**：追加・削除の全要素と、シグナルのある変更要素だけを要素単位で保持する（見かけ上の変更要素は保持しない）。あわせてペア全体の件数（追加／削除／実質変更／生の変更）を保持する。結果は `cache/diff-{key}-v{from}-v{to}.json` に保存し、再起動後はそれを読む。
+- **状態の公開**：`/api/issues` と `/api/index-status` の各モデルに `diffStatus`（`na`／`building`／`ready`／`failed`）を含める。画面は構築中バナーの対象に含め、完了時に一覧を取り直す。
+- **実測（2026-11-17）**：Snowdon 建築（V5 まで）の3ペア（V1→V5、V2→V5、V4→V5）が取得できた。所要は索引が既存のペアで約20秒、索引の新規構築を含むペアで約140秒。検証用 Issue の判定：#43 植栽＝削除（V2 で追加された要素が最新では消えている）、#44 藤棚＝変更なし（最新では戻っている）、#45 外灯＝形状変更＋移動 約1.16m、#46 ドア＝プロパティ変更、#47 壁＝形状変更＋移動 約0.05m。
+
 ## 6. クライアント仕様（public/）
 
 ### 6.1 画面レイアウト（v8.22／v8.23）
@@ -181,12 +194,12 @@ Forma（Autodesk Construction Cloud、以下 ACC）の実 Issue を Issues API �
 
 ### 6.2 Issue 表
 
-- **列定義**：固定列16件＋自動列。
+- **列定義**：固定列17件＋自動列。
   - 固定列（グループ「Issue」）：Title／Status／Type／Assigned to／Due date／Start date／Placement（モデルファイル名＋バージョンのピル表示）／ID／作成日／公開／コメント（件数）／添付（件数）。
-  - 固定列（グループ「モデル情報」）：対象要素（要素名＋Revit ID。ピンなしは「ピンなし」、対象外モデルは「対象外モデルのピン」）／モデル／階（Level 系キーの優先順で解決）／位置（Column Location Mark → Mark → Type Mark の順）。
+  - 固定列（グループ「モデル情報」）：対象要素（要素名＋Revit ID。ピンなしは「ピンなし」、対象外モデルは「対象外モデルのピン」）／モデル／階（Level 系キーの優先順で解決）／位置（Column Location Mark → Mark → Type Mark の順）／**変更（v8.33）**：バージョン間 Diff（§5.9）の判定を色ドット＋ラベルで表示する（変更あり 橙／削除 赤／追加 緑／変更なし 灰／取得中 青／取得失敗 赤）。比較対象がない Issue は「—」。
   - 自動列（グループ「モデル情報（自動）」）：全 Issue の要素プロパティに実在するキーを出現頻度順に列化する（`name`／`revitId`／`objectid` は除く）。ラベルは日本語対応表（タイプ名・階・位置（通り芯）・材質・構造用途・カテゴリ・長さ・面積・体積など）で表示し、対応表にないキーは英語名のまま。
   - 自動列（グループ「カスタム属性」）：Issue の customAttributes のタイトルを列化する。
-- **既定の表示列**：Title／Status／Type／Assigned to／Due date／Start date／Placement の7列。
+- **既定の表示列**：Title／Status／Type／Assigned to／Due date／Start date／Placement／変更 の8列（v8.33 で「変更」を追加。既存ユーザーの保存済み列設定にも一度だけ自動でマージされる）。
 - **列の設定**：ツールバーの「列の設定」からチェックボックスで切り替える。列名の絞り込み入力付き。選択は localStorage に保存される（§6.10）。
 - **ステータス表示**：色バー＋英語ラベル（Draft 灰／Open 橙／Pending 濃橙／In review 青／Closed 緑／Void 灰）。Type 列はコードの丸チップ＋「タイプ > subtype」。担当者未設定は「Unspecified」。
 - **Title セル**：左側に **3D ボタン（48×29px）** を置く（対象要素がある Issue のみ。ない場合は同じ幅の空白）。行クリックは詳細を開くだけで、ビューア表示はしない（§6.5）。
@@ -200,6 +213,7 @@ Forma（Autodesk Construction Cloud、以下 ACC）の実 Issue を Issues API �
 ### 6.3 詳細パネル
 
 - 見出しは「Issue #番号」。項目：サムネイル画像／Title（編集可）／Status（編集可）／Type（チップ表示）／Due date（編集可）／Description（編集可）／Assigned to（名前）／Watchers（名前の列挙）／Placement（モデル名＋バージョン）／対象要素（自動付与されたプロパティの定義リスト。日本語ラベル付き、`revitId` と `objectid` は出さない）。
+- **モデル更新による変更（v8.33）**：対象要素の下に専用の節を持つ。内容は「V{ピン時点} → V{最新}：判定文」（対象要素は最新版で追加された要素です／最新版では削除されています／変更があります／実質的な変更はありません）＋シグナル（形状の変更／移動（約 X m）／プロパティの変更）＋実質変化したプロパティの「名前：旧値 → 新値」一覧（最大12件）＋ペア全体の件数（追加・削除・実質変更。見かけ上の変更の件数は判定から除外した旨を併記）。取得中は「変更情報を取得中…（Vx → Vy）」、失敗時はその旨、比較対象がない場合は「比較対象なし（ピン時点と最新が同じバージョンです）」と表示する。
 - **サムネイルの優先順位**：① Forma のスナップショット（`snapshotUrn`）→ ② 読み込み失敗時の代替としてモデルサムネイル。スナップショットがない Issue は ③ ビューアのキャプチャ（§6.5、表示済みの場合）→ ④ モデルサムネイル。
 - **編集と保存**：「変更を保存」で `/api/issues/update` に送り、実 Issue へ PATCH する。保存後は一覧を取り直し、「保存しました（Forma 側に反映済み）」を表示する。失敗時は理由を表示する。
 - **ステータスの選択肢**は Issue ごとの `permittedStatuses`（Forma が許可する遷移）に従う。取得できない場合は全ステータス（draft／open／pending／in_review／closed／void）を選択肢にし、現在のステータスは必ず含める。
@@ -298,6 +312,9 @@ Viewer のツールバーに自前のボタン群（DemoToolbarExtension）を�
 - **OBJ 抽出は DACH と sample_architecture で失敗する**（変換自体が「No Geometries to extract」。ファイル固有）。
 - **形状を持たない要素**（プロパティ DB にはあるがビューアブルの SVF に描画実体がない要素）には、検証可能なピン座標が得られないため正しくピンを置けない（旧 #21・#23 が該当し、作り直しをせず削除した）。
 - 要素索引は §2 の前提に対する例外として残っている（付与の動的化は未決）。
+- **バージョン間 Diff の比較ペアは「ピン時点 → 最新」に固定**（§5.9）。任意の2版を選んで比べる機能は sample-d には無く、履歴グラフ（別アプリ）側の担当。
+- **Diff の結果キャッシュは版番号がキー**：同じ版番号のままファイルが差し替えられた場合、古い結果を読み続ける可能性がある（版番号が上がれば新しいペアとして取り直す）。
+- **変更判定はヒューリスティクス**：形状ハッシュ・bbox・値の実質変化で判定しており（§5.9）、要素の削除→再作成（ID の変化）は「削除＋追加」として現れる。プロパティの変更一覧は補助情報で、キー自体の付け替えが残る場合は値の移行が「（なし）→ 値」と表示されることがある。
 - Issue の取得は最大200件まで（ページングの上限）。
 - この VM のブラウザからは Viewer の CDN に到達できないため、実機確認はユーザーのブラウザで行う（ローカル検証はオフラインのリグで代替する）。
 
@@ -318,3 +335,4 @@ Viewer のツールバーに自前のボタン群（DemoToolbarExtension）を�
 | 2026-11-16 | v8.32 | §1.5 に Revit Issues アドインの存在と「差別化が前提である」旨を追記。具体的な差別化の現状比較は更新負担のため記載しない（ユーザー指示） |
 | 2026-11-16 | v8.32 | §1.6 に将来像（履歴グラフで「同じ指摘」を追う）を追記。スナップショットの自前保持を可とする決定と、要素 ID が変わる場合の同一性の扱い（候補提示＋人が確定）を含む（ユーザーとの設計議論） |
 | 2026-11-17 | v8.32 | §1.6 に追記：将来像は sample-d とは分けて別アプリとして検討することになった（ユーザー決定） |
+| 2026-11-17 | v8.33 | バージョン間 Diff による変更表示を追加（§1.4、§5.5、§5.6、§5.9、§6.2、§6.3、§7）。比較ペアはピン時点→最新に固定（ユーザー決定）。Model Properties API の Diff をペア単位で非同期取得し、ロケールノイズを除いた判定を表の「変更」列と詳細パネルに表示する |
