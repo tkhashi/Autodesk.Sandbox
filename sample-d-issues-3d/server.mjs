@@ -99,6 +99,10 @@ const indexCacheDir = path.join(root, 'cache');
 fs.mkdirSync(indexCacheDir, { recursive: true });
 for (const m of models) {
   m.propsIndex = null; m.ext2dbid = null; m.indexStatus = 'idle'; m.indexError = null; m.indexVersionId = null;
+  // 登録されている derivativeUrn の版が「基準版」。それより新しい版があれば最新版として解決する（重ね表示用）
+  const dec = Buffer.from(m.derivativeUrn, 'base64').toString('utf8');
+  m.baseVersion = Number(dec.match(/\?version=(\d+)/)?.[1] ?? 1);
+  m.latest = null; m.latestDone = false; m.latestResolving = false; m.viewableName = null;
   try { // 前回構築した派生キャッシュがあれば即座に使う
     const c = JSON.parse(fs.readFileSync(path.join(indexCacheDir, 'index-' + m.key + '.json'), 'utf8'));
     if (c?.propsIndex && c?.ext2dbid && c.guid === m.viewableGuid) {
@@ -109,35 +113,40 @@ for (const m of models) {
 }
 let DatabaseSync = null;
 try { ({ DatabaseSync } = await import('node:sqlite')); } catch (e) {}
+// 指定した derivative（版）と viewable から要素索引データを作る（基準版・最新版で共用）
+async function buildIndexData(derivativeUrn, viewableGuid, tmpTag) {
+  if (!DatabaseSync) throw new Error('node:sqlite が使えません（Node 22.5+ が必要です）');
+  const token = (await getToken2()).access_token;
+  // プロパティ一式 → externalId → プロパティ（平坦化）
+  const props = await pollUntilReady(`${BASE}/modelderivative/v2/designdata/${derivativeUrn}/metadata/${viewableGuid}/properties?forceget=true`, token, 'properties');
+  const propsIndex = {};
+  for (const o of props.data?.collection ?? []) {
+    if (!o.externalId) continue;
+    const entry = { name: o.name, revitId: o.name?.match(/\[(\d+)\]\s*$/)?.[1] ?? null, objectid: o.objectid };
+    for (const g of Object.values(o.properties ?? {})) for (const [k, v] of Object.entries(g)) {
+      if (!k.startsWith('_') && entry[k] === undefined) entry[k] = v;
+    }
+    propsIndex[o.externalId] = entry;
+  }
+  // model.sdb（変換データ同梱のプロパティ DB）→ externalId → Viewer の dbId
+  const sdbUrn = `urn:adsk.viewing:fs.file:${derivativeUrn}/output/Resource/model.sdb`;
+  const sr = await fetch(`${BASE}/modelderivative/v2/designdata/${derivativeUrn}/manifest/${encodeURIComponent(sdbUrn)}`, { headers: { Authorization: 'Bearer ' + token } });
+  if (!sr.ok) throw new Error('sdb status ' + sr.status);
+  const sdbPath = path.join(indexCacheDir, 'tmp-' + tmpTag + '.sdb');
+  fs.writeFileSync(sdbPath, Buffer.from(await sr.arrayBuffer()));
+  const db = new DatabaseSync(sdbPath);
+  const ext2dbid = {};
+  for (const row of db.prepare('SELECT id, external_id FROM _objects_id').all()) ext2dbid[row.external_id] = row.id;
+  db.close();
+  fs.rmSync(sdbPath, { force: true });
+  return { propsIndex, ext2dbid };
+}
 async function buildIndex(m) {
   if (m.indexStatus === 'building') return;
   m.indexStatus = 'building'; m.indexError = null;
   const t0 = Date.now();
   try {
-    if (!DatabaseSync) throw new Error('node:sqlite が使えません（Node 22.5+ が必要です）');
-    const token = (await getToken2()).access_token;
-    // プロパティ一式 → externalId → プロパティ（平坦化）
-    const props = await pollUntilReady(`${BASE}/modelderivative/v2/designdata/${m.derivativeUrn}/metadata/${m.viewableGuid}/properties?forceget=true`, token, 'properties');
-    const propsIndex = {};
-    for (const o of props.data?.collection ?? []) {
-      if (!o.externalId) continue;
-      const entry = { name: o.name, revitId: o.name?.match(/\[(\d+)\]\s*$/)?.[1] ?? null, objectid: o.objectid };
-      for (const g of Object.values(o.properties ?? {})) for (const [k, v] of Object.entries(g)) {
-        if (!k.startsWith('_') && entry[k] === undefined) entry[k] = v;
-      }
-      propsIndex[o.externalId] = entry;
-    }
-    // model.sdb（変換データ同梱のプロパティ DB）→ externalId → Viewer の dbId
-    const sdbUrn = `urn:adsk.viewing:fs.file:${m.derivativeUrn}/output/Resource/model.sdb`;
-    const sr = await fetch(`${BASE}/modelderivative/v2/designdata/${m.derivativeUrn}/manifest/${encodeURIComponent(sdbUrn)}`, { headers: { Authorization: 'Bearer ' + token } });
-    if (!sr.ok) throw new Error('sdb status ' + sr.status);
-    const sdbPath = path.join(indexCacheDir, 'tmp-' + m.key + '.sdb');
-    fs.writeFileSync(sdbPath, Buffer.from(await sr.arrayBuffer()));
-    const db = new DatabaseSync(sdbPath);
-    const ext2dbid = {};
-    for (const row of db.prepare('SELECT id, external_id FROM _objects_id').all()) ext2dbid[row.external_id] = row.id;
-    db.close();
-    fs.rmSync(sdbPath, { force: true });
+    const { propsIndex, ext2dbid } = await buildIndexData(m.derivativeUrn, m.viewableGuid, m.key);
     m.propsIndex = propsIndex; m.ext2dbid = ext2dbid; m.indexStatus = 'ready';
     const ver = await getModelVersion(m).catch(() => null);
     m.indexVersionId = ver?.versionId ?? null;
@@ -158,7 +167,66 @@ function initIndexes() {
     } else {
       buildIndex(m);
     }
+    resolveLatest(m); // 基準版より新しい版があれば、最新版の索引も用意する（重ね表示用）
   }
+}
+
+// ============ 最新版の解決と索引（重ね表示：最新版を主表示し、旧版をゴーストで重ねる） ============
+async function listViewables(derivativeUrn, token) {
+  const j = await apsGet(`${BASE}/modelderivative/v2/designdata/${derivativeUrn}/metadata`, token);
+  return j.data?.metadata ?? [];
+}
+// 基準版より新しい版（tip）があれば、その derivative と同名 viewable の GUID を解決し、索引構築を開始する
+async function resolveLatest(m) {
+  if (m.latest || m.latestResolving) return;
+  m.latestResolving = true;
+  try {
+    const tip = await getModelVersion(m).catch(() => null);
+    if (!tip || tip.versionNumber <= m.baseVersion || !tip.versionId) { m.latestDone = true; return; }
+    const token = (await getToken2()).access_token;
+    if (!m.viewableName) {
+      const baseViews = await listViewables(m.derivativeUrn, token);
+      m.viewableName = baseViews.find(v => v.guid === m.viewableGuid)?.name ?? null;
+    }
+    const latestUrn = Buffer.from(tip.versionId, 'utf8').toString('base64url');
+    const views = await listViewables(latestUrn, token);
+    const lv = views.find(v => v.role === '3d' && v.name === m.viewableName) ?? views.find(v => v.guid === m.viewableGuid);
+    if (!lv) { m.latest = { status: 'error', error: '最新版に同名の viewable が見つかりません', version: tip.versionNumber, versionId: tip.versionId, urn: latestUrn, guid: null, propsIndex: null, ext2dbid: null }; return; }
+    m.latest = { status: 'idle', version: tip.versionNumber, versionId: tip.versionId, urn: latestUrn, guid: lv.guid, propsIndex: null, ext2dbid: null, error: null };
+    buildLatestIndex(m);
+  } catch (e) {
+    m.latest = { status: 'error', error: String(e?.message ?? e), version: null, versionId: null, urn: null, guid: null, propsIndex: null, ext2dbid: null };
+    console.error('resolveLatest failed:', m.key, e);
+  } finally { m.latestResolving = false; m.latestDone = true; }
+}
+async function buildLatestIndex(m) {
+  const L = m.latest;
+  if (!L || L.status === 'building' || L.status === 'ready' || !L.guid) return;
+  try { // 前回構築した派生キャッシュがあれば即座に使う（版と viewable が一致する場合のみ）
+    const c = JSON.parse(fs.readFileSync(path.join(indexCacheDir, 'index-' + m.key + '-latest.json'), 'utf8'));
+    if (c?.propsIndex && c?.ext2dbid && c.versionId === L.versionId && c.guid === L.guid) {
+      L.propsIndex = c.propsIndex; L.ext2dbid = c.ext2dbid; L.status = 'ready';
+      console.log(`latest index from cache: ${m.key} V${L.version} (props ${Object.keys(c.propsIndex).length})`);
+      return;
+    }
+  } catch (e) {}
+  L.status = 'building';
+  try {
+    const { propsIndex, ext2dbid } = await buildIndexData(L.urn, L.guid, m.key + '-latest');
+    L.propsIndex = propsIndex; L.ext2dbid = ext2dbid; L.status = 'ready';
+    fs.writeFileSync(path.join(indexCacheDir, 'index-' + m.key + '-latest.json'), JSON.stringify({ versionId: L.versionId, guid: L.guid, builtAt: new Date().toISOString(), propsIndex, ext2dbid }));
+    console.log(`latest index built: ${m.key} V${L.version} (props ${Object.keys(propsIndex).length}, map ${Object.keys(ext2dbid).length})`);
+  } catch (e) { L.status = 'error'; L.error = String(e?.message ?? e); console.error('latest index failed:', m.key, e); }
+}
+// 重ね表示の準備状態：na（新しい版なし）／building（索引・Diff 取得中）／ready／failed
+function overlayStatus(m) {
+  if (!m.latest) return m.latestDone ? 'na' : 'building';
+  if (m.latest.status === 'error') return 'failed';
+  if (m.latest.status !== 'ready') return 'building';
+  const pair = diffStore.get(diffPairKey(m.key, m.baseVersion, m.latest.version));
+  if (!pair || pair.state === 'building') return 'building';
+  if (pair.state === 'failed') return 'failed';
+  return 'ready';
 }
 
 // ============ Issues（タイプ／メンバーは10分キャッシュ） ============
@@ -202,7 +270,7 @@ function enrich(issue, types, users, tips) {
     snapshotUrn: issue.snapshotUrn ?? null, snapshotHasMarkups: issue.snapshotHasMarkups ?? false,
     permittedStatuses: issue.permittedStatuses ?? null, customAttributes: issue.customAttributes ?? [],
     attachmentCount: issue.attachmentCount ?? 0, commentCount: issue.commentCount ?? 0,
-    pin: null, element: null, targetDbId: null, modelKey: null, modelName: null, modelFullName: null,
+    pin: null, element: null, targetDbId: null, targetDbIdLatest: null, modelKey: null, modelName: null, modelFullName: null,
     changeState: 'na', change: null, tipVersion: null,
   };
   const ld = (issue.linkedDocuments ?? [])[0];
@@ -214,6 +282,8 @@ function enrich(issue, types, users, tips) {
   out.modelKey = m.key;
   out.modelName = m.short;
   out.modelFullName = m.name;
+  // 最新版のシーンでの対象要素（重ね表示のアンカー用。最新版の索引が用意できている場合のみ）
+  if (m.latest?.ext2dbid && d.externalId) out.targetDbIdLatest = m.latest.ext2dbid[d.externalId] ?? null;
   // バージョン間 Diff（ピン時点の版 → 最新版）による対象要素の変更。索引の有無とは独立に判定する
   const tip = tips?.get(m.key) ?? null;
   out.tipVersion = tip;
@@ -256,6 +326,10 @@ async function fetchIssues() {
   }
   const enriched = all.filter(i => !i.deleted).map(i => enrich(i, types, users, tips));
   planDiffs(enriched); // 必要な Diff ペア（ピン時点 → 最新）が無ければ裏で開始する
+  for (const m of models) { // 重ね表示用に「基準版 → 最新版」のペアも用意する
+    const tip = tips.get(m.key);
+    if (tip != null && tip > m.baseVersion) ensureDiffPair(m, m.baseVersion, tip);
+  }
   return enriched;
 }
 
@@ -275,6 +349,7 @@ function refreshIssues() {
 }
 async function getIssuesCached() {
   if (models.some(m => m.indexStatus !== 'ready')) return fetchIssues();
+  if (models.some(m => m.latest && m.latest.status === 'building')) return fetchIssues(); // 最新版の索引構築中も付与（targetDbIdLatest）が変わるのでライブで取る
   if ([...diffStore.values()].some(p => p.state === 'building')) return fetchIssues(); // Diff 取得中も付与が変わるのでライブで取る
   if (!issuesBox) return refreshIssues();
   if (Date.now() - issuesBox.at >= ISSUES_TTL) refreshIssues().catch(() => {});
@@ -636,12 +711,30 @@ const server = http.createServer(async (req, res) => {
       const issues = await getIssuesCached();
       const vers = await Promise.all(models.map(getModelVersion));
       return sendJson(res, 200, {
-        models: models.map((m, i) => ({ key: m.key, name: m.name, short: m.short, version: vers[i].versionNumber, urn: m.derivativeUrn, guid: m.viewableGuid, pinFrame: m.pinFrame ?? null, indexStatus: m.indexStatus, diffStatus: modelDiffStatus(m.key) })),
+        models: models.map((m, i) => ({ key: m.key, name: m.name, short: m.short, version: vers[i].versionNumber, baseVersion: m.baseVersion, urn: m.derivativeUrn, guid: m.viewableGuid, latest: m.latest?.guid ? { version: m.latest.version, urn: m.latest.urn, guid: m.latest.guid } : null, overlayStatus: overlayStatus(m), pinFrame: m.pinFrame ?? null, indexStatus: m.indexStatus, diffStatus: modelDiffStatus(m.key) })),
         issues, fetchedAt: new Date().toISOString(),
       });
     }
     if (url.pathname === '/api/index-status') { // 索引の構築状態だけを返す軽いエンドポイント（画面のポーリング用）
-      return sendJson(res, 200, { models: models.map(m => ({ key: m.key, short: m.short, indexStatus: m.indexStatus, diffStatus: modelDiffStatus(m.key) })) });
+      return sendJson(res, 200, { models: models.map(m => ({ key: m.key, short: m.short, indexStatus: m.indexStatus, diffStatus: modelDiffStatus(m.key), overlayStatus: overlayStatus(m), latestVersion: m.latest?.version ?? null })) });
+    }
+    if (url.pathname === '/api/overlay') {
+      // 重ね表示用：基準版 → 最新版の Diff を、両版のシーンの dbId 集合に変換して返す
+      const m = models.find(x => x.key === url.searchParams.get('model'));
+      if (!m || !m.latest) return sendJson(res, 200, { status: 'na' });
+      const st = overlayStatus(m);
+      if (st !== 'ready') return sendJson(res, 200, { status: st });
+      const pair = diffStore.get(diffPairKey(m.key, m.baseVersion, m.latest.version));
+      const removed = [], added = [], changed = [], changedBase = [];
+      for (const [ext, e] of pair.byExt) {
+        if (e.type === 'removed') { const id = m.ext2dbid?.[ext]; if (id != null) removed.push(id); }
+        else if (e.type === 'added') { const id = m.latest.ext2dbid?.[ext]; if (id != null) added.push(id); }
+        else if (e.type === 'modified') {
+          const id = m.latest.ext2dbid?.[ext]; if (id != null) changed.push(id);
+          const b = m.ext2dbid?.[ext]; if (b != null) changedBase.push(b);
+        }
+      }
+      return sendJson(res, 200, { status: 'ready', fromVersion: m.baseVersion, toVersion: m.latest.version, removed, added, changed, changedBase });
     }
     if (url.pathname === '/api/extract') {
       // Issue の対象要素＋周辺（同じ階・隣接通り芯など）を OBJ で切り出す

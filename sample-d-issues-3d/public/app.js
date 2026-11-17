@@ -1,6 +1,9 @@
 // app.js — sample-d の画面ロジック（Issue 一覧／詳細／ビューア／一覧モード）
 let DATA = null, selected = null, focusedId = null;
 let viewer = null, viewerModelKey = null, rootLoaded = false, geoLoaded = false, tSelect = 0;
+// 重ね表示（最新版を主表示＋旧版をゴーストで重ねる。v8.35）の状態
+let ghostModel = null, ghostGeoLoaded = false, overlayData = null, overlayApplied = false, overlayExpected = false, overlayFetchTimer = null;
+const overlayDisabledKeys = new Set(); // 重ね表示の準備に失敗したモデルは、通常表示（基準版のみ）に切り替える
 let viewerReady = false, desiredModelKey = null;
 let fittedFor = null; // カメラのフィットを実行済みの対象（モデル: Issue）。フィットは1回だけにする
 let pendingFocusId = null; // 読み込み中・モデル切替中に 3D ボタンで指定された Issue（読み込み完了時にカメラを寄せる）
@@ -9,7 +12,7 @@ const $ = id => document.getElementById(id);
 const LS_COLS = 'sampled-cols-v2', LS_PAGE = 'sampled-pagesize-v2', LS_GHOST = 'sampled-ghost-transparency'; // ユーザー設定の保存キー（互換のため変更しない）
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 function issue() { return DATA?.issues.find(i => i.id === selected); }
-function issuesOnCurrentModel() { return DATA.issues.filter(x => x.modelKey === viewerModelKey && x.targetDbId); }
+function issuesOnCurrentModel() { return DATA.issues.filter(x => x.modelKey === viewerModelKey && (x.targetDbId || (overlayData?.status === 'ready' && x.targetDbIdLatest))); }
 function focusedIssue() { return DATA?.issues.find(i => i.id === focusedId); }
 const STATUS = { draft: '下書き', open: '未対応', pending: '対応中', in_review: '確認待ち', closed: '完了', void: '無効' };
 const FSTATUS = { // Forma 風ステータス表示（色バー＋英語）
@@ -184,7 +187,7 @@ function cellHtml(c, i) {
     case 'assignee': return i.assignedToName ? esc(i.assignedToName) : '<span class="unspec">Unspecified</span>';
     case 'placement': return i.modelFullName ? `<span class="place">${esc(i.modelFullName)}</span>${modelVersion(i) ? `<span class="vpill">${esc(modelVersion(i))}</span>` : ''}` : '-';
     case 'change': { const t = changeText(i); return t === '—' ? '—' : `<span class="fst"><i style="background:${CHG_COLOR[t]}"></i>${esc(t)}</span>`; }
-    case 'title': return `<span class="titlecell">${i.targetDbId ? `<button class="vbtn" data-view="${i.id}">3D</button>` : '<span class="vbtn-spacer"></span>'}<b style="font-weight:600">${esc(v)}</b></span>`;
+    case 'title': return `<span class="titlecell">${(i.targetDbId || i.targetDbIdLatest) ? `<button class="vbtn" data-view="${i.id}">3D</button>` : '<span class="vbtn-spacer"></span>'}<b style="font-weight:600">${esc(v)}</b></span>`;
     default: return esc(v);
   }
 }
@@ -284,7 +287,7 @@ function selectIssue(id) {
     .map(([k, v]) => `<dt>${esc(PROP_LABELS[k] ?? k)}</dt><dd>${esc(v)}</dd>`).join('')
     : '<dd style="color:#68798a">対象要素なし（ピンなし、または対象外モデル）</dd>';
   renderDetailChange(i);
-  $('dtShow3d').disabled = !i.targetDbId;
+  $('dtShow3d').disabled = !(i.targetDbId || i.targetDbIdLatest);
   if (overviewOn) { // 一覧モード中は選択の赤とラベルの強調を追随させる
     colorIssueElements();
     refreshMarkerSel();
@@ -365,6 +368,13 @@ async function reloadIssuesSoft() {
   buildTable();
   const editing = $('detailPanel').contains(document.activeElement);
   if (keep && !editing) selectIssue(keep);
+  // 表示中のモデルが重ね表示に対応したのに、ビューアが通常表示で作られていたら作り直す
+  const cm = DATA.models.find(x => x.key === viewerModelKey);
+  if (viewer && viewerMode === 'aps' && cm?.latest && !overlayExpected && !overlayDisabledKeys.has(cm.key)) {
+    const v = viewer; viewer = null; viewerModelKey = null;
+    try { v?.finish(); } catch (e) {}
+    setupViewer(cm.key);
+  }
 }
 function watchIndexStatus() {
   const el = $('idxStat');
@@ -373,12 +383,12 @@ function watchIndexStatus() {
     el.textContent = '一部のモデル情報の構築に失敗しました（そのモデルの Issue は要素情報なしで表示しています）。';
   };
   if ((DATA?.models ?? []).some(m => m.indexStatus === 'error')) showFailed();
-  if (!(DATA?.models ?? []).some(m => m.indexStatus === 'building' || m.indexStatus === 'idle' || m.diffStatus === 'building')) return;
+  if (!(DATA?.models ?? []).some(m => m.indexStatus === 'building' || m.indexStatus === 'idle' || m.diffStatus === 'building' || m.overlayStatus === 'building')) return;
   let tries = 0;
   const tick = async () => {
     let ms = [];
     try { ms = (await (await fetch('/api/index-status')).json()).models ?? []; } catch (e) {}
-    const pending = ms.filter(m => m.indexStatus === 'building' || m.indexStatus === 'idle' || m.diffStatus === 'building');
+    const pending = ms.filter(m => m.indexStatus === 'building' || m.indexStatus === 'idle' || m.diffStatus === 'building' || m.overlayStatus === 'building');
     const maxTries = pending.some(m => m.diffStatus === 'building') ? 400 : 60; // Diff は索引より時間がかかるため長めに待つ
     if (pending.length && tries++ < maxTries) {
       el.hidden = false;
@@ -466,13 +476,14 @@ function showInViewer(id) {
   if (i?.modelKey) ensureViewerModel(i.modelKey);
   if (overviewOn) {
     // 一覧モードは維持したまま、その Issue にカメラを寄せる（ラベル・引き出し線は残す）
-    if (viewer && geoLoaded && i?.targetDbId && i.modelKey === viewerModelKey) {
-      if (!fitToElement(i.targetDbId)) { try { viewer.fitToView([i.targetDbId]); } catch (e) {} }
+    const t = i && effTarget(i);
+    if (viewer && geoLoaded && t && i.modelKey === viewerModelKey) {
+      if (!fitToElement(t.dbId, t.model)) { try { viewer.fitToView([t.dbId]); } catch (e) {} }
       colorIssueElements();
       refreshMarkerSel();
       applyOccluderClearing();
       updateMarkers();
-    } else if (i?.targetDbId) {
+    } else if (i?.targetDbId || i?.targetDbIdLatest) {
       pendingFocusId = id; // 読み込み中・モデル切替中は、完了した時点で寄せる
     }
   } else {
@@ -484,9 +495,9 @@ function showInViewer(id) {
 // 色替え（theming）の点滅は、そのたびに画面全体の再描画が走って負荷が高いので使わない。
 // 対象要素は濃い赤で一度だけ塗り（再描画は1回）、「ここだよ」の合図は画面上のピン
 // （#focusPin。CSS アニメーションなので 3D 描画には触らない）で出す。
-function paintFocusTarget(dbId) {
+function paintFocusTarget(dbId, model) {
   if (!viewer) return;
-  try { viewer.setThemingColor(dbId, v4(1, 0.05, 0.05, 1)); } catch (e) {}
+  try { viewer.setThemingColor(dbId, v4(1, 0.05, 0.05, 1), model); } catch (e) {}
 }
 // フォーカス中要素の位置にピンを重ねる。位置合わせはカメラ等のイベント時のみで、
 // アニメーション自体は CSS が担うため、3D の再描画は発生しない。
@@ -494,7 +505,8 @@ function updateFocusPin() {
   const el = $('focusPin');
   if (!el) return;
   const i = focusedIssue();
-  if (!viewer || !rootLoaded || overviewOn || viewerMode !== 'aps' || !i?.targetDbId || i.modelKey !== viewerModelKey) { el.hidden = true; return; }
+  const ft = i && effTarget(i);
+  if (!viewer || !rootLoaded || overviewOn || viewerMode !== 'aps' || !i || i.modelKey !== viewerModelKey || (!ft && !i.targetDbId)) { el.hidden = true; return; }
   const pos = anchorFor(i) ?? pinAnchorFor(i); // 読み込み中はピン座標で先行表示
   if (!pos) { el.hidden = true; return; }
   try {
@@ -502,7 +514,7 @@ function updateFocusPin() {
     const p = new T.Vector3(pos.x, pos.y, pos.z);
     const cam = viewer.impl.camera; const dir = new T.Vector3(); cam.getWorldDirection(dir);
     if (p.clone().sub(cam.position).dot(dir) <= 0) { el.hidden = true; return; }
-    if (geoLoaded && typeof viewer.isNodeVisible === 'function' && !viewer.isNodeVisible(i.targetDbId)) { el.hidden = true; return; }
+    if (geoLoaded && ft && ft.model === viewer.model && typeof viewer.isNodeVisible === 'function' && !viewer.isNodeVisible(ft.dbId)) { el.hidden = true; return; }
     const v = viewer.worldToClient(p);
     el.style.left = Math.floor(v.x) + 'px';
     el.style.top = Math.floor(v.y) + 'px';
@@ -543,9 +555,10 @@ function syncOverviewBtn() { window.dispatchEvent(new CustomEvent('demo-overview
 // [minx, miny, minz, maxx, maxy, maxz] の数値配列（LMV 本体の実装で確認。2026-11-16）。
 // Box3 を渡すと min/max が初期値（+∞/−∞）のままになり、常に「ボックスなし」になって
 // ラベル・引き出し線・フォーカスピンが全て消える（実機報告で発覚した不具合の真因）。
-function nodeWorldBox(dbId) {
+function nodeWorldBox(dbId, model) {
+  const mdl = model ?? viewer.model;
   try {
-    const tree = viewer.model.getInstanceTree();
+    const tree = mdl.getInstanceTree();
     const a = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
     tree.getNodeBox(dbId, a);
     if (a[0] <= a[3] && a[1] <= a[4] && a[2] <= a[5]) {
@@ -554,8 +567,8 @@ function nodeWorldBox(dbId) {
   } catch (e) {}
   try {
     // 予備：フラグメントのワールド境界を合成する
-    const tree = viewer.model.getInstanceTree();
-    const frags = viewer.model.getFragmentList();
+    const tree = mdl.getInstanceTree();
+    const frags = mdl.getFragmentList();
     const box = new Autodesk.Viewing.Private.THREE.Box3();
     const fb = new Autodesk.Viewing.Private.THREE.Box3();
     let found = false;
@@ -567,10 +580,28 @@ function nodeWorldBox(dbId) {
   } catch (e) {}
   return null;
 }
+// Issue の対象要素が「今どのモデル（シーン）の、どの dbId か」を返す。
+// 重ね表示が有効な間は、最新版に要素があれば最新版の要素を、無ければ旧版の
+// ゴースト要素を指す。重ね表示の準備が整うまではボックスアンカーを使わない
+// （基準版の dbId を最新版のシーンで引くと別要素を指してしまうため、
+// その間はピン座標の先行表示にフォールバックする）。
+function effTarget(issue) {
+  if (!issue || issue.modelKey !== viewerModelKey || !viewer) return null;
+  if (overlayExpected && overlayData?.status !== 'ready') return null;
+  if (overlayData?.status === 'ready') {
+    if (issue.targetDbIdLatest != null) return { dbId: issue.targetDbIdLatest, model: viewer.model };
+    if (issue.targetDbId != null && ghostModel) return { dbId: issue.targetDbId, model: ghostModel };
+    return null;
+  }
+  if (issue.targetDbId != null) return { dbId: issue.targetDbId, model: viewer.model };
+  return null;
+}
 // 引き出し線の先端は、読み込み完了後はハイライトされる部材そのものの中心にする。
 // 部材ボックスは Viewer 実行時 API から取るので、ハイライトや fitToView と同じ空間で必ず部材の上に来る。
 function anchorFor(issue) {
-  const box = nodeWorldBox(issue.targetDbId);
+  const t = effTarget(issue);
+  if (!t) return null;
+  const box = nodeWorldBox(t.dbId, t.model);
   if (!box) return null;
   return { x: (box.min.x + box.max.x) / 2, y: (box.min.y + box.max.y) / 2, z: (box.min.z + box.max.z) / 2 };
 }
@@ -603,17 +634,20 @@ function pinAnchorFor(issue) {
 // マーカー構築済みキーは段階も含める：読み込み中（ピン座標アンカー）→ 完了後
 // （ボックスアンカー）でキーが変わり、完了時に作り直されて線の先が部材に合い直す。
 function markersKey() {
-  return viewerModelKey + ':' + issuesOnCurrentModel().map(x => x.id + '|' + x.status).join(',') + (geoLoaded ? ':g' : ':e');
+  return viewerModelKey + ':' + issuesOnCurrentModel().map(x => x.id + '|' + x.status).join(',') + (geoLoaded ? ':g' : ':e') + (overlayData?.status === 'ready' ? ':ov' : '');
 }
 function colorIssueElements() {
   if (!viewer) return;
   for (const i of issuesOnCurrentModel()) {
+    const t = effTarget(i);
+    if (!t) continue;
     const c = STATUS3D[i.status] ?? [0.6, 0.6, 0.6];
-    try { viewer.setThemingColor(i.targetDbId, v4(c[0], c[1], c[2], 1)); } catch (e) {}
+    try { viewer.setThemingColor(t.dbId, v4(c[0], c[1], c[2], 1), t.model); } catch (e) {}
   }
   const sel = issue(); // 表で選択中の Issue は赤
-  if (sel && sel.modelKey === viewerModelKey && sel.targetDbId) {
-    try { viewer.setThemingColor(sel.targetDbId, v4(1, 0.08, 0.08, 1)); } catch (e) {}
+  const st = sel && effTarget(sel);
+  if (st) {
+    try { viewer.setThemingColor(st.dbId, v4(1, 0.08, 0.08, 1), st.model); } catch (e) {}
   }
 }
 function clearMarkers() {
@@ -637,7 +671,8 @@ function buildMarkers() {
   for (const i of issuesOnCurrentModel()) {
     const pos = anchorFor(i) ?? pinAnchorFor(i); // 読み込み中はピン座標で先行表示し、完了後の再構築でボックス中心に合い直す
     if (!pos) continue;
-    const bb = nodeWorldBox(i.targetDbId);
+    const et = effTarget(i);
+    const bb = et ? nodeWorldBox(et.dbId, et.model) : null;
     const corners = bb ? [0, 1].flatMap(xi => [0, 1].flatMap(yi => [0, 1].map(zi => ({
       x: xi ? bb.max.x : bb.min.x, y: yi ? bb.max.y : bb.min.y, z: zi ? bb.max.z : bb.min.z,
     })))) : null;
@@ -805,6 +840,7 @@ function enterOverview() {
   if (!viewer || !geoLoaded) return;
   applyOccluderClearing(); // 選択中の Issue の手前の部材だけを消す
   viewer.clearThemingColors();
+  if (overlayApplied) applyOverlayColors(); // 重ね表示の色付け（Diff）を Issue 色の下に敷き直す
   colorIssueElements();
   const mkey = markersKey();
   if (markersBuiltFor !== mkey) { buildMarkers(); markersBuiltFor = mkey; }
@@ -812,8 +848,9 @@ function enterOverview() {
   if (pendingFocusId) { // 読み込み中に 3D ボタンで指定されていたら、この時点でカメラを寄せる
     const pi = DATA?.issues.find(x => x.id === pendingFocusId);
     pendingFocusId = null;
-    if (pi?.targetDbId && pi.modelKey === viewerModelKey) {
-      if (!fitToElement(pi.targetDbId)) { try { viewer.fitToView([pi.targetDbId]); } catch (e) {} }
+    const pt = pi && effTarget(pi);
+    if (pt && pi.modelKey === viewerModelKey) {
+      if (!fitToElement(pt.dbId, pt.model)) { try { viewer.fitToView([pt.dbId]); } catch (e) {} }
       colorIssueElements(); refreshMarkerSel(); applyOccluderClearing(); updateMarkers();
     }
   }
@@ -923,8 +960,10 @@ function computeOccluders(targetDbId) {
   (function mark(id) { excluded.add(id); tree.enumNodeChildren(id, c => mark(c)); })(targetDbId);
   // 他の Issue 要素とその祖先も消さない（祖先を消すと配下の Issue 要素ごと消えてしまう）
   for (const i of issuesOnCurrentModel()) {
-    excluded.add(i.targetDbId);
-    addAncestors(tree, i.targetDbId, excluded);
+    const t = effTarget(i);
+    if (!t || t.model !== viewer.model) continue; // 主表示（最新版）のシーンにある要素だけが対象
+    excluded.add(t.dbId);
+    addAncestors(tree, t.dbId, excluded);
   }
   const result = [];
   for (const cand of occluderCandidates()) {
@@ -973,11 +1012,13 @@ function applyOccluderSet(next) {
 function applyOccluderClearing() {
   if (!viewer || !geoLoaded || viewerMode !== 'aps' || occluderRange <= 0) { applyOccluderSet(new Set()); occTargetDbId = null; return 0; }
   const i = issue() ?? focusedIssue();
-  if (!i?.targetDbId || i.modelKey !== viewerModelKey) { applyOccluderSet(new Set()); occTargetDbId = null; return 0; }
+  const t = i && effTarget(i);
+  // 手前消去は主表示モデル（最新版）の要素に対してだけ行う。対象が旧版ゴースト側にある場合は行わない
+  if (!t || t.model !== viewer.model || i.modelKey !== viewerModelKey) { applyOccluderSet(new Set()); occTargetDbId = null; return 0; }
   try {
-    const occ = computeOccluders(i.targetDbId);
+    const occ = computeOccluders(t.dbId);
     applyOccluderSet(new Set(occ));
-    occTargetDbId = i.targetDbId;
+    occTargetDbId = t.dbId;
     if (overviewOn) setStatV(`<b>#${i.displayId}</b> の見通しのため、手前の部材 <b>${occ.length} 件</b>を透明にしています（フレームのみ表示・範囲 ${occluderRange}%）。`);
     return occ.length;
   } catch (e) {
@@ -1020,8 +1061,8 @@ if (ghostRangeEl) ghostRangeEl.addEventListener('input', () => {
 // （2026-11-16 ユーザー指示）。
 let focusAnim = null; // フォーカス移動アニメーションの状態（ユーザー操作で中断する）
 function cancelFocusAnim() { if (focusAnim) { cancelAnimationFrame(focusAnim.raf); focusAnim = null; } }
-function fitToElement(dbId) {
-  const box = nodeWorldBox(dbId);
+function fitToElement(dbId, model) {
+  const box = nodeWorldBox(dbId, model);
   if (!box) return false;
   try {
     const T = THREE;
@@ -1074,14 +1115,16 @@ function applySelection() {
   if (overviewOn) return;
   const i = focusedIssue();
   if (!viewer || !rootLoaded || !i) return;
-  if (!i.targetDbId || i.modelKey !== viewerModelKey) {
-    if (!i.targetDbId) { clearOccluders(); viewer.showAll(); viewer.clearThemingColors(); setStatV('この Issue は対象モデルへのピンがないため、モデル全体を表示しています。'); }
+  const t = effTarget(i);
+  if (!t || i.modelKey !== viewerModelKey) {
+    if (!i.targetDbId && !i.targetDbIdLatest) { clearOccluders(); viewer.showAll(); viewer.clearThemingColors(); if (overlayApplied) { applyOverlayColors(); hideGhostKeep(); } setStatV('この Issue は対象モデルへのピンがないため、モデル全体を表示しています。'); }
     updateFocusPin();
     return;
   }
   if (!viewer.model?.getFragmentList?.()) return;
   try {
     viewer.clearThemingColors();
+    if (overlayApplied) applyOverlayColors(); // 重ね表示の色付けはクリアのたびに重ね直す
     // カメラのフィットは、形状の読み込みが終わってから対象ごとに1回だけ行う。
     // 読み込み途中のイベント（ルート読み込み時など）で繰り返すと、不完全な範囲への
     // フィット（モデル全体の俯瞰表示など）と競合して画面が跳ぶ（2026-11-15/16 報告）。
@@ -1089,20 +1132,20 @@ function applySelection() {
     // リセットするので、その場合はもう一度フィットする。
     const fkey = viewerModelKey + ':' + i.id;
     if (fittedFor !== fkey && (geoLoaded || rootLoaded)) {
-      if (fitToElement(i.targetDbId)) fittedFor = fkey;
-      else if (geoLoaded) { try { viewer.fitToView([i.targetDbId]); } catch (e) {} fittedFor = fkey; }
+      if (fitToElement(t.dbId, t.model)) fittedFor = fkey;
+      else if (geoLoaded && t.model === viewer.model) { try { viewer.fitToView([t.dbId]); } catch (e) {} fittedFor = fkey; }
     }
     if (focusAnim) {
       // フォーカスの移動アニメーション中：透明化はまだ適用しない。
       // 移動開始時点の視点で計算すると、到着時にもう一度付け替わり、
       // 半透明の部材が一瞬ちらつく（実機報告）。到着時に1回だけ適用する
       // （fitToElement の完了処理が occTargetDbId を見て適用する）。
-      occTargetDbId = i.targetDbId;
+      occTargetDbId = t.model === viewer.model ? t.dbId : null;
     } else {
       applyOccluderClearing(); // 対象の手前の部材だけを透明にする（材質には触らない）
     }
   } catch (e) { return; }
-  paintFocusTarget(i.targetDbId);
+  paintFocusTarget(t.dbId, t.model);
   updateFocusPin();
   if (geoLoaded) {
     setStatV(`<b>#${i.displayId}</b> の対象要素を表示中（${occHiddenCount ? '手前の部材 ' + occHiddenCount + ' 件を透明にして見通しを確保' : '手前の部材は透明にしていません'}）。`);
@@ -1142,6 +1185,10 @@ function setupViewer(modelKey) {
   $('viewerWrap').innerHTML = '';
   setViewerLoading(`モデル（${esc(m.short)}）を読み込んでいます…`);
   viewerModelKey = modelKey; rootLoaded = false; geoLoaded = false; fittedFor = null; hiddenOccluders = new Set(); occHiddenCount = 0; occTargetDbId = null; occCache = null; streamingNow = true;
+  ghostModel = null; ghostGeoLoaded = false; overlayData = null; overlayApplied = false;
+  if (overlayFetchTimer) { clearTimeout(overlayFetchTimer); overlayFetchTimer = null; }
+  overlayExpected = !!(m.latest && !overlayDisabledKeys.has(modelKey));
+  if (overlayExpected) fetchOverlay(modelKey);
   viewer = new Autodesk.Viewing.GuiViewer3D($('viewerWrap'));
   viewer.start();
   // 手前の部材は「消す」のではなく透明にする：Viewer のゴースト表示を有効にすると、
@@ -1165,7 +1212,14 @@ function setupViewer(modelKey) {
     updateFocusPin();
     setStatV(`モデル（${esc(m.short)}）の読み込み中…`);
   });
-  viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, () => {
+  viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, (e) => {
+    // 重ね表示の旧版（ゴースト）モデルの読み込み完了は、主表示側の完了処理と分ける
+    if (overlayExpected && e?.model && viewer.model && e.model !== viewer.model) {
+      ghostGeoLoaded = true;
+      if (!ghostModel) ghostModel = e.model;
+      maybeApplyOverlay();
+      return;
+    }
     geoLoaded = true;
     streamingNow = false;
     occCache = null; // 候補（要素ボックス）キャッシュは形状確定後に作り直す
@@ -1174,7 +1228,7 @@ function setupViewer(modelKey) {
     if (overviewOn) { enterOverview(); return; }
     applySelection();
     const i = focusedIssue();
-    setStatV(`モデルの読み込みが完了しました。` + (i?.targetDbId && i.modelKey === viewerModelKey ? ` <b>#${i.displayId}</b> の対象要素を表示中（選択から ${((performance.now() - tSelect) / 1000).toFixed(1)} 秒）。` : ''));
+    setStatV(`モデルの読み込みが完了しました。` + (i && effTarget(i) ? ` <b>#${i.displayId}</b> の対象要素を表示中（選択から ${((performance.now() - tSelect) / 1000).toFixed(1)} 秒）。` : ''));
   });
   viewer.addEventListener(Autodesk.Viewing.PROGRESS_UPDATE_EVENT, (e) => {
     if (!geoLoaded && typeof e.percent === 'number') {
@@ -1183,13 +1237,93 @@ function setupViewer(modelKey) {
       updMarkers(); // 先行表示中のラベル／ピンを、配信中の視点変化にも追随させる（rAF で間引き済み）
     }
   });
-  Autodesk.Viewing.Document.load('urn:' + m.urn, (doc) => {
-    // 既定ジオメトリ任せにしない：Snowdon 建築の既定は壁だけの viewable「Coord - Arch Walls」で、
-    // 外灯・藤棚・植栽などがそもそも描画されなかった（2026-11-17 ユーザー指摘）。
-    // models.json で指定した viewable（全カテゴリの「New Construction」等）を明示的に開く。
-    viewer.loadDocumentNode(doc, pickViewableNode(doc, m.guid));
+  // 既定ジオメトリ任せにしない：Snowdon 建築の既定は壁だけの viewable「Coord - Arch Walls」で、
+  // 外灯・藤棚・植栽などがそもそも描画されなかった（2026-11-17 ユーザー指摘）。
+  // models.json で指定した viewable（全カテゴリの「New Construction」等）を明示的に開く。
+  // 重ね表示（v8.35）：新しい版があるモデルは、最新版を主表示として先に読み込み、
+  // 基準版を2つ目のモデルとして重ねる（主表示が viewer.model になるよう先に読む）。
+  const primaryUrn = overlayExpected ? m.latest.urn : m.urn;
+  const primaryGuid = overlayExpected ? m.latest.guid : m.guid;
+  Autodesk.Viewing.Document.load('urn:' + primaryUrn, (doc) => {
+    viewer.loadDocumentNode(doc, pickViewableNode(doc, primaryGuid));
     setStatV(`モデル（${esc(m.short)}）を読み込んでいます（逐次配信）…`);
+    if (overlayExpected) {
+      Autodesk.Viewing.Document.load('urn:' + m.urn, (doc2) => {
+        viewer.loadDocumentNode(doc2, pickViewableNode(doc2, m.guid), { keepCurrentModels: true })
+          .then(model => { ghostModel = model; maybeApplyOverlay(); })
+          .catch(() => {});
+      }, () => {});
+    }
   }, (code, msg2) => { setStatV('モデルの読み込みに失敗しました：' + code + ' ' + esc(msg2 ?? '')); setViewerLoading('モデルの読み込みに失敗しました：' + code); });
+}
+
+// ---- 重ね表示（最新版＋旧版ゴースト） ----
+// サーバーから「基準版 → 最新版」の変更要素集合（両版の dbId）を取得する。
+// 取得中は数秒おきに再試行し、失敗したら通常表示（基準版のみ）に切り替える。
+function fetchOverlay(key, tries = 0) {
+  fetch('/api/overlay?model=' + encodeURIComponent(key)).then(r => r.json()).then(j => {
+    if (viewerModelKey !== key || !overlayExpected) return; // 既に別のモデルへ切り替わっていたら捨てる
+    if (j.status === 'ready') {
+      overlayData = j;
+      maybeApplyOverlay();
+      if (geoLoaded) { // アンカーが最新版に切り替わるので、マーカーと選択表示を作り直す
+        markersBuiltFor = null;
+        if (overviewOn) { colorIssueElements(); const k = markersKey(); buildMarkers(); markersBuiltFor = k; updateMarkers(); }
+        else applySelection();
+      }
+    } else if (j.status === 'building' && tries < 40) {
+      overlayFetchTimer = setTimeout(() => fetchOverlay(key, tries + 1), 4000);
+    } else if (j.status === 'failed' || j.status === 'na') {
+      overlayDisabledKeys.add(key);
+      overlayExpected = false;
+      setStatV('重ね表示の準備に失敗したため、通常表示（ピン時点の版）に切り替えました。');
+      const v = viewer; viewer = null; viewerModelKey = null; // setupViewer の同一モデル早期リターンを回避して作り直す
+      try { v?.finish(); } catch (e) {}
+      setupViewer(key);
+    }
+  }).catch(() => {
+    if (viewerModelKey === key && overlayExpected && tries < 40) overlayFetchTimer = setTimeout(() => fetchOverlay(key, tries + 1), 4000);
+  });
+}
+function maybeApplyOverlay() {
+  if (!overlayExpected || overlayApplied || overlayData?.status !== 'ready' || !ghostModel || !ghostGeoLoaded) return;
+  applyOverlay();
+}
+// 旧版モデルの大半を完全に消し、削除・変更前の要素だけをゴースト（半透明フレーム）で残す。
+// 完全に消す方は hide ではなく setNodeOff を使う：ゴースト表示が有効な間は hide した
+// 要素がフレームとして残ってしまうため（履歴グラフ側で発生した「白い屋根」問題と同じ）。
+function applyOverlay() {
+  overlayApplied = true;
+  const keep = new Set([...overlayData.removed, ...overlayData.changedBase]);
+  try {
+    const f2d = ghostModel.getData().fragments.fragId2dbId;
+    const vm = ghostModel.visibilityManager;
+    for (const id of new Set(Object.values(f2d))) {
+      if (!keep.has(id)) { try { vm.setNodeOff(id, true); } catch (e) {} }
+    }
+  } catch (e) {}
+  applyOverlayColors();
+  hideGhostKeep();
+  // Issue の色（ステータス色・選択色）を Diff 色の上に重ね直す
+  if (overviewOn) colorIssueElements();
+  else { const i = focusedIssue(); const t = i && effTarget(i); if (t) paintFocusTarget(t.dbId, t.model); }
+  setStatV(`重ね表示：最新版 V${overlayData.toVersion} を表示し、旧版 V${overlayData.fromVersion} の削除要素（赤）と変更前の位置（黄）をゴーストで重ねています。最新版の追加要素は緑、変更要素は黄で表示します。`);
+}
+// 旧版のゴースト要素（削除・変更前）を半透明フレーム表示にする。showAll 等で
+// 戻されてしまった場合に呼び直せるよう分離している
+function hideGhostKeep() {
+  if (!overlayData || !ghostModel) return;
+  try { viewer.hide([...overlayData.removed, ...overlayData.changedBase], ghostModel); } catch (e) {}
+}
+// 重ね表示の色付けだけを行う（theming のクリア後に重ね直せるよう分離）
+function applyOverlayColors() {
+  if (!overlayData || overlayData.status !== 'ready') return;
+  if (ghostModel) {
+    try { for (const id of overlayData.changedBase) viewer.setThemingColor(id, v4(1, 0.8, 0.1, 1), ghostModel); } catch (e) {}
+    try { for (const id of overlayData.removed) viewer.setThemingColor(id, v4(1, 0.15, 0.15, 1), ghostModel); } catch (e) {}
+  }
+  try { for (const id of overlayData.added) viewer.setThemingColor(id, v4(0.2, 0.8, 0.3, 1)); } catch (e) {}
+  try { for (const id of overlayData.changed) viewer.setThemingColor(id, v4(1, 0.8, 0.1, 1)); } catch (e) {}
 }
 
 // ビューアの読み込み表示（#viewerMsg）を実際の状態に合わせて出し分ける。
@@ -1248,8 +1382,9 @@ if (window.Autodesk?.Viewing?.Extension) {
 }
 window.addEventListener('demo-focus-target', () => {
   const i = issue() ?? focusedIssue();
-  if (!viewer || !i?.targetDbId || i.modelKey !== viewerModelKey) return;
-  if (!fitToElement(i.targetDbId)) { try { viewer.fitToView([i.targetDbId]); } catch (e) {} }
+  const t = i && effTarget(i);
+  if (!viewer || !t || i.modelKey !== viewerModelKey) return;
+  if (!fitToElement(t.dbId, t.model)) { try { viewer.fitToView([t.dbId]); } catch (e) {} }
   fittedFor = viewerModelKey + ':' + i.id;
   if (overviewOn) { colorIssueElements(); updateMarkers(); applyOccluderClearing(); }
   else applySelection();
@@ -1301,7 +1436,7 @@ initViewer();
     }
     buildColumns();
     buildTable();
-    const first = DATA.issues.find(i => i.targetDbId) ?? DATA.issues[0];
+    const first = DATA.issues.find(i => i.targetDbId || i.targetDbIdLatest) ?? DATA.issues[0];
     if (first) selectIssue(first.id); // 詳細だけ開く。ビューア表示は専用ボタンから
     // 初期化の競合対策：Viewer の準備が先に終わっていて、データ未着でモデルを
     // 作れなかった場合は、データが揃ったこの時点で必ずモデル読み込みを始める

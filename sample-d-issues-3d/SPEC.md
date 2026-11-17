@@ -42,6 +42,7 @@ Forma（Autodesk Construction Cloud、以下 ACC）の実 Issue を Issues API �
 4. **手前の部材の透明化**：選択中の Issue の対象要素について、カメラと対象の間にある部材だけをゴースト表示（フレームのみ表示）にして見通しを確保する。
 5. **OBJ 表示モード**：対象要素＋周辺要素を OBJ で切り出して軽量ビューア（three.js）で表示する切り替え機能。
 6. **バージョン間 Diff による変更表示（v8.33）**：ピン時点のモデルバージョンと最新バージョンを Model Properties API の Diff で比べ、対象要素の変更（追加／削除／形状・移動・プロパティの実質変化）を Issue の表と詳細に表示する。比較ペアは「ピン時点 → 最新」に固定（ユーザー決定）。
+7. **重ね表示（v8.35）**：新しいバージョンがあるモデルでは、ビューアは最新版を主表示し、基準版（登録版）をゴーストとして重ねる。削除された要素は旧版の位置に赤いゴースト、変更された要素は旧版側に黄のゴースト（変更前の位置）と最新版側に黄の表示、追加された要素は緑で表示する（ユーザー決定「最新版＋旧版ゴースト重ね表示」2026-11-17）。
 
 ### 1.5 既存手段との関係（差別化の前提）
 
@@ -115,8 +116,9 @@ Forma（Autodesk Construction Cloud、以下 ACC）の実 Issue を Issues API �
 | メソッド・パス | 仕様 |
 |---|---|
 | GET `/api/token` | Viewer 用 2-legged トークンを返す（`access_token` と残り秒数 `expires_in`、最小60秒） |
-| GET `/api/issues` | 実 Issue の取得＋要素情報の付与（§5.5）。応答は `{ models: [{key, name, short, version, urn, guid, indexStatus}], issues: [...], fetchedAt }`。一覧キャッシュの仕様は §5.6 |
-| GET `/api/index-status` | 索引の構築状態だけを返す軽いエンドポイント `{ models: [{key, short, indexStatus}] }`（画面のポーリング用） |
+| GET `/api/issues` | 実 Issue の取得＋要素情報の付与（§5.5）。応答は `{ models: [{key, name, short, version, baseVersion, urn, guid, latest, overlayStatus, indexStatus, diffStatus}], issues: [...], fetchedAt }`。`latest` は最新版の `{version, urn, guid}`（新しい版が無い／未解決なら null）、`overlayStatus` は §5.10。一覧キャッシュの仕様は §5.6 |
+| GET `/api/index-status` | 索引の構築状態だけを返す軽いエンドポイント `{ models: [{key, short, indexStatus, diffStatus, overlayStatus, latestVersion}] }`（画面のポーリング用） |
+| GET `/api/overlay?model={key}` | 重ね表示用（§5.10、§6.11）。基準版 → 最新版の Diff を両版シーンの dbId 集合に変換して返す `{ status, fromVersion, toVersion, removed, added, changed, changedBase }`。準備ができていない間は `{ status: 'building' }`、新しい版が無ければ `{ status: 'na' }` |
 | POST `/api/issues/update` | 実 Issue の PATCH 中継。ボディ `{ id, patch }`。patch のうち **title / description / status / dueDate の4項目だけ**をホワイトリストで通す。成功したら一覧キャッシュを即座に破棄する |
 | GET `/api/thumbnail?model={key}` | モデルのサムネイル画像（PNG）。メモリキャッシュ。`Cache-Control: max-age=3600` |
 | GET `/api/snapshot?urn={snapshotUrn}` | Issue のスナップショット画像。`urn:adsk.objects:os.object:` で始まる URN のみ受理。署名付き S3 URL 経由で取得（§5.7）。メモリキャッシュ。`Cache-Control: max-age=3600` |
@@ -144,7 +146,7 @@ Forma（Autodesk Construction Cloud、以下 ACC）の実 Issue を Issues API �
   - Issue タイプ：`GET .../issue-types?include=subtypes` で subtype ID → {タイプ名、subtype 名、コード}。**コードは Forma 画面のチップ文字と一致する**（例：Observation > Quality → `OQ`）。
   - メンバー：`GET /construction/admin/v1/projects/{projectId}/users`（limit 200）で autodeskId → 表示名。メールアドレスは画面に出さない。
 - 画面へ返す Issue オブジェクトの主なフィールド：`id`、`displayId`、`title`、`description`、`status`、`dueDate`、`startDate`、`assignedTo`／`assignedToName`、`watcherNames`、`published`、`typeLabel`（「タイプ > subtype」）、`typeCode`、`createdAt`、`openedBy`／`openedAt`、`createdBy`、`snapshotUrn`、`snapshotHasMarkups`、`permittedStatuses`、`customAttributes`、`attachmentCount`、`commentCount`。
-- ピンと要素の解決：`pin = { modelUrn, viewName, objectId, externalId, position, createdAtVersion }`（linkedDocuments の先頭から。`createdAtVersion` はピンが置かれた時点のモデルバージョン）。modelUrn が登録簿の lineage と一致するモデルを `modelKey` とし、索引が ready なら externalId から `targetDbId` と `element`（プロパティ一式）を付与する。
+- ピンと要素の解決：`pin = { modelUrn, viewName, objectId, externalId, position, createdAtVersion }`（linkedDocuments の先頭から。`createdAtVersion` はピンが置かれた時点のモデルバージョン）。modelUrn が登録簿の lineage と一致するモデルを `modelKey` とし、索引が ready なら externalId から `targetDbId` と `element`（プロパティ一式）を付与する。あわせて、最新版の索引（§5.10）が ready なら最新版シーンでの dbId を `targetDbIdLatest` として付与する（重ね表示のアンカー用）。
 - バージョン間 Diff の結果（§5.9）があれば、`changeState`（`na`／`building`／`ready`／`failed`）と `change`（ペアの版番号、対象要素の変更種別とシグナル、ペア全体の件数）を付与する。索引の有無とは独立に判定する。
 
 ### 5.6 Issue 一覧の短期キャッシュ（v8.30）
@@ -181,6 +183,14 @@ Forma（Autodesk Construction Cloud、以下 ACC）の実 Issue を Issues API �
 - **保持する結果**：追加・削除の全要素と、シグナルのある変更要素だけを要素単位で保持する（見かけ上の変更要素は保持しない）。あわせてペア全体の件数（追加／削除／実質変更／生の変更）を保持する。結果は `cache/diff-{key}-v{from}-v{to}.json` に保存し、再起動後はそれを読む。
 - **状態の公開**：`/api/issues` と `/api/index-status` の各モデルに `diffStatus`（`na`／`building`／`ready`／`failed`）を含める。画面は構築中バナーの対象に含め、完了時に一覧を取り直す。
 - **実測（2026-11-17）**：Snowdon 建築（V5 まで）の3ペア（V1→V5、V2→V5、V4→V5）が取得できた。所要は索引が既存のペアで約20秒、索引の新規構築を含むペアで約140秒。検証用 Issue の判定：#43 植栽＝削除（V2 で追加された要素が最新では消えている）、#44 藤棚＝変更なし（最新では戻っている）、#45 外灯＝形状変更＋移動 約1.16m、#46 ドア＝プロパティ変更、#47 壁＝形状変更＋移動 約0.05m。
+
+### 5.10 最新版の解決と索引（v8.35、重ね表示用）
+
+- **基準版**：`data/models.json` の derivativeUrn が指す版（URN を復号して版番号を得る）。ビューアが従来表示してきた版で、要素索引（§5.4）とピン時点の基準はこちら。
+- **最新版の解決**：起動時に各モデルの最新版（Data Management の versions 先頭）を確認し、基準版より新しければ、その版の derivative URN（版 URN の base64）と、**基準版と同じ名前の viewable** の GUID を Model Derivative のメタデータから解決する（GUID は版ごとに変わりうるため名前で引く。同名が無ければ基準版の GUID にフォールバック）。
+- **最新版の索引**：基準版と同じ手順で最新版の要素索引（プロパティ＋externalId → dbId）を構築し、`cache/index-{key}-latest.json` に保存する（版 URN と GUID が一致する場合のみ再利用）。
+- **重ね表示用ペア**：Issue 取得時に「基準版 → 最新版」の Diff ペアも自動で開始する（§5.9 の仕組みを共用）。
+- **状態の公開**：`overlayStatus`（`na`＝新しい版なし／`building`＝解決・索引・Diff のいずれか取得中／`ready`／`failed`）を `/api/issues` と `/api/index-status` に含める。`/api/overlay` は ready の時に、Diff の要素集合を両版の dbId に変換して返す（削除＝基準版 dbId、追加・変更＝最新版 dbId、変更の旧版側＝基準版 dbId）。
 
 ## 6. クライアント仕様（public/）
 
@@ -228,6 +238,16 @@ Forma（Autodesk Construction Cloud、以下 ACC）の実 Issue を Issues API �
 - **読み込み表示**：ビューア上部のピル型表示で実状態を出す（データ読み込み中 → モデル読み込み中（進捗％）→ 完了で消える）。入力は塞がない。ステータス欄（ビューア下）にも進捗・結果・件数などの文言を出す。
 - モデルの切り替えは Issue の選択・3D 表示に連動して自動で行う（`ensureViewerModel`）。
 - Viewer の CDN に到達できない環境では、その旨を読み込み表示とステータス欄に出す。
+
+### 6.11 重ね表示（最新版＋旧版ゴースト。v8.35）
+
+- **対象**：基準版より新しい版があるモデルのみ（現在は Snowdon 建築 V1 → V5）。新しい版が無いモデルは従来どおり単一表示。
+- **読み込み**：最新版を先に読み込んで主表示とし（`viewer.model` は最初に読み込んだモデルを指すため）、基準版を `keepCurrentModels` で2つ目に重ねる。表示 viewable は両版とも同名のもの（§5.10 で解決した GUID）。
+- **旧版（ゴースト層）の表示**：削除・変更前の要素**以外**は `setNodeOff` で完全に消す（ゴースト表示が有効な間は `hide` した要素がフレームとして残るため、hide は使わない）。削除要素は赤、変更要素の旧版側は黄で theming し、`hide` でゴースト（半透明フレーム）表示にする。
+- **最新版（主表示）の色付け**：追加要素は緑、変更要素は黄で theming する。その上に Issue のステータス色・選択色（赤）を重ねる（theming をクリアする処理のたびに Diff 色を敷き直す）。
+- **Issue のアンカー**：重ね表示の準備が整った後は、対象要素が最新版にあれば最新版の要素（`targetDbIdLatest`）を、無ければ旧版のゴースト要素を指す。準備が整うまではボックスアンカーを使わず、ピン座標の先行表示にフォールバックする（基準版の dbId を最新版のシーンで引くと別要素を指すため）。手前消去（§6.7）は主表示の要素に対してのみ行う。
+- **フォールバック**：重ね表示の準備（`/api/overlay`）が失敗したら、そのモデルは通常表示（基準版のみ）に切り替える。
+- OBJ モード（§6.9）は重ね表示の対象外（従来どおり基準版から抽出する）。
 
 ### 6.5 単独フォーカス表示（3D ボタン）
 
@@ -314,6 +334,7 @@ Viewer のツールバーに自前のボタン群（DemoToolbarExtension）を�
 - **形状を持たない要素**（プロパティ DB にはあるがビューアブルの SVF に描画実体がない要素）には、検証可能なピン座標が得られないため正しくピンを置けない（旧 #21・#23 が該当し、作り直しをせず削除した）。
 - 要素索引は §2 の前提に対する例外として残っている（付与の動的化は未決）。
 - **バージョン間 Diff の比較ペアは「ピン時点 → 最新」に固定**（§5.9）。任意の2版を選んで比べる機能は sample-d には無く、履歴グラフ（別アプリ）側の担当。
+- **重ね表示の比較ペアは「基準版 → 最新版」に固定**（§6.11）。ピン時点が基準版より後の Issue（例：V2 でピンした #43〜47）でも、3D の重ね表示は基準版との比較で統一する（文字での変更表示は従来どおりピン時点 → 最新）。重ね表示では2版分のモデルを読み込むため、対象モデルの読み込み量は増える。
 - **Diff の結果キャッシュは版番号がキー**：同じ版番号のままファイルが差し替えられた場合、古い結果を読み続ける可能性がある（版番号が上がれば新しいペアとして取り直す）。
 - **変更判定はヒューリスティクス**：形状ハッシュ・bbox・値の実質変化で判定しており（§5.9）、要素の削除→再作成（ID の変化）は「削除＋追加」として現れる。プロパティの変更一覧は補助情報で、キー自体の付け替えが残る場合は値の移行が「（なし）→ 値」と表示されることがある。
 - **SVF2 座標系ピンの変換は限定的**（§6.4）：変換が効くのは「対象要素が表示モデル内に無い」ピンだけ。要素が解決できる API 起票ピン（#44〜47）は、読み込み完了後に要素ボックスへ付け直されるが、読み込み中の先行表示は変換前の座標のまま一時的にずれる。pinFrame の変換値は snowdonarch の V1 に対して実測したもので、他モデル・他バージョンでは未検証。
@@ -339,3 +360,4 @@ Viewer のツールバーに自前のボタン群（DemoToolbarExtension）を�
 | 2026-11-17 | v8.32 | §1.6 に追記：将来像は sample-d とは分けて別アプリとして検討することになった（ユーザー決定） |
 | 2026-11-17 | v8.33 | バージョン間 Diff による変更表示を追加（§1.4、§5.5、§5.6、§5.9、§6.2、§6.3、§7）。比較ペアはピン時点→最新に固定（ユーザー決定）。Model Properties API の Diff をペア単位で非同期取得し、ロケールノイズを除いた判定を表の「変更」列と詳細パネルに表示する |
 | 2026-11-17 | v8.34 | Snowdon 建築の表示 viewable を壁だけの「Coord - Arch Walls」から全カテゴリの「New Construction」へ変更し、GUID で明示的に開くよう変更（§4、§6.4）。索引キャッシュに viewableGuid を含めて検証するよう変更（§5.4）。API 起票ピン（SVF2 座標系）のシーン座標への変換を、対象要素が解決できない場合の先行表示に追加（§6.4、§7） |
+| 2026-11-17 | v8.35 | 重ね表示を追加（§1.4、§5.3、§5.5、§5.10、§6.11、§7）：新しい版があるモデルは最新版を主表示し、基準版をゴーストで重ねる（削除＝赤ゴースト、変更前＝黄ゴースト、追加＝緑、変更＝黄）。サーバーは最新版の viewable を名前で解決して索引を構築し、`/api/overlay` で変更要素集合を両版の dbId で返す。ユーザー決定「最新版＋旧版ゴースト重ね表示（履歴グラフ式）」 |
