@@ -31,7 +31,7 @@ h1,h2,h3,p,ul{margin:0}
 ul{padding:0}
 
 /* ---------- レイアウト ---------- */
-.shell{max-width:1320px;margin:0 auto;padding:16px 16px 36px}
+.shell{width:100%;margin:0 auto;padding:12px 14px 20px}
 .page-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px;margin-bottom:12px}
 .page-head h1{font-size:19px;font-weight:900}
 .page-head p{font-size:12.5px;color:var(--muted)}
@@ -41,7 +41,7 @@ ul{padding:0}
 .btn:disabled{opacity:.5;cursor:default}
 .app-grid{display:grid;grid-template-columns:minmax(0,1fr) 372px;gap:14px;align-items:start}
 @media(max-width:960px){.app-grid{grid-template-columns:1fr}}
-.left-col{display:flex;flex-direction:column;gap:14px;min-width:0}
+.left-col{display:flex;flex-direction:column;gap:14px;min-width:0;min-height:0}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:8px}
 .panel-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:11px 14px;border-bottom:1px solid var(--line)}
 .panel-head h2{font-size:14px;font-weight:900}
@@ -56,6 +56,7 @@ ul{padding:0}
 
 /* ---------- Issue 表 ---------- */
 .panel.issues-panel{border:none;border-radius:10px;box-shadow:0 1px 3px rgba(20,40,60,.08)}
+.issues-panel{display:flex;flex-direction:column;flex:0 1 auto;min-height:0}
 .issues-panel .panel-head{border-bottom:none;padding:12px 16px 2px}
 .issues-panel .panel-head h2{font-size:15px;font-weight:700}
 .tbl-toolbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:6px 16px 6px}
@@ -64,9 +65,9 @@ ul{padding:0}
 .pager button{padding:5px 12px;border:1px solid var(--sd-chip-border);background:var(--sd-chip-bg);border-radius:6px;cursor:pointer;font-size:12.5px;color:var(--ink)}
 .pager button:disabled{opacity:.45;cursor:default}
 .pager select{padding:5px 6px;border:1px solid var(--sd-chip-border);border-radius:6px;font-size:12.5px;background:var(--surface);color:var(--ink)}
-.tbl-wrap{overflow-x:auto}
+.tbl-wrap{overflow:auto;flex:0 1 auto;min-height:0}
 table.issues{border-collapse:collapse;width:100%;min-width:640px;font-size:13px}
-table.issues th{background:var(--surface);color:var(--sd-head);text-align:left;padding:7px 10px;font-weight:600;white-space:nowrap;border-bottom:2px solid var(--sd-headline)}
+table.issues th{background:var(--surface);color:var(--sd-head);text-align:left;padding:7px 10px;font-weight:600;white-space:nowrap;border-bottom:2px solid var(--sd-headline);position:sticky;top:0;z-index:2}
 table.issues th.sortable{cursor:pointer;user-select:none}
 table.issues th.sortable:hover{background:var(--sd-hover)}
 table.issues th.sorted{color:var(--sd-accent)}
@@ -103,7 +104,7 @@ table.issues .c-due.overdue{color:var(--red);font-weight:700}
 .mini-line.open-end{background:repeating-linear-gradient(90deg,var(--sd-accent) 0 4px,transparent 4px 8px)}
 
 /* ---------- Viewer ---------- */
-#viewerWrap{height:380px;background:#1a1d20;border-radius:0 0 8px 8px;position:relative}
+#viewerWrap{height:64vh;min-height:420px;background:#1a1d20;border-radius:0 0 8px 8px;position:relative}
 #viewerEl{position:absolute;inset:0}
 #diffMarkers{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:6}
 #diffLeaders{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:5}
@@ -149,7 +150,7 @@ table.issues .c-due.overdue{color:var(--red);font-weight:700}
 .vchip.changed{background:var(--chg-bg);color:var(--chg);border:1px solid #e3cf8a}
 .vchip.unchanged{background:var(--surface);color:var(--muted);border:1px solid var(--line)}
 .vchip.unknown{background:var(--surface);color:var(--muted);border:1px dashed var(--line)}
-.tl-scroll{overflow-y:auto;padding:6px 16px 16px}
+.tl-scroll{overflow-y:auto;padding:6px 16px 16px;flex:1 1 auto;min-height:0}
 .timeline{position:relative;margin:10px 0 0 6px;padding-left:26px}
 .timeline:before{content:"";position:absolute;left:6px;top:10px;bottom:10px;width:2px;background:var(--line)}
 .ev{position:relative;padding:7px 0}
@@ -174,6 +175,19 @@ button.ev-row:hover{background:var(--surface2)}
 .ev-body{font-size:12.5px;color:var(--muted);white-space:pre-wrap;margin-top:2px}
 .err{background:var(--red-bg);color:var(--red);border-radius:6px;padding:10px 14px;font-size:13px;margin-bottom:12px;display:none}
 
+/* 背の高い画面では sample-d と同じ全高フレックス（画面に収め、表は内部スクロールで
+   縮み、ビューアが残りの高さを取る）。低い画面では通常フロー＋ビューア 64vh。 */
+@media(min-width:961px) and (min-height:900px){
+  html,body{height:100%}
+  body{display:flex;flex-direction:column;overflow:hidden}
+  .shell{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;padding-bottom:14px}
+  .page-head{flex:0 0 auto}
+  .app-grid{flex:1 1 auto;min-height:0;align-items:stretch}
+  .issues-panel{max-height:36%}
+  .viewer-panel{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+  #viewerWrap{flex:1 1 auto;min-height:240px;height:auto}
+  .tl-panel{position:static;max-height:100%;min-height:0}
+}
 @media(max-width:720px){
   table.issues{min-width:0}
   .c-title{min-width:0}
@@ -226,7 +240,7 @@ button.ev-row:hover{background:var(--surface2)}
         </div>
       </section>
 
-      <section class="panel" aria-label="3Dビューア">
+      <section class="panel viewer-panel" aria-label="3Dビューア">
         <div class="panel-head">
           <h2>3D ビューア（差分）</h2>
           <span class="ph-note" id="viewerNote"></span>

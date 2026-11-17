@@ -137,6 +137,8 @@ function buildTable() {
   $('pagerInfo').textContent = `${pages} ページ中 ${flt.page} ページ目`;
   $('btnPrev').disabled = flt.page <= 1;
   $('btnNext').disabled = flt.page >= pages;
+  // フレックスレイアウトでは表の高さ変化でビューア領域も変わるため、描画サイズを追随させる
+  if (typeof viewer !== 'undefined' && viewer) requestAnimationFrame(() => { try { viewer.resize(); } catch (e) {} });
 }
 
 // ============ タイムライン ============
@@ -892,27 +894,40 @@ function setDiffScope(s) {
 }
 // ---- 要素単位の実透過（ゴースト表示） ----
 // テーマカラーの第4成分は公式仕様で「intensity（元の色との混合率）」であり透明度ではない。
-// そのため削除要素の「透明＋赤」は、フラグメントのマテリアルを半透明マテリアルに
-// 差し替えて実現する（APS 公式ブログの material swatch 方式: matman().addMaterial +
-// FragmentList.setMaterial。統合モデルでは unconsolidate が必要な場合がある）。
+// 一方、手作りマテリアル（MeshBasicMaterial 等）の色は Viewer の WebGL2/MRT 描画では
+// 素直に効かないことがある（APS 公式ブログ「Custom shader materials in Forge Viewer」:
+// カスタムマテリアルは公式サポート外で、MRT 対応なしでは出力が不完全になり得る）。
+// 実機でも「透明にはなるが赤くならない」症状を確認した（2026-11-17）。
+// そのため役割を分離する:
+// - 透明: フラグメント自身の元マテリアル（LMV ネイティブ）を clone し、
+//   transparent / opacity / depthWrite だけを変えて差し替える（色は触らない）。
+// - 色: 呼び出し側でテーマカラー（setThemingColor、混合率 1.0）を必ず重ねる。
+//   テーマカラーは本アプリの他分類（追加=緑・変更=黄・未変更=白）で実績のある経路。
 // 差し替えたフラグメントは台帳に記録し、表示の再適用時に元のマテリアルへ戻す。
+// 統合モデルでは unconsolidate が必要な場合がある。
 let matOverrideLedger = []; // { model, frags, fragId, orig }
 const unconsolidatedModels = new WeakSet();
-let ghostMats = null;
-function ghostMaterial(kind) {
-  if (ghostMats?.[kind]) return ghostMats[kind];
-  const T = window.THREE ?? window.Autodesk?.Viewing?.Private?.THREE;
-  if (!T?.MeshBasicMaterial) return null;
-  const conf = kind === 'removed'
-    ? { color: 0xd42b1a, opacity: 0.45 }
-    : { color: 0xe6b326, opacity: 0.35 };
-  const mat = new T.MeshBasicMaterial({ color: conf.color, transparent: true, opacity: conf.opacity, depthWrite: false });
-  try { viewer.impl.matman().addMaterial('hg-ghost-' + kind, mat, true); } catch (e) {}
-  (ghostMats ??= {})[kind] = mat;
-  return mat;
+const GHOST_CONF = { removed: { opacity: 0.45 }, changed: { opacity: 0.35 } };
+const ghostCloneCache = new Map(); // `${kind}|${orig.uuid}` -> clone
+let ghostCloneSeq = 0;
+function ghostCloneMaterial(orig, kind) {
+  if (!orig || typeof orig.clone !== 'function') return null;
+  const key = kind + '|' + (orig.uuid ?? orig.id ?? '');
+  if (ghostCloneCache.has(key)) return ghostCloneCache.get(key);
+  let clone = null;
+  try {
+    clone = orig.clone();
+    clone.transparent = true;
+    clone.opacity = GHOST_CONF[kind].opacity;
+    clone.depthWrite = false;
+    clone.needsUpdate = true;
+    try { viewer.impl.matman().addMaterial('hg-ghost-' + kind + '-' + (++ghostCloneSeq), clone, true); } catch (e) {}
+  } catch (e) { clone = null; }
+  if (clone) ghostCloneCache.set(key, clone);
+  return clone;
 }
-function applyTransparentGhost(model, dbIds, mat) {
-  if (!model || !dbIds?.length || !mat) return false;
+function applyTransparentGhost(model, dbIds, kind) {
+  if (!model || !dbIds?.length) return false;
   try {
     if (!unconsolidatedModels.has(model)) {
       try { model.unconsolidate?.(); } catch (e) {}
@@ -924,12 +939,15 @@ function applyTransparentGhost(model, dbIds, mat) {
     let applied = 0;
     for (const db of dbIds) {
       tree.enumNodeFragments(db, (fragId) => {
-        if (!matOverrideLedger.some(e => e.model === model && e.fragId === fragId)) {
-          let orig = null;
+        const prev = matOverrideLedger.find(e => e.model === model && e.fragId === fragId);
+        let orig = prev?.orig ?? null;
+        if (!prev) {
           try { orig = frags.getMaterial(fragId); } catch (e) {}
           matOverrideLedger.push({ model, frags, fragId, orig });
         }
-        frags.setMaterial(fragId, mat);
+        const ghost = ghostCloneMaterial(orig, kind);
+        if (!ghost) return;
+        frags.setMaterial(fragId, ghost);
         applied++;
       }, true);
     }
@@ -1010,17 +1028,17 @@ function applyDiffViewMode() {
     theme(toM, ctx.addedToDb, V4(0.1, 0.65, 0.3, 1));
     theme(toM, ctx.changedToDb, V4(0.95, 0.72, 0.08, 1));
     theme(toM, unchangedTo, V4(1, 1, 1, 1));
-    // 削除要素は「透明＋赤」で重ねる。テーマカラーでは透明にならない（第4成分は
-    // 混合率）ため、フラグメントのマテリアルを半透明の赤に差し替える。
-    // 差し替えに失敗した場合のみ、従来のテーマカラー（赤の混合）に落とす。
-    if (!applyTransparentGhost(fromM, ctx.removedDb, ghostMaterial('removed'))) {
-      theme(fromM, ctx.removedDb, V4(0.85, 0.16, 0.1, 0.45));
-    }
+    // 削除要素は「透明＋赤」で重ねる（二段構え）:
+    // 透明は元マテリアルの clone 差し替え（applyTransparentGhost）が担い、
+    // 赤はテーマカラー（混合率 1.0）が担う。テーマカラーはゴーストの成否に
+    // 関わらず必ず重ねる（手作りマテリアルの色は WebGL2/MRT では効かない
+    // ことがあるため、色をマテリアル側に頼らない）。
+    applyTransparentGhost(fromM, ctx.removedDb, 'removed');
+    theme(fromM, ctx.removedDb, V4(0.85, 0.16, 0.1, 1));
     if (diffGhostOld) {
-      // 変更の旧形状ゴーストも同じ理由で実透過にする（失敗時はテーマカラー）
-      if (!applyTransparentGhost(fromM, ctx.changedFromDb, ghostMaterial('changed'))) {
-        theme(fromM, ctx.changedFromDb, V4(0.9, 0.7, 0.15, 0.35));
-      }
+      // 変更の旧形状ゴーストも同じ二段構え（透明=clone 差し替え、黄=テーマカラー）
+      applyTransparentGhost(fromM, ctx.changedFromDb, 'changed');
+      theme(fromM, ctx.changedFromDb, V4(0.9, 0.7, 0.15, 1));
     }
   }
 }
