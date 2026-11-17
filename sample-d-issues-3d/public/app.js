@@ -575,14 +575,29 @@ function anchorFor(issue) {
   return { x: (box.min.x + box.max.x) / 2, y: (box.min.y + box.max.y) / 2, z: (box.min.z + box.max.z) / 2 };
 }
 // 読み込み中に使う先行アンカー：Issue のピン座標（Issues API 由来）。
-// ピン座標は Viewer のワールド座標そのものであることを 2026-11-16 にローカルリグで実測した
-// （対象部材を色付けし、ピン座標の投影点が部材の上に重なることを目視確認。globalOffset を
-// 足した点は部材から外れた）。かつて「別空間の座標」とした調査は、ワールド座標のピンと
-// ローカル座標のオフラインボックスを比べた取り違えだった（差分はモデルの globalOffset と一致）。
+// Forma 画面で起票されたピンの座標は Viewer のワールド座標そのものであることを
+// 2026-11-16 にローカルリグで実測した（対象部材を色付けし、ピン座標の投影点が部材の上に
+// 重なることを目視確認。globalOffset を足した点は部材から外れた）。
+// ただし API 起票のピン（スナップショットなし）には例外がある：履歴グラフ実験で起票された
+// #43〜47 は SVF2 側の座標系（Revit 内部座標 − refPoint）で記録されており、そのまま投影すると
+// 実物から大きくずれる（2026-11-17 実測。ピンの値は「内部座標中心 − refPoint」と小数第2位まで
+// 一致）。対象要素が表示中のモデルに存在しない（＝ボックスへ付け直せない）場合に限り、
+// models.json の pinFrame（実測した変換）でシーン座標へ変換して先行表示する。
 // サーバー側の索引は使わず、Forma（Issues API）が持つデータだけで先行表示する。
 function pinAnchorFor(issue) {
   const p = issue?.pin?.position;
   if (!p || typeof p.x !== 'number' || typeof p.y !== 'number' || typeof p.z !== 'number') return null;
+  const mf = DATA?.models.find(x => x.key === issue.modelKey)?.pinFrame;
+  const go = viewer?.model?.getData?.()?.globalOffset;
+  if (mf && go && !issue.snapshotUrn && !issue.targetDbId) {
+    const [rx, ry, rz] = mf.refPoint, A = mf.affine;
+    const sx = p.x + rx, sy = p.y + ry, sz = p.z + rz;
+    return {
+      x: A[0][0] * sx + A[0][1] * sy + A[0][2] * sz + A[0][3] - go.x,
+      y: A[1][0] * sx + A[1][1] * sy + A[1][2] * sz + A[1][3] - go.y,
+      z: A[2][0] * sx + A[2][1] * sy + A[2][2] * sz + A[2][3] - go.z,
+    };
+  }
   return { x: p.x, y: p.y, z: p.z };
 }
 // マーカー構築済みキーは段階も含める：読み込み中（ピン座標アンカー）→ 完了後
@@ -1145,7 +1160,12 @@ function setupViewer(modelKey) {
     }
   });
   Autodesk.Viewing.Document.load('urn:' + m.urn, (doc) => {
-    viewer.loadDocumentNode(doc, doc.getRoot().getDefaultGeometry());
+    // 既定ジオメトリ任せにしない：Snowdon 建築の既定は壁だけの viewable「Coord - Arch Walls」で、
+    // 外灯・藤棚・植栽などがそもそも描画されなかった（2026-11-17 ユーザー指摘）。
+    // models.json で指定した viewable（全カテゴリの「New Construction」等）を GUID で明示的に開く。
+    const root = doc.getRoot();
+    const node = (m.guid && root.findByGuid?.(m.guid)) || root.getDefaultGeometry();
+    viewer.loadDocumentNode(doc, node);
     setStatV(`モデル（${esc(m.short)}）を読み込んでいます（逐次配信）…`);
   }, (code, msg2) => { setStatV('モデルの読み込みに失敗しました：' + code + ' ' + esc(msg2 ?? '')); setViewerLoading('モデルの読み込みに失敗しました：' + code); });
 }

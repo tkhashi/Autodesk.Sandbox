@@ -82,13 +82,13 @@ Forma（Autodesk Construction Cloud、以下 ACC）の実 Issue を Issues API �
 ## 4. 対象データ
 
 - プロジェクト：ACC「Snowdon Towers」（プロジェクト ID `b.031a6e68-ccdf-4a29-b8a5-50a2a3ecac25`、Issues API では `b.` を除いた ID を使用）。全モデル同一プロジェクト。
-- 対象モデルは `data/models.json` の登録簿で定義する（key／ファイル名／lineage URN／derivativeUrn／viewableGuid／projectId）。現行は5モデル：
+- 対象モデルは `data/models.json` の登録簿で定義する（key／ファイル名／lineage URN／derivativeUrn／viewableGuid／projectId、任意で pinFrame）。現行は5モデル：
 
 | key | ファイル | 規模 | 備考 |
 |---|---|---|---|
 | dach | DACHsampleproject.rvt | 132MB | 建築（木造・鉄骨・RC 混在）。OBJ 抽出は失敗する（§5.8） |
 | snowdon | Snowdon Towers Sample Structural.rvt | 約32MB | 構造（軽量） |
-| snowdonarch | Snowdon Towers Sample Architectural.rvt | 約95MB | 建築 |
+| snowdonarch | Snowdon Towers Sample Architectural.rvt | 約95MB | 建築。viewableGuid は全カテゴリの「New Construction」（v8.34。それまでは壁だけの「Coord - Arch Walls」で、外灯・藤棚・植栽・ドア等が描画されず要素情報も付かなかった）。pinFrame（API 起票ピンの座標変換、実測値）を持つ |
 | snowdonfacades | Snowdon Towers Sample Facades.rvt | 約53MB | ファサード |
 | samplearch | sample_architecture.rvt | 約63MB | 建築（日本語モデル）。OBJ 抽出は失敗する（§5.8） |
 
@@ -133,7 +133,7 @@ Forma（Autodesk Construction Cloud、以下 ACC）の実 Issue を Issues API �
   1. Model Derivative のプロパティ一式を取得（`GET /modelderivative/v2/designdata/{derivativeUrn}/metadata/{viewableGuid}/properties?forceget=true`。202 の間は3秒間隔でポーリング、最大120回）。平坦化して `externalId → プロパティ` の表にする（キー名が `_` で始まるものは除外。要素名から Revit の要素 ID `[数値]` も抽出）。
   2. 変換データ同梱のプロパティ DB `model.sdb` を manifest 経由でダウンロードし、`_objects_id` テーブルから `externalId → dbId` の対応表を作る（`node:sqlite` で解析）。
 - **状態**：`idle`（未着手）／`building`（構築中）／`ready`（完成）／`error`（失敗、理由を保持）。状態は `/api/issues` の `models[].indexStatus` と `/api/index-status` で公開する。
-- **キャッシュ**：完成したら `cache/index-{key}.json`（versionId・構築日時・2つの表）へ保存し、次回起動時は即座に使う。起動時にモデルの現行バージョン（Data Management の versions 先頭）とキャッシュの versionId を比べ、変わっていたら作り直す（バージョン確認結果は60秒キャッシュ）。
+- **キャッシュ**：完成したら `cache/index-{key}.json`（versionId・viewableGuid・構築日時・2つの表）へ保存し、次回起動時は即座に使う。起動時にモデルの現行バージョン（Data Management の versions 先頭）とキャッシュの versionId を比べ、変わっていたら作り直す（バージョン確認結果は60秒キャッシュ）。**viewableGuid がキャッシュと異なる場合も作り直す**（v8.34。プロパティの取得元 viewable を変えた時に古い表が残るのを防ぐ）。
 - **実測**：コールドスタートからの構築は1モデルあたり約3〜6秒、全モデル ready まで約6秒。
 - 索引が `ready` でないモデルの Issue は、要素情報なし（`element: null`、`targetDbId: null`）で返す。
 
@@ -221,7 +221,8 @@ Forma（Autodesk Construction Cloud、以下 ACC）の実 Issue を Issues API �
 
 ### 6.4 ビューア共通
 
-- Viewer は APS Viewer（GuiViewer3D）。モデルは SVF の逐次配信で読み込む。読み込むビューは `doc.getRoot().getDefaultGeometry()`。
+- Viewer は APS Viewer（GuiViewer3D）。モデルは SVF の逐次配信で読み込む（遅延読み込み）。読み込むビューは既定ジオメトリ任せにせず、`data/models.json` の viewableGuid で指定した viewable を `findByGuid` で明示的に開く（v8.34。Snowdon 建築の既定は壁だけの viewable で、全カテゴリが表示されなかった）。GUID で見つからない場合のみ既定ジオメトリにフォールバックする。
+- **ピン座標の座標系（v8.34）**：Forma 画面で起票されたピンは Viewer のワールド座標。一方、API 起票のピン（スナップショットなし）には SVF2 側の座標系（Revit 内部座標 − refPoint）で記録されたものがある（履歴グラフ実験の #43〜47 で実測）。対象要素が表示モデル内に解決できる場合は読み込み完了後に要素ボックスへ付け直すため影響しない。解決できない場合に限り、モデルに pinFrame（実測した変換：world ＝ affine・(pin ＋ refPoint)、シーン座標 ＝ world − globalOffset）があれば変換して先行表示する。変換は snowdonarch のみ（他モデルは対象ピンなし）。
 - **初期化シーケンス（v8.28）**：Viewer の初期化と `/api/issues` の取得は並行するが、**データが届く前に初期化だけ終わった場合はモデルを読み始めない**。データ到着側の初期処理が、選択中の Issue のモデルで読み込みを開始する（先頭モデルで読み始めて切り替える二重読み込みの防止）。
 - **初期選択**：データ到着時、対象要素を持つ先頭の Issue を選択して詳細だけを開く（ビューア表示はしない）。ビューアの初期モデルはその Issue のモデル。
 - **読み込み表示**：ビューア上部のピル型表示で実状態を出す（データ読み込み中 → モデル読み込み中（進捗％）→ 完了で消える）。入力は塞がない。ステータス欄（ビューア下）にも進捗・結果・件数などの文言を出す。
@@ -315,6 +316,7 @@ Viewer のツールバーに自前のボタン群（DemoToolbarExtension）を�
 - **バージョン間 Diff の比較ペアは「ピン時点 → 最新」に固定**（§5.9）。任意の2版を選んで比べる機能は sample-d には無く、履歴グラフ（別アプリ）側の担当。
 - **Diff の結果キャッシュは版番号がキー**：同じ版番号のままファイルが差し替えられた場合、古い結果を読み続ける可能性がある（版番号が上がれば新しいペアとして取り直す）。
 - **変更判定はヒューリスティクス**：形状ハッシュ・bbox・値の実質変化で判定しており（§5.9）、要素の削除→再作成（ID の変化）は「削除＋追加」として現れる。プロパティの変更一覧は補助情報で、キー自体の付け替えが残る場合は値の移行が「（なし）→ 値」と表示されることがある。
+- **SVF2 座標系ピンの変換は限定的**（§6.4）：変換が効くのは「対象要素が表示モデル内に無い」ピンだけ。要素が解決できる API 起票ピン（#44〜47）は、読み込み完了後に要素ボックスへ付け直されるが、読み込み中の先行表示は変換前の座標のまま一時的にずれる。pinFrame の変換値は snowdonarch の V1 に対して実測したもので、他モデル・他バージョンでは未検証。
 - Issue の取得は最大200件まで（ページングの上限）。
 - この VM のブラウザからは Viewer の CDN に到達できないため、実機確認はユーザーのブラウザで行う（ローカル検証はオフラインのリグで代替する）。
 
@@ -336,3 +338,4 @@ Viewer のツールバーに自前のボタン群（DemoToolbarExtension）を�
 | 2026-11-16 | v8.32 | §1.6 に将来像（履歴グラフで「同じ指摘」を追う）を追記。スナップショットの自前保持を可とする決定と、要素 ID が変わる場合の同一性の扱い（候補提示＋人が確定）を含む（ユーザーとの設計議論） |
 | 2026-11-17 | v8.32 | §1.6 に追記：将来像は sample-d とは分けて別アプリとして検討することになった（ユーザー決定） |
 | 2026-11-17 | v8.33 | バージョン間 Diff による変更表示を追加（§1.4、§5.5、§5.6、§5.9、§6.2、§6.3、§7）。比較ペアはピン時点→最新に固定（ユーザー決定）。Model Properties API の Diff をペア単位で非同期取得し、ロケールノイズを除いた判定を表の「変更」列と詳細パネルに表示する |
+| 2026-11-17 | v8.34 | Snowdon 建築の表示 viewable を壁だけの「Coord - Arch Walls」から全カテゴリの「New Construction」へ変更し、GUID で明示的に開くよう変更（§4、§6.4）。索引キャッシュに viewableGuid を含めて検証するよう変更（§5.4）。API 起票ピン（SVF2 座標系）のシーン座標への変換を、対象要素が解決できない場合の先行表示に追加（§6.4、§7） |

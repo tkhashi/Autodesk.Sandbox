@@ -101,7 +101,7 @@ for (const m of models) {
   m.propsIndex = null; m.ext2dbid = null; m.indexStatus = 'idle'; m.indexError = null; m.indexVersionId = null;
   try { // 前回構築した派生キャッシュがあれば即座に使う
     const c = JSON.parse(fs.readFileSync(path.join(indexCacheDir, 'index-' + m.key + '.json'), 'utf8'));
-    if (c?.propsIndex && c?.ext2dbid) {
+    if (c?.propsIndex && c?.ext2dbid && c.guid === m.viewableGuid) {
       m.propsIndex = c.propsIndex; m.ext2dbid = c.ext2dbid;
       m.indexVersionId = c.versionId ?? null; m.indexStatus = 'ready';
     }
@@ -141,7 +141,7 @@ async function buildIndex(m) {
     m.propsIndex = propsIndex; m.ext2dbid = ext2dbid; m.indexStatus = 'ready';
     const ver = await getModelVersion(m).catch(() => null);
     m.indexVersionId = ver?.versionId ?? null;
-    fs.writeFileSync(path.join(indexCacheDir, 'index-' + m.key + '.json'), JSON.stringify({ versionId: m.indexVersionId, builtAt: new Date().toISOString(), propsIndex, ext2dbid }));
+    fs.writeFileSync(path.join(indexCacheDir, 'index-' + m.key + '.json'), JSON.stringify({ versionId: m.indexVersionId, guid: m.viewableGuid, builtAt: new Date().toISOString(), propsIndex, ext2dbid }));
     console.log(`index built: ${m.key} (props ${Object.keys(propsIndex).length}, map ${Object.keys(ext2dbid).length}) in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
   } catch (e) {
     m.indexStatus = 'error'; m.indexError = String(e?.message ?? e);
@@ -636,7 +636,7 @@ const server = http.createServer(async (req, res) => {
       const issues = await getIssuesCached();
       const vers = await Promise.all(models.map(getModelVersion));
       return sendJson(res, 200, {
-        models: models.map((m, i) => ({ key: m.key, name: m.name, short: m.short, version: vers[i].versionNumber, urn: m.derivativeUrn, guid: m.viewableGuid, indexStatus: m.indexStatus, diffStatus: modelDiffStatus(m.key) })),
+        models: models.map((m, i) => ({ key: m.key, name: m.name, short: m.short, version: vers[i].versionNumber, urn: m.derivativeUrn, guid: m.viewableGuid, pinFrame: m.pinFrame ?? null, indexStatus: m.indexStatus, diffStatus: modelDiffStatus(m.key) })),
         issues, fetchedAt: new Date().toISOString(),
       });
     }

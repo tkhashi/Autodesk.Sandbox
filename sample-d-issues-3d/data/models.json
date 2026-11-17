@@ -1,47 +1,52 @@
 [
- {
-  "key": "dach",
-  "name": "DACHsampleproject.rvt",
-  "short": "DACH（建築 132MB）",
-  "lineage": "urn:adsk.wipprod:dm.lineage:3wTWeoMNQTOsNv7j3pVf-w",
-  "derivativeUrn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjN3VFdlb01OUVRPc052N2ozcFZmLXc_dmVyc2lvbj0x",
-  "viewableGuid": "f0cb2e5f-1cbd-0c96-c0ee-69fff8577543",
-  "projectId": "b.031a6e68-ccdf-4a29-b8a5-50a2a3ecac25"
- },
- {
-  "key": "snowdon",
-  "name": "Snowdon Towers Sample Structural.rvt",
-  "short": "Snowdon 構造（軽量）",
-  "lineage": "urn:adsk.wipprod:dm.lineage:ZRF1ijarXRS7X3mi7BYiFg",
-  "derivativeUrn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLlpSRjFpamFyWFJTN1gzbWk3QllpRmc_dmVyc2lvbj0x",
-  "viewableGuid": "0caacd2f-a9c4-7da9-8b99-d5762178b1de",
-  "projectId": "b.031a6e68-ccdf-4a29-b8a5-50a2a3ecac25"
- },
- {
-  "key": "snowdonarch",
-  "name": "Snowdon Towers Sample Architectural.rvt",
-  "short": "Snowdon 建築（95MB）",
-  "lineage": "urn:adsk.wipprod:dm.lineage:VwJ57NkiQ-Gy0nHLR3UmAA",
-  "derivativeUrn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLlZ3SjU3TmtpUS1HeTBuSExSM1VtQUE_dmVyc2lvbj0x",
-  "viewableGuid": "7738212f-d458-662f-cb9c-cf7c761af18d",
-  "projectId": "b.031a6e68-ccdf-4a29-b8a5-50a2a3ecac25"
- },
- {
-  "key": "snowdonfacades",
-  "name": "Snowdon Towers Sample Facades.rvt",
-  "short": "Snowdon ファサード（53MB）",
-  "lineage": "urn:adsk.wipprod:dm.lineage:KoiFueUiTT20F5KPOHkRDg",
-  "derivativeUrn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLktvaUZ1ZVVpVFQyMEY1S1BPSGtSRGc_dmVyc2lvbj0x",
-  "viewableGuid": "ee468dd8-59ee-b79b-2203-df43b89fb561",
-  "projectId": "b.031a6e68-ccdf-4a29-b8a5-50a2a3ecac25"
- },
- {
-  "key": "samplearch",
-  "name": "sample_architecture.rvt",
-  "short": "sample_architecture（建築 63MB）",
-  "lineage": "urn:adsk.wipprod:dm.lineage:dJ4loKRmSkWYXzqIFMWCHg",
-  "derivativeUrn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLmRKNGxvS1JtU2tXWVh6cUlGTVdDSGc_dmVyc2lvbj0x",
-  "viewableGuid": "cbd02212-3eea-66c0-c1c6-bf3ea2db6449",
-  "projectId": "b.031a6e68-ccdf-4a29-b8a5-50a2a3ecac25"
- }
+  {
+    "key": "dach",
+    "name": "DACHsampleproject.rvt",
+    "short": "DACH（建築 132MB）",
+    "lineage": "urn:adsk.wipprod:dm.lineage:3wTWeoMNQTOsNv7j3pVf-w",
+    "derivativeUrn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLjN3VFdlb01OUVRPc052N2ozcFZmLXc_dmVyc2lvbj0x",
+    "viewableGuid": "f0cb2e5f-1cbd-0c96-c0ee-69fff8577543",
+    "projectId": "b.031a6e68-ccdf-4a29-b8a5-50a2a3ecac25"
+  },
+  {
+    "key": "snowdon",
+    "name": "Snowdon Towers Sample Structural.rvt",
+    "short": "Snowdon 構造（軽量）",
+    "lineage": "urn:adsk.wipprod:dm.lineage:ZRF1ijarXRS7X3mi7BYiFg",
+    "derivativeUrn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLlpSRjFpamFyWFJTN1gzbWk3QllpRmc_dmVyc2lvbj0x",
+    "viewableGuid": "0caacd2f-a9c4-7da9-8b99-d5762178b1de",
+    "projectId": "b.031a6e68-ccdf-4a29-b8a5-50a2a3ecac25"
+  },
+  {
+    "key": "snowdonarch",
+    "name": "Snowdon Towers Sample Architectural.rvt",
+    "short": "Snowdon 建築（95MB）",
+    "lineage": "urn:adsk.wipprod:dm.lineage:VwJ57NkiQ-Gy0nHLR3UmAA",
+    "derivativeUrn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLlZ3SjU3TmtpUS1HeTBuSExSM1VtQUE_dmVyc2lvbj0x",
+    "viewableGuid": "453399dc-4fac-f28a-cd19-e3980219ca22",
+    "pinFrame": {
+      "comment": "API 起票ピン（スナップショットなし）は SVF2 側の座標系（Revit 内部座標 − refPoint）で記録されていた（2026-11-17 実測）。affine は Model Properties の bbox 中心→SVF ワールド中心の最小二乗フィット（7,091 要素で残差ゼロ）。world = A・(pin + refPoint)、シーン座標 = world − globalOffset。",
+      "refPoint": [417664.07, 78738.41, 251.5],
+      "affine": [[2.94842061009, 1.43902577932, 0, -1344597.55059], [-1.43902767076, 2.9484055131, 0, 368889.256525], [0, 0, 3.28083988748, -780.502076334]]
+    },
+    "projectId": "b.031a6e68-ccdf-4a29-b8a5-50a2a3ecac25"
+  },
+  {
+    "key": "snowdonfacades",
+    "name": "Snowdon Towers Sample Facades.rvt",
+    "short": "Snowdon ファサード（53MB）",
+    "lineage": "urn:adsk.wipprod:dm.lineage:KoiFueUiTT20F5KPOHkRDg",
+    "derivativeUrn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLktvaUZ1ZVVpVFQyMEY1S1BPSGtSRGc_dmVyc2lvbj0x",
+    "viewableGuid": "ee468dd8-59ee-b79b-2203-df43b89fb561",
+    "projectId": "b.031a6e68-ccdf-4a29-b8a5-50a2a3ecac25"
+  },
+  {
+    "key": "samplearch",
+    "name": "sample_architecture.rvt",
+    "short": "sample_architecture（建築 63MB）",
+    "lineage": "urn:adsk.wipprod:dm.lineage:dJ4loKRmSkWYXzqIFMWCHg",
+    "derivativeUrn": "dXJuOmFkc2sud2lwcHJvZDpmcy5maWxlOnZmLmRKNGxvS1JtU2tXWVh6cUlGTVdDSGc_dmVyc2lvbj0x",
+    "viewableGuid": "cbd02212-3eea-66c0-c1c6-bf3ea2db6449",
+    "projectId": "b.031a6e68-ccdf-4a29-b8a5-50a2a3ecac25"
+  }
 ]
