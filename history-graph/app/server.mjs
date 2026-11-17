@@ -8,6 +8,7 @@
 // アプリ側で持つ状態は data/ のみ:
 //   data/snapshots.json — Issue の status／担当者のスナップショットと変化イベント（追記型）
 //   data/diff-cache/    — このアプリ自身が実 API ジョブで取得した diff 結果のキャッシュ（出所＝ジョブ実行日時つき）
+//   data/pin-snapshots.json — ピン時点スナップショット（デモスライス。Webhook 受信シミュレーション経由で保存）
 // 現在値は常に Forma から取得する（このアプリは「履歴の記録者」であり、状態の管理者ではない）。
 import http from 'node:http';
 import fs from 'node:fs';
@@ -281,7 +282,9 @@ async function fetchVersions() {
     urn: v.id,
     createdAt: v.attributes?.createTime ?? v.attributes?.lastModifiedTime ?? null,
     lastModifiedAt: v.attributes?.lastModifiedTime ?? null,
-    createdBy: v.relationships?.creator?.data?.id ?? null,
+    // 版の公開者は DM API の attributes.createUserName（無ければ lastModifiedUserName）に
+    // 実名で入っている（批判的レビュー H4 で実測。relationships.creator は存在せず常に null だった）
+    createdBy: v.attributes?.createUserName ?? v.attributes?.lastModifiedUserName ?? null,
     note: VERSION_NOTES[v.attributes?.versionNumber] ?? null,
     derivativeUrn: derivativeUrn(v.attributes?.versionNumber),
     viewableGuid: ARCH.viewableGuid,
@@ -372,7 +375,7 @@ function buildHistory(issue, snap, versions) {
   const modelUpdates = versions
     .filter(v => v.createdAt && issue.createdAt && v.createdAt > issue.createdAt)
     .filter(v => !lastClose || v.createdAt <= lastClose.detectedAt)
-    .map(v => ({ version: v.versionNumber, publishedAt: v.createdAt, note: v.note, diffPair: diffPairFor(v.versionNumber) }));
+    .map(v => ({ version: v.versionNumber, publishedAt: v.createdAt, createdBy: v.createdBy ?? null, note: v.note, diffPair: diffPairFor(v.versionNumber) }));
   return { events, modelUpdates, stats: { closeCount, reopenCount, modelUpdateCount: modelUpdates.length } };
 }
 
@@ -1025,6 +1028,223 @@ async function processCaptureQueue() {
   } finally { captureRunning = false; }
 }
 
+// ============ ピン時点スナップショットと Close 検証（デモスライス、SPEC §7.9） ============
+// 狙い: Issue 起票の瞬間にピンが指した要素の「その時点の状態」を保存しておき、
+// 後から最新版と照合して「Close 時点で対象がどう変わったか」を判定できるようにする。
+// デモ前提（本番配線はしない）:
+//   - Webhook は本物を登録しない。POST /api/sim/webhook が本物と同じ形のペイロード
+//     （event 名＋payload）を受け、受信後の処理は本物の受け口と同じ経路
+//     （processIssueCreatedWebhook: Issue を API で GET → ピン抽出 → 要素状態の保存 → 照合）を通す。
+//   - 保存先は data/pin-snapshots.json で、外部ストレージのモックとして扱う。
+//   - 要素の状態は、その版の Model Properties インデックスの実データから復元する
+//     （事前投入データは使わない）。変換ジョブは投げない。
+const PIN_SNAP_FILE = path.join(dataDir, 'pin-snapshots.json');
+function loadPinSnaps() {
+  try {
+    const s = JSON.parse(fs.readFileSync(PIN_SNAP_FILE, 'utf8'));
+    if (s && s.snapshots) return s;
+  } catch (e) {}
+  return { version: 1, snapshots: {} };
+}
+function savePinSnaps(s) { fs.writeFileSync(PIN_SNAP_FILE, JSON.stringify(s, null, 1)); }
+
+async function idxCall(method, url, body) {
+  const t = await getToken3();
+  const r = await fetch(url, {
+    method, headers: { Authorization: 'Bearer ' + t, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await r.text();
+  let json = null; try { json = JSON.parse(text); } catch (e) {}
+  return { status: r.status, json };
+}
+// 単一版インデックスの確保（runLiveDiff の ensureIndex と同じ手順）
+async function ensureIndexShared(urn) {
+  const { json } = await idxCall('POST', `${IDX}/projects/${PID}/indexes:batch-status`, { versions: [{ versionUrn: urn }] });
+  const ix = json?.indexes?.[0];
+  if (!ix?.indexId) throw new Error('indexId が返りませんでした');
+  for (let i = 0; i < 80; i++) {
+    const { json: j2 } = await idxCall('GET', `${IDX}/projects/${PID}/indexes/${ix.indexId}`);
+    if (j2?.state === 'FINISHED') return ix.indexId;
+    if (j2?.state === 'FAILED') throw new Error('index FAILED');
+    await sleep(15000);
+  }
+  throw new Error('index timeout');
+}
+const indexFieldsCache = new Map();
+async function indexFields(indexId) {
+  if (indexFieldsCache.has(indexId)) return indexFieldsCache.get(indexId);
+  const text = await apsText(`${IDX}/projects/${PID}/indexes/${indexId}/fields`, await getToken3());
+  const fmap = new Map();
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    try { const d = JSON.parse(line); fmap.set(d.key, d); } catch (e) {}
+  }
+  indexFieldsCache.set(indexId, fmap);
+  return fmap;
+}
+async function queryIndexRows(indexId, lo, hi) {
+  const base = `${IDX}/projects/${PID}/indexes/${indexId}`;
+  const create = await idxCall('POST', `${base}/queries`, { query: { $between: ['s.SVF2Id', lo, hi] } });
+  if (create.status !== 200 && create.status !== 201) throw new Error(`index query create ${create.status}`);
+  const qid = create.json.queryId;
+  let st = create.json.state;
+  for (let i = 0; i < 60 && st !== 'FINISHED'; i++) {
+    await sleep(3000);
+    const { json } = await idxCall('GET', `${base}/queries/${qid}`);
+    st = json?.state;
+    if (st === 'FAILED') throw new Error('index query FAILED');
+  }
+  if (st !== 'FINISHED') throw new Error('index query timeout');
+  const text = await apsText(`${base}/queries/${qid}/properties`, await getToken3());
+  const rows = [];
+  for (const line of text.split('\n')) if (line.trim()) rows.push(JSON.parse(line));
+  return rows;
+}
+// インデックス行を「要素の状態」に正規化する（プロパティはフィールド定義で読み取り名に直す）
+function normalizeElementState(row, fmap, versionNumber) {
+  let nameKey = null, catKey = null;
+  for (const [k, v] of fmap) {
+    if (v.category === '__name__') nameKey = k;
+    if (v.category === '__category__' && v.name === 'Category') catKey = k;
+  }
+  const props = [];
+  for (const [k, v] of Object.entries(row.props ?? {})) {
+    const f = fmap.get(k);
+    props.push({ name: f?.name ?? k, category: f?.category ?? null, value: v });
+  }
+  props.sort((a, b) => String(a.category).localeCompare(String(b.category)) || String(a.name).localeCompare(String(b.name)));
+  return {
+    version: versionNumber, found: true,
+    svf2Id: row.svf2Id ?? null, externalId: row.externalId ?? null,
+    name: (nameKey ? row.props?.[nameKey] : null) ?? null,
+    category: (catKey ? row.props?.[catKey] : null) ?? null,
+    bboxMin: row.bboxMin ?? null, bboxMax: row.bboxMax ?? null,
+    geomHash: row.geomHash ?? null, propsHash: row.propsHash ?? null,
+    props,
+  };
+}
+// 指定版における要素の状態を取得する。externalId の直接クエリは API が受理しない
+// （$eq は 400、実測）ため、ピンの objectId（＝インデックスの svf2Id）をヒントに
+// 範囲を広げながら引き、externalId で照合する。最後は全域スキャンで「存在しない」
+// ことまで確定させる（削除判定の根拠）。
+const elementStateCache = new Map();
+async function fetchElementState(versionNumber, externalId, svf2IdHint) {
+  const key = `${versionNumber}:${externalId}`;
+  if (elementStateCache.has(key)) return elementStateCache.get(key);
+  const indexId = await ensureIndexShared(versionUrn(versionNumber));
+  const fmap = await indexFields(indexId);
+  const scan = async (lo, hi) => {
+    const rows = await queryIndexRows(indexId, lo, hi);
+    return rows.find(r => r.externalId === externalId) ?? null;
+  };
+  let row = null;
+  if (Number.isFinite(svf2IdHint)) {
+    for (const w of [256, 2048]) {
+      row = await scan(Math.max(0, svf2IdHint - w), svf2IdHint + w);
+      if (row) break;
+    }
+  }
+  if (!row) {
+    for (let a = 0; a <= 48000 && !row; a += 4000) row = await scan(a, a + 3999);
+  }
+  const state = row ? normalizeElementState(row, fmap, versionNumber) : { version: versionNumber, found: false, externalId };
+  elementStateCache.set(key, state);
+  return state;
+}
+// ピン時点の状態と最新版の状態の照合（Close 検証）。
+// 判定: removed（最新版に存在しない）／ changed（形状・移動・bbox・プロパティのいずれか）／ unchanged。
+function compareElementStates(a, b) {
+  const base = { geomChanged: false, moved: false, moveVector: null, bboxChanged: false, changedProps: [], changedPropCount: 0 };
+  if (!a?.found) return { ...base, verdict: 'unknown', summary: ['ピン時点の対象要素を取得できませんでした'] };
+  if (!b?.found) return { ...base, verdict: 'removed', summary: ['対象要素が最新版に存在しません（削除＝解消方向の変化）'] };
+  const summary = [];
+  let moved = false, moveVector = null, bboxChanged = false;
+  if (a.bboxMin && b.bboxMin && a.bboxMax && b.bboxMax) {
+    const dMin = ['x', 'y', 'z'].map(k => b.bboxMin[k] - a.bboxMin[k]);
+    const dMax = ['x', 'y', 'z'].map(k => b.bboxMax[k] - a.bboxMax[k]);
+    const sameVec = dMin.every((v, i) => Math.round(v * 1000) === Math.round(dMax[i] * 1000));
+    if (sameVec && dMin.some(v => Math.round(v * 1000) !== 0)) {
+      moved = true;
+      moveVector = { x: Math.round(dMin[0] * 1000) / 1000, y: Math.round(dMin[1] * 1000) / 1000, z: Math.round(dMin[2] * 1000) / 1000 };
+      summary.push(`位置が移動しました（Δx ${moveVector.x}, Δy ${moveVector.y}, Δz ${moveVector.z}、モデル単位）`);
+    } else if (JSON.stringify(a.bboxMin) !== JSON.stringify(b.bboxMin) || JSON.stringify(a.bboxMax) !== JSON.stringify(b.bboxMax)) {
+      bboxChanged = true;
+      summary.push('外形（bbox）が変化しました');
+    }
+  }
+  const geomChanged = !!(a.geomHash && b.geomHash && a.geomHash !== b.geomHash);
+  if (geomChanged) summary.push('形状（geomHash）が変化しました');
+  const keyOf = p => `${p.category ?? ''}::${p.name}`;
+  const pick = s => new Map((s.props ?? []).filter(p => !String(p.category ?? '').startsWith('__')).map(p => [keyOf(p), p]));
+  const am = pick(a), bm = pick(b);
+  const changedProps = [];
+  for (const k of new Set([...am.keys(), ...bm.keys()])) {
+    const pa = am.get(k), pb = bm.get(k);
+    const va = pa?.value ?? null, vb = pb?.value ?? null;
+    if (JSON.stringify(va) !== JSON.stringify(vb)) {
+      changedProps.push({ name: (pb ?? pa)?.name ?? k, category: (pb ?? pa)?.category ?? null, from: va, to: vb });
+    }
+  }
+  if (changedProps.length) {
+    summary.push(`プロパティが ${changedProps.length} 件変化しました（${changedProps.slice(0, 3).map(c => c.name).join('、')}${changedProps.length > 3 ? ' ほか' : ''}）`);
+  }
+  const changed = moved || bboxChanged || geomChanged || changedProps.length > 0;
+  return {
+    verdict: changed ? 'changed' : 'unchanged',
+    geomChanged, moved, moveVector, bboxChanged,
+    changedProps: changedProps.slice(0, 20), changedPropCount: changedProps.length,
+    summary: changed ? summary : ['形状・位置・プロパティに変化はありません'],
+  };
+}
+// ピンが打たれた版＝Issue 作成時刻以前に公開された最新の版（作成後に公開された版にはピンできない）
+function pinnedVersionFor(issue, versions) {
+  const cands = versions.filter(v => v.createdAt && issue.createdAt && v.createdAt <= issue.createdAt);
+  return cands.length ? cands[cands.length - 1].versionNumber : (versions[0]?.versionNumber ?? null);
+}
+async function fetchIssueById(issueId) {
+  const token = await getToken3();
+  const [types, users] = await Promise.all([
+    getIssueTypes(() => loadIssueTypes(token)),
+    getProjectUsers(() => loadProjectUsers(token)),
+  ]);
+  const j = await apsGet(`${BASE}/construction/issues/v1/projects/${PID}/issues/${issueId}`, token);
+  return enrichIssue(j, types, users);
+}
+// Webhook 受信後の処理本体。本物の受け口でも同じ経路を通す想定で、
+// 「Issue を API で GET → ピン抽出 → ピン時点の要素状態を保存 → 最新版と照合」を行う。
+async function processIssueCreatedWebhook(payload) {
+  const p = payload?.payload ?? payload ?? {};
+  const issueId = p.issueId ?? p.id ?? p.resourceId ?? payload?.issueId ?? null;
+  if (!issueId) throw new Error('webhook ペイロードから issueId を取り出せませんでした');
+  const issue = await fetchIssueById(issueId);
+  const out = { issueId, displayId: issue.displayId, title: issue.title, pinFound: !!issue.pin };
+  if (!issue.pin?.externalId || !issue.pin.isArchitectural) {
+    out.note = '対象モデルへのピンが無いため、要素スナップショットは作成しませんでした';
+    return out;
+  }
+  const versions = await fetchVersions();
+  const pinnedVersion = pinnedVersionFor(issue, versions);
+  const latestVersion = versions[versions.length - 1]?.versionNumber ?? pinnedVersion;
+  const pinState = await fetchElementState(pinnedVersion, issue.pin.externalId, issue.pin.objectId);
+  const latestState = latestVersion === pinnedVersion ? pinState
+    : await fetchElementState(latestVersion, issue.pin.externalId, issue.pin.objectId);
+  const verification = { comparedVersion: latestVersion, checkedAt: new Date().toISOString(), ...compareElementStates(pinState, latestState) };
+  const store = loadPinSnaps();
+  store.snapshots[issueId] = {
+    issueId, displayId: issue.displayId, title: issue.title,
+    source: 'webhook-sim', simulated: true,
+    event: payload?.event ?? 'issue.created-1.0',
+    receivedAt: new Date().toISOString(),
+    pin: { position: issue.pin.position ?? null, externalId: issue.pin.externalId, objectId: issue.pin.objectId ?? null, viewName: issue.pin.viewName ?? null },
+    pinnedVersion,
+    element: pinState,
+    verification,
+  };
+  savePinSnaps(store);
+  return { ...out, pinnedVersion, elementFound: pinState.found, comparedVersion: latestVersion, verdict: verification.verdict, summary: verification.summary };
+}
+
 // ============ HTTP ルーティング ============
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -1084,6 +1304,35 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/versions') {
       const versions = await fetchVersions();
       return sendJson(res, 200, { model: ARCH.name, versions });
+    }
+    // ---- ピン時点スナップショット／Webhook 受信シミュレーション（デモスライス、SPEC §7.9） ----
+    const psm = url.pathname.match(/^\/api\/issues\/([^/]+)\/pin-snapshot$/);
+    if (psm && req.method === 'GET') {
+      const rec = loadPinSnaps().snapshots[decodeURIComponent(psm[1])];
+      if (!rec) return sendJson(res, 404, { error: 'ピン時点スナップショットはまだありません（Webhook 受信シミュレーションで生成されます）' });
+      return sendJson(res, 200, rec);
+    }
+    if (url.pathname === '/api/sim/webhook' && req.method === 'POST') {
+      // 本物の Issues Webhook と同じ形のペイロードを受ける口（デモ用シミュレーション。
+      // 本物の Webhook 登録はしていない）。受信後の処理は本物の受け口と同じ経路を通す。
+      let body = {};
+      try { body = JSON.parse(await readBody(req)); } catch (e) {}
+      const r = await processIssueCreatedWebhook(body);
+      return sendJson(res, 200, { ok: true, simulated: true, ...r });
+    }
+    if (url.pathname === '/api/sim/webhook/hg' && req.method === 'POST') {
+      // 管理用: 対象モデルにピンされた Issue（HG では #48〜52）を「起票 Webhook が来た」
+      // ていで同じ経路に流し、スナップショットを一括生成する（再実行可能）。
+      const issues = await fetchIssues();
+      const targets = issues.filter(i => i.pin?.isArchitectural && i.pin?.externalId);
+      const results = [];
+      for (const i of targets) {
+        try {
+          const r = await processIssueCreatedWebhook({ event: 'issue.created-1.0', payload: { issueId: i.id } });
+          results.push(r);
+        } catch (e) { results.push({ issueId: i.id, displayId: i.displayId, error: String(e?.message ?? e) }); }
+      }
+      return sendJson(res, 200, { ok: true, simulated: true, count: results.length, results });
     }
     if (url.pathname === '/api/refresh' && req.method === 'POST') {
       const r = await refreshSnapshots();

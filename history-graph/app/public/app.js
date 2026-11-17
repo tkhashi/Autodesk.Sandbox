@@ -149,9 +149,102 @@ async function loadComments(id) {
   } catch (e) { commentsCache.set(id, []); }
   return commentsCache.get(id);
 }
+// ============ ピン時点スナップショット（デモスライス） ============
+// 起票 Webhook の受信をシミュレートして保存した「ピン時点の要素状態」と、
+// 最新版との照合（Close 検証）を表示する。サーバ側の保存先はローカルの
+// data/pin-snapshots.json（外部ストレージのモック）。本物の Webhook は未登録。
+const pinSnapCache = new Map(); // issueId -> スナップショット（無い場合は null）
+async function loadPinSnap(id) {
+  if (pinSnapCache.has(id)) return pinSnapCache.get(id);
+  let rec = null;
+  try {
+    const r = await fetch(`/api/issues/${encodeURIComponent(id)}/pin-snapshot`);
+    if (r.ok) rec = await r.json();
+  } catch (e) {}
+  pinSnapCache.set(id, rec);
+  return rec;
+}
+const VERDICT_LABEL = {
+  removed: '対象要素が削除（解消方向の変化）',
+  changed: '変化あり',
+  unchanged: '変化なし',
+  unknown: '照合できませんでした',
+};
+function verdictChip(v) {
+  if (!v?.verdict) return '';
+  return `<span class="vchip ${esc(v.verdict)}" title="ピン時点と最新版 V${v.comparedVersion ?? '—'} の照合結果">${esc(VERDICT_LABEL[v.verdict] ?? v.verdict)}</span>`;
+}
+function fmtPropVal(v) {
+  if (v == null) return '（なし）';
+  const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
+  return s.length > 60 ? s.slice(0, 60) + '…' : s;
+}
+function renderPinSnap(i, ps) {
+  const wrap = $('pinSnapWrap');
+  if (!wrap) return;
+  if (!ps) {
+    // スナップショットが無い場合: 対象モデルにピンされた Issue だけ、生成ボタンを出す
+    if (i.pin?.isArchitectural && i.pin?.externalId) {
+      wrap.hidden = false;
+      wrap.innerHTML = `<div class="pinsnap"><h3>ピン時点スナップショット（デモ）</h3>
+        <p class="demo-note">Webhook 受信はデモ用シミュレーションです（本物の Webhook は登録していません）。</p>
+        <p style="color:var(--muted)">まだスナップショットがありません。起票 Webhook の受信をシミュレートすると、ピン時点の要素状態（座標・形状・プロパティ）を保存し、最新版と照合します。</p>
+        <button type="button" class="sim-btn" id="pinSnapSimBtn">起票 Webhook の受信をシミュレート</button></div>`;
+      $('pinSnapSimBtn').addEventListener('click', async () => {
+        const btn = $('pinSnapSimBtn');
+        btn.disabled = true;
+        btn.textContent = '処理中…（インデックス照合のため時間がかかる場合があります）';
+        try {
+          const r = await fetch('/api/sim/webhook', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ event: 'issue.created-1.0', payload: { issueId: i.id } }),
+          });
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          pinSnapCache.delete(i.id);
+          const rec = await loadPinSnap(i.id);
+          if (selectedId === i.id) renderPinSnap(i, rec);
+          buildTimeline(); // Close イベント側の判定チップも付け直す
+        } catch (e) {
+          btn.disabled = false;
+          btn.textContent = '失敗しました — もう一度シミュレート';
+        }
+      });
+    } else {
+      wrap.hidden = true;
+      wrap.innerHTML = '';
+    }
+    return;
+  }
+  const el = ps.element ?? {};
+  const v = ps.verification ?? {};
+  const pos = ps.pin?.position;
+  const props = (el.props ?? []).filter(p => !String(p.category ?? '').startsWith('__'));
+  const main = props.slice(0, 8);
+  const rest = props.slice(8);
+  const bbox = el.bboxMin && el.bboxMax
+    ? `(${el.bboxMin.x.toFixed(1)}, ${el.bboxMin.y.toFixed(1)}, ${el.bboxMin.z.toFixed(1)}) 〜 (${el.bboxMax.x.toFixed(1)}, ${el.bboxMax.y.toFixed(1)}, ${el.bboxMax.z.toFixed(1)})`
+    : '—';
+  wrap.hidden = false;
+  wrap.innerHTML = `<div class="pinsnap">
+    <h3>ピン時点スナップショット（デモ）</h3>
+    <p class="demo-note">Webhook 受信はデモ用シミュレーションです（本物の Webhook は登録していません）。受信後の処理（Issue 取得 → ピン保存 → 最新版との照合）は本物の受け口と同じ経路で、保存先はローカルの data/pin-snapshots.json（外部ストレージのモック）です。</p>
+    <dl>
+      <dt>ピン座標</dt><dd>${pos ? `x ${pos.x}, y ${pos.y}, z ${pos.z}（Viewer 座標）` : '—'}</dd>
+      <dt>ピンした版</dt><dd>V${ps.pinnedVersion ?? '—'}（${esc(ps.event ?? 'issue.created')} 受信時に保存）</dd>
+      <dt>対象要素</dt><dd>${esc(el.name ?? ps.pin?.externalId ?? '—')}${el.category ? `（${esc(el.category)}）` : ''}</dd>
+      <dt>外形 (bbox)</dt><dd>${esc(bbox)}</dd>
+      <dt>形状ハッシュ</dt><dd>${esc(el.geomHash ?? '—')}</dd>
+    </dl>
+    ${main.length ? `<div><b>主要プロパティ（ピン時点）</b><ul class="props">${main.map(p => `<li>${esc(p.name)}: ${esc(fmtPropVal(p.value))}</li>`).join('')}</ul>${rest.length ? `<details><summary>その他のプロパティ ${rest.length} 件（ピン時点の全件を保存）</summary><ul class="props">${rest.map(p => `<li>${esc(p.name)}: ${esc(fmtPropVal(p.value))}</li>`).join('')}</ul></details>` : ''}</div>` : ''}
+    <div class="verify"><b>最新版 V${v.comparedVersion ?? '—'} との照合（Close 検証）</b>${verdictChip(v)}
+      ${v.summary?.length ? `<ul class="vsum">${v.summary.map(s => `<li>${esc(s)}</li>`).join('')}</ul>` : ''}
+      ${v.changedProps?.length ? `<ul class="vprops">${v.changedProps.slice(0, 6).map(c => `<li>${esc(c.name)}: ${esc(fmtPropVal(c.from))} → ${esc(fmtPropVal(c.to))}</li>`).join('')}</ul>` : ''}
+    </div>
+  </div>`;
+}
 async function buildTimeline() {
   const i = issue();
-  if (!i) { $('tlTitle').textContent = '—'; $('tlBody').innerHTML = ''; return; }
+  if (!i) { $('tlTitle').textContent = '—'; $('tlBody').innerHTML = ''; const pw = $('pinSnapWrap'); if (pw) { pw.hidden = true; pw.innerHTML = ''; } return; }
   const myId = i.id;
   const [label] = FSTATUS[i.status] ?? [i.status];
   $('tlTitle').textContent = `#${i.displayId ?? ''} ${i.title ?? ''}`;
@@ -173,8 +266,9 @@ async function buildTimeline() {
     tw.hidden = true;
     timg.removeAttribute('src');
   }
-  const comments = await loadComments(i.id);
+  const [comments, pinSnap] = await Promise.all([loadComments(i.id), loadPinSnap(i.id)]);
   if (selectedId !== myId) return; // 待っている間に選択が切り替わっていたら、古い描画で上書きしない
+  renderPinSnap(i, pinSnap);
   const evs = [];
   evs.push({ t: i.createdAt, cls: 'open', html: `<b>起票</b> — ${esc(i.createdByName ?? '')} が Open` });
   for (const c of comments) {
@@ -182,7 +276,7 @@ async function buildTimeline() {
   }
   for (const e of i.history.events) {
     if (e.kind === 'status') {
-      if (e.to === 'closed') evs.push({ t: e.detectedAt, cls: 'goal', html: `<b>Close 🏁</b> — ${esc(STATUS_JA[e.from] ?? e.from)} <span class="st-arrow">→</span> 完了`, note: 'スナップショット検出時刻' });
+      if (e.to === 'closed') evs.push({ t: e.detectedAt, cls: 'goal', html: `<b>Close 🏁</b> — ${esc(STATUS_JA[e.from] ?? e.from)} <span class="st-arrow">→</span> 完了`, note: 'スナップショット検出時刻', verifyChip: pinSnap ? verdictChip(pinSnap.verification) : '' });
       else if (e.from === 'closed') evs.push({ t: e.detectedAt, cls: 'reopen', html: `<b>Reopen</b> — 完了 <span class="st-arrow">→</span> ${esc(STATUS_JA[e.to] ?? e.to)}`, note: 'スナップショット検出時刻' });
       else evs.push({ t: e.detectedAt, cls: 'status', html: `<b>状態変更</b> — ${esc(STATUS_JA[e.from] ?? e.from)} <span class="st-arrow">→</span> ${esc(STATUS_JA[e.to] ?? e.to)}`, note: 'スナップショット検出時刻' });
     } else if (e.kind === 'assignee') {
@@ -192,7 +286,7 @@ async function buildTimeline() {
   for (const m of i.history.modelUpdates) {
     evs.push({
       t: m.publishedAt, cls: 'model', pair: m.diffPair, version: m.version,
-      html: `<b>モデル更新 V${m.version}</b> — ${esc(DATA.model.name)}`,
+      html: `<b>モデル更新 V${m.version}</b> — ${esc(DATA.model.name)}${m.createdBy ? `（公開者: ${esc(m.createdBy)}）` : ''}`,
       note: m.note ?? (m.diffPair ? `差分: ${m.diffPair.label}` : ''),
     });
   }
@@ -218,7 +312,7 @@ async function buildTimeline() {
       <span class="ev-dot"></span>
       ${e.pair
         ? `<button type="button" class="ev-row" data-ev="${idx}"><span class="ev-when">${esc(fmtDateTime(e.t))}</span><span class="ev-text">${e.html}${e.note ? `<div class="ev-body">${esc(e.note)}</div>` : ''}</span></button>`
-        : `<div class="ev-row"><span class="ev-when">${e.t ? esc(fmtDateTime(e.t)) : ''}</span><span class="ev-text">${e.html}${e.body ? `<div class="ev-body">${esc(e.body)}</div>` : ''}${e.note ? `<div class="ev-body">${esc(e.note)}</div>` : ''}</span></div>`}
+        : `<div class="ev-row"><span class="ev-when">${e.t ? esc(fmtDateTime(e.t)) : ''}</span><span class="ev-text">${e.html}${e.verifyChip ?? ''}${e.body ? `<div class="ev-body">${esc(e.body)}</div>` : ''}${e.note ? `<div class="ev-body">${esc(e.note)}</div>` : ''}</span></div>`}
       ${e.capsHtml ?? ''}
     </div>`).join('');
   for (const b of $('tlBody').querySelectorAll('button.ev-row')) {
