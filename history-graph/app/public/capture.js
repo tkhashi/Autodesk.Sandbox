@@ -262,7 +262,15 @@ async function main() {
     if (!labelItems.length) return;
     const W = innerWidth, H = innerHeight;
     const camPos = viewer.navigation.getPosition();
-    const camDir = viewer.navigation.getWorldDirection(new T.Vector3());
+    // カメラ方向は Navigation の公式 API には無い（getWorldDirection は存在しない）。
+    // app.js の updateLabels と同じく impl.camera から取る。
+    const camDir = new T.Vector3();
+    const cam = viewer.impl?.camera;
+    if (cam?.getWorldDirection) cam.getWorldDirection(camDir);
+    else {
+      const tgt = viewer.navigation.getTarget();
+      camDir.set(tgt.x - camPos.x, tgt.y - camPos.y, tgt.z - camPos.z).normalize();
+    }
     const B = { l: W * 0.125, r: W * 0.875, t: H * 0.18, b: H * 0.74 };
     const vis = [];
     for (const it of labelItems) {

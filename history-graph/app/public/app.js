@@ -612,7 +612,16 @@ function updateLabels() {
   let camPos, camDir;
   try {
     camPos = viewer.navigation.getPosition();
-    camDir = viewer.navigation.getWorldDirection(new T.Vector3());
+    // カメラ方向は Navigation の公式 API には無い（getWorldDirection は存在しない。
+    // これを呼ぶと例外になり、ラベルの transform が一切書かれず全ラベルが左上に残る）。
+    // sample-d と同じく impl.camera から取る。取れなければ注視点−位置で代用する。
+    camDir = new T.Vector3();
+    const cam = viewer.impl?.camera;
+    if (cam?.getWorldDirection) cam.getWorldDirection(camDir);
+    else {
+      const tgt = viewer.navigation.getTarget();
+      camDir.set(tgt.x - camPos.x, tgt.y - camPos.y, tgt.z - camPos.z).normalize();
+    }
   } catch (e) { return; }
   const vis = [];
   for (const it of labelItems) {
@@ -881,6 +890,61 @@ function setDiffScope(s) {
   applyOccluders();
   buildLabels();
 }
+// ---- 要素単位の実透過（ゴースト表示） ----
+// テーマカラーの第4成分は公式仕様で「intensity（元の色との混合率）」であり透明度ではない。
+// そのため削除要素の「透明＋赤」は、フラグメントのマテリアルを半透明マテリアルに
+// 差し替えて実現する（APS 公式ブログの material swatch 方式: matman().addMaterial +
+// FragmentList.setMaterial。統合モデルでは unconsolidate が必要な場合がある）。
+// 差し替えたフラグメントは台帳に記録し、表示の再適用時に元のマテリアルへ戻す。
+let matOverrideLedger = []; // { model, frags, fragId, orig }
+const unconsolidatedModels = new WeakSet();
+let ghostMats = null;
+function ghostMaterial(kind) {
+  if (ghostMats?.[kind]) return ghostMats[kind];
+  const T = window.THREE ?? window.Autodesk?.Viewing?.Private?.THREE;
+  if (!T?.MeshBasicMaterial) return null;
+  const conf = kind === 'removed'
+    ? { color: 0xd42b1a, opacity: 0.45 }
+    : { color: 0xe6b326, opacity: 0.35 };
+  const mat = new T.MeshBasicMaterial({ color: conf.color, transparent: true, opacity: conf.opacity, depthWrite: false });
+  try { viewer.impl.matman().addMaterial('hg-ghost-' + kind, mat, true); } catch (e) {}
+  (ghostMats ??= {})[kind] = mat;
+  return mat;
+}
+function applyTransparentGhost(model, dbIds, mat) {
+  if (!model || !dbIds?.length || !mat) return false;
+  try {
+    if (!unconsolidatedModels.has(model)) {
+      try { model.unconsolidate?.(); } catch (e) {}
+      unconsolidatedModels.add(model);
+    }
+    const tree = model.getInstanceTree();
+    const frags = model.getFragmentList();
+    if (!tree || typeof frags?.setMaterial !== 'function') return false;
+    let applied = 0;
+    for (const db of dbIds) {
+      tree.enumNodeFragments(db, (fragId) => {
+        if (!matOverrideLedger.some(e => e.model === model && e.fragId === fragId)) {
+          let orig = null;
+          try { orig = frags.getMaterial(fragId); } catch (e) {}
+          matOverrideLedger.push({ model, frags, fragId, orig });
+        }
+        frags.setMaterial(fragId, mat);
+        applied++;
+      }, true);
+    }
+    if (applied) { try { viewer.impl.invalidate(true); } catch (e) {} }
+    return applied > 0;
+  } catch (e) { return false; }
+}
+function restoreMaterialOverrides(onlyModel = null) {
+  const keep = [];
+  for (const e of matOverrideLedger) {
+    if (onlyModel && e.model !== onlyModel) { keep.push(e); continue; }
+    try { if (e.orig) e.frags.setMaterial(e.fragId, e.orig); } catch (err) {}
+  }
+  matOverrideLedger = keep;
+}
 // 分類済みコンテキスト（diffViewCtx）に対して、表示モードに応じた表示／非表示と色付けだけを適用する。
 // モード切替ではモデルも要素リストも再取得しない。
 // 表示範囲（差分フォーカス／全体）の違いは、ここでの基本表示ではなく、この上に重なる
@@ -903,6 +967,7 @@ function applyDiffViewMode() {
   try { viewer.isolate([], toM); } catch (e) {}
   try { viewer.clearThemingColors(fromM); } catch (e) {}
   try { viewer.clearThemingColors(toM); } catch (e) {}
+  restoreMaterialOverrides(); // 前回適用した実透過（マテリアル差し替え）を元に戻してから作り直す
   // この適用で明示表示される要素は、前に透明化した要素を含めて正の状態に戻るため、
   // 透明化の台帳はリセットする（直後に applyOccluders が現視点で再適用する）
   hiddenOccluders = new Map();
@@ -945,8 +1010,18 @@ function applyDiffViewMode() {
     theme(toM, ctx.addedToDb, V4(0.1, 0.65, 0.3, 1));
     theme(toM, ctx.changedToDb, V4(0.95, 0.72, 0.08, 1));
     theme(toM, unchangedTo, V4(1, 1, 1, 1));
-    theme(fromM, ctx.removedDb, V4(0.85, 0.16, 0.1, 0.45));
-    if (diffGhostOld) theme(fromM, ctx.changedFromDb, V4(0.9, 0.7, 0.15, 0.35));
+    // 削除要素は「透明＋赤」で重ねる。テーマカラーでは透明にならない（第4成分は
+    // 混合率）ため、フラグメントのマテリアルを半透明の赤に差し替える。
+    // 差し替えに失敗した場合のみ、従来のテーマカラー（赤の混合）に落とす。
+    if (!applyTransparentGhost(fromM, ctx.removedDb, ghostMaterial('removed'))) {
+      theme(fromM, ctx.removedDb, V4(0.85, 0.16, 0.1, 0.45));
+    }
+    if (diffGhostOld) {
+      // 変更の旧形状ゴーストも同じ理由で実透過にする（失敗時はテーマカラー）
+      if (!applyTransparentGhost(fromM, ctx.changedFromDb, ghostMaterial('changed'))) {
+        theme(fromM, ctx.changedFromDb, V4(0.9, 0.7, 0.15, 0.35));
+      }
+    }
   }
 }
 async function applyDiffClassification() {
@@ -996,6 +1071,7 @@ async function applyDiffClassification() {
 function resetModelPresentation(model) {
   try { viewer.isolate([], model); } catch (e) {}
   try { viewer.clearThemingColors(model); } catch (e) {}
+  restoreMaterialOverrides(model);
   const ids = allDbIds(model);
   if (ids.length) { try { viewer.show(ids, model); } catch (e) {} }
 }
@@ -1012,7 +1088,7 @@ async function showDiff3D() {
     await ensureViewer();
     // このペアに不要な版のモデルは破棄し、必要な2版は読み込み済みを再利用する
     for (const [v, m] of [...diffModelByVersion]) {
-      if (v !== from && v !== to) { try { viewer.unloadModel(m); } catch (e) {} diffModelByVersion.delete(v); }
+      if (v !== from && v !== to) { try { viewer.unloadModel(m); } catch (e) {} matOverrideLedger = matOverrideLedger.filter(e => e.model !== m); diffModelByVersion.delete(v); }
     }
     diffViewCtx = null; // 分類が済むまで切替ボタンは無効（古いペアの分類で切り替える事故防止）
     occTarget = null;
