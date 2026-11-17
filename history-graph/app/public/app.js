@@ -23,7 +23,7 @@ let DATA = null;             // /api/issues の応答
 let selectedId = null;
 let selectedPair = null;     // { from, to, version } 3D 差分の比較ペア（ピン時点の版 → 最新版。ピッカーは置かない）
 let commentsCache = new Map();
-const flt = { q: '', status: 'all', sort: null, page: 1, pageSize: 10 };
+const flt = { q: '', status: 'all', sort: null, page: 1, pageSize: 5 };
 
 // ============ Issue 表 ============
 const COLUMNS = [
