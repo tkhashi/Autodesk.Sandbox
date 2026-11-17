@@ -963,6 +963,38 @@ function restoreMaterialOverrides(onlyModel = null) {
   }
   matOverrideLedger = keep;
 }
+// ---- 土台の抑制は「完全非表示」で行う（ゴースト漏れ対策、2026-11-17） ----
+// viewer.setGhosting(true) の下では、hide() した要素は消えず半透明のゴーストとして
+// 描画される（LMV の仕様。ゴースト化は遮蔽物の見通し確保のための意図した使い方）。
+// しかし土台の表示制御（重ねて表示で旧版モデルの大半を抑える等）まで hide() で行うと、
+// 抑えたはずの建物全体がゴーストとして重なり、全面屋根のような大きな平板要素が
+// 「存在しない白い板」に見える（実機報告）。土台の抑制には、ゴースト化の対象に
+// ならない visibilityManager.setNodeOff（Autodesk の View and Data API Tips で
+// 「完全に隠す」手段として確立）を使う。遮蔽物（applyOccluders）の hide() は
+// 従来どおりゴースト表示のままにする。setNodeOff が使えない環境では hide() に落とす。
+const offLedger = new Map(); // model -> Set<dbId>（setNodeOff で消している要素）
+function vmSetOff(model, dbId, off) {
+  const vm = viewer?.impl?.visibilityManager;
+  if (!vm || typeof vm.setNodeOff !== 'function') return false;
+  try { vm.setNodeOff(dbId, off); return true; } catch (e) { return false; }
+}
+function setBaseVisibility(model, showIds, hideIds) {
+  let off = offLedger.get(model);
+  if (!off) { off = new Set(); offLedger.set(model, off); }
+  // 表示側: off を解除してから show する（off が残っていると show しても出ない）
+  for (const id of showIds) { if (vmSetOff(model, id, false)) off.delete(id); }
+  if (showIds.length) { try { viewer.show(showIds, model); } catch (e) {} }
+  // 抑制側: setNodeOff で完全に消す（使えない場合のみ hide() にフォールバック）
+  const fallback = [];
+  for (const id of hideIds) { if (vmSetOff(model, id, true)) off.add(id); else fallback.push(id); }
+  if (fallback.length) { try { viewer.hide(fallback, model); } catch (e) {} }
+}
+function clearOffState(model) {
+  const off = offLedger.get(model);
+  if (!off) return;
+  for (const id of off) vmSetOff(model, id, false);
+  offLedger.delete(model);
+}
 // 分類済みコンテキスト（diffViewCtx）に対して、表示モードに応じた表示／非表示と色付けだけを適用する。
 // モード切替ではモデルも要素リストも再取得しない。
 // 表示範囲（差分フォーカス／全体）の違いは、ここでの基本表示ではなく、この上に重なる
@@ -976,8 +1008,6 @@ function applyDiffViewMode() {
   if (!THREE) return;
   const V4 = (r, g, b, a) => new THREE.Vector4(r, g, b, a);
   const { fromM, toM } = ctx;
-  const show = (model, ids) => { if (ids.length) { try { viewer.show(ids, model); } catch (e) {} } };
-  const hide = (model, ids) => { if (ids.length) { try { viewer.hide(ids, model); } catch (e) {} } };
   const theme = (model, ids, v4) => { for (const db of ids) { try { viewer.setThemingColor(db, v4, model); } catch (e) {} } };
   const rest = (all, keep) => { const s = new Set(keep); return all.filter(id => !s.has(id)); };
   // 前回の isolate 状態を解除してから、明示的な表示／非表示リストで状態を作り直す
@@ -991,10 +1021,11 @@ function applyDiffViewMode() {
   hiddenOccluders = new Map();
   occHiddenTotal = 0;
   if (ctx.plain) {
-    // all モード: 要素単位の分類・色付けはせず、モデル単位で Before／After を切り替えるだけ
-    if (diffViewMode === 'before') { show(fromM, ctx.allFrom); hide(toM, ctx.allTo); }
-    else if (diffViewMode === 'after') { show(toM, ctx.allTo); hide(fromM, ctx.allFrom); }
-    else { show(fromM, ctx.allFrom); show(toM, ctx.allTo); }
+    // all モード: 要素単位の分類・色付けはせず、モデル単位で Before／After を切り替えるだけ。
+    // 切り替え先モデルは完全非表示（setNodeOff）にする。hide() だとゴーストとして残る。
+    if (diffViewMode === 'before') { setBaseVisibility(fromM, ctx.allFrom, []); setBaseVisibility(toM, [], ctx.allTo); }
+    else if (diffViewMode === 'after') { setBaseVisibility(toM, ctx.allTo, []); setBaseVisibility(fromM, [], ctx.allFrom); }
+    else { setBaseVisibility(fromM, ctx.allFrom, []); setBaseVisibility(toM, ctx.allTo, []); }
     return;
   }
   // 基本表示（フォーカス／全体で共通）: After は全要素、Before はモードに応じて
@@ -1003,10 +1034,10 @@ function applyDiffViewMode() {
   const visFrom = diffViewMode === 'after' ? []
     : diffViewMode === 'before' ? ctx.allFrom
     : diffGhostOld ? [...ctx.removedDb, ...ctx.changedFromDb] : [...ctx.removedDb];
-  show(toM, visTo);
-  hide(toM, rest(ctx.allTo, visTo));
-  show(fromM, visFrom);
-  hide(fromM, rest(ctx.allFrom, visFrom));
+  // 土台の表示／抑制は完全非表示ベース（setBaseVisibility）。hide() で抑えると
+  // ゴースト化して旧版モデル全体が重なって見える（全面屋根が白い板に見える原因）。
+  setBaseVisibility(toM, visTo, rest(ctx.allTo, visTo));
+  setBaseVisibility(fromM, visFrom, rest(ctx.allFrom, visFrom));
   // 変更がかかっていない要素は白で表示する（UI 簡素化の要件、2026-11-17）。
   // 透明化ではなくテーマカラー白（不透明）を選んだ理由: 変更要素の色付けと同じ
   // setThemingColor の経路で数行で済み、描画も不透明パスのまま（透明化は
@@ -1090,6 +1121,7 @@ function resetModelPresentation(model) {
   try { viewer.isolate([], model); } catch (e) {}
   try { viewer.clearThemingColors(model); } catch (e) {}
   restoreMaterialOverrides(model);
+  clearOffState(model); // setNodeOff で消した要素を全て戻してから全表示する
   const ids = allDbIds(model);
   if (ids.length) { try { viewer.show(ids, model); } catch (e) {} }
 }
@@ -1106,7 +1138,7 @@ async function showDiff3D() {
     await ensureViewer();
     // このペアに不要な版のモデルは破棄し、必要な2版は読み込み済みを再利用する
     for (const [v, m] of [...diffModelByVersion]) {
-      if (v !== from && v !== to) { try { viewer.unloadModel(m); } catch (e) {} matOverrideLedger = matOverrideLedger.filter(e => e.model !== m); diffModelByVersion.delete(v); }
+      if (v !== from && v !== to) { try { viewer.unloadModel(m); } catch (e) {} matOverrideLedger = matOverrideLedger.filter(e => e.model !== m); offLedger.delete(m); diffModelByVersion.delete(v); }
     }
     diffViewCtx = null; // 分類が済むまで切替ボタンは無効（古いペアの分類で切り替える事故防止）
     occTarget = null;
@@ -1190,7 +1222,7 @@ async function showLatestOnly() {
     await ensureViewer();
     if (!still()) return;
     for (const [v, m] of [...diffModelByVersion]) {
-      if (v !== latest) { try { viewer.unloadModel(m); } catch (e) {} diffModelByVersion.delete(v); }
+      if (v !== latest) { try { viewer.unloadModel(m); } catch (e) {} offLedger.delete(m); diffModelByVersion.delete(v); }
     }
     diffViewCtx = null;
     occTarget = null;
