@@ -209,12 +209,17 @@ async function buildTimeline() {
     evs.push({ t: null, cls: 'model', html: '<b>関連するモデル更新</b> — ライブ diff で確認中…', note: 'diff ジョブの完了後に自動で表示されます' });
   }
   if (i.status !== 'closed') evs.push({ t: null, cls: 'now', html: '<b>現在</b> — オープン中' });
+  // モデル更新イベントの下に、そのペアの自動スクショ（サーバ側撮影）を付ける
+  const pairList = [...new Map(evs.filter(e => e.pair).map(e => [`${e.pair.from}-${e.pair.to}`, e.pair])).values()];
+  await Promise.all(pairList.map(p => fetchCaptures(p.from, p.to)));
+  for (const e of evs) if (e.pair) e.capsHtml = capsHtmlFor(e.pair, i.id);
   $('tlBody').innerHTML = evs.map((e, idx) => `
     <div class="ev ${e.cls}${e.pair && selectedPair && e.pair.from === selectedPair.from && e.pair.to === selectedPair.to ? ' selected' : ''}">
       <span class="ev-dot"></span>
       ${e.pair
         ? `<button type="button" class="ev-row" data-ev="${idx}"><span class="ev-when">${esc(fmtDateTime(e.t))}</span><span class="ev-text">${e.html}${e.note ? `<div class="ev-body">${esc(e.note)}</div>` : ''}</span></button>`
         : `<div class="ev-row"><span class="ev-when">${e.t ? esc(fmtDateTime(e.t)) : ''}</span><span class="ev-text">${e.html}${e.body ? `<div class="ev-body">${esc(e.body)}</div>` : ''}${e.note ? `<div class="ev-body">${esc(e.note)}</div>` : ''}</span></div>`}
+      ${e.capsHtml ?? ''}
     </div>`).join('');
   for (const b of $('tlBody').querySelectorAll('button.ev-row')) {
     b.addEventListener('click', () => {
@@ -222,6 +227,40 @@ async function buildTimeline() {
       if (e?.pair) applyPair({ ...e.pair, version: e.version }, true);
     });
   }
+}
+
+// ---- 自動スクショ（サーバ側撮影）のタイムライン表示 ----
+const captureCache = new Map(); // "from-to" -> そのペアの撮影ジョブ（key ごとに最新のみ）
+async function fetchCaptures(from, to) {
+  const key = `${from}-${to}`;
+  if (captureCache.has(key)) return captureCache.get(key);
+  try {
+    const r = await fetch(`/api/captures?from=${from}&to=${to}`);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    const latest = new Map();
+    for (const job of j.jobs ?? []) {
+      const cur = latest.get(job.key);
+      if (!cur || String(job.queuedAt) > String(cur.queuedAt)) latest.set(job.key, job);
+    }
+    const list = [...latest.values()];
+    captureCache.set(key, list);
+    return list;
+  } catch (e) { return []; }
+}
+function capsHtmlFor(pair, issueId) {
+  const list = captureCache.get(`${pair.from}-${pair.to}`) ?? [];
+  if (!list.length) return '';
+  const mine = list.filter(x => x.kind === 'anchor' && x.issueId === issueId);
+  const rest = list.filter(x => !(x.kind === 'anchor' && x.issueId === issueId));
+  const ordered = [...mine, ...rest];
+  const done = ordered.filter(x => x.status === 'done');
+  const failed = ordered.filter(x => x.status === 'failed');
+  const pending = ordered.filter(x => x.status === 'queued' || x.status === 'running');
+  const camLabel = { pin: 'ピンカメラ再現', fallback: '代替カメラ', computed: '計算カメラ' };
+  const imgs = done.map(x => `<a class="ev-cap" href="/api/captures/${x.id}/image" target="_blank" rel="noopener" title="${esc(x.elementName ?? '')}（${esc(camLabel[x.camera] ?? x.camera)}）"><img src="/api/captures/${x.id}/image" alt="${esc(x.elementName ?? '変更箇所')}の自動スクショ"></a>`).join('');
+  const fails = failed.map(x => `<span class="ev-cap-fail" title="${esc(x.error ?? '')}">撮影失敗: ${esc(x.elementName ?? x.key ?? '')}${x.error ? `（${esc(x.error.slice(0, 40))}）` : ''}</span>`).join('');
+  return `<div class="ev-caps"><div class="ev-caps-head">自動スクショ（V${pair.from} → V${pair.to}）: 成功 ${done.length} 件／失敗 ${failed.length} 件${pending.length ? `／撮影中・待ち ${pending.length} 件` : ''}</div><div class="ev-caps-imgs">${imgs}${fails}</div></div>`;
 }
 
 // ============ 差分ビュー ============
@@ -319,17 +358,23 @@ function applyPair(pair, auto3d) {
   buildTimeline().then(() => loadDiff(auto3d));
   updateViewerButton();
 }
-async function loadDiff(auto3d) {
+async function loadDiff() {
   const i = issue();
   if (!selectedPair) {
     $('diffTitle').textContent = '差分ビュー';
     $('diffCounts').innerHTML = '';
     $('diffBody').innerHTML = '<div class="diff-empty">タイムラインのモデル更新イベントを選ぶか、上のピッカーで版ペアを指定すると差分が出ます。</div>';
+    occTarget = null;
+    clearLabels();
     return;
   }
   const { from, to } = selectedPair;
   $('diffTitle').textContent = `差分ビュー — ${selectedPair.label ?? `V${from} → V${to}`}`;
   renderDiffLegend();
+  // 3D モデル確認は業務フローの必須ステップ: 件数の取得を待たず、ペアが決まった
+  // この時点で Viewer の初期化とモデル読み込み（段階ロードで After 優先）を即開始する。
+  // ユーザーが 3D を見ようとしたときには表示済みになっている状態を目指す。
+  showDiff3D();
   // 取得が終わるまで件数チップは「取得中」にしておく（前ペアの数字を残さない。H1）
   $('diffCounts').innerHTML = COUNTS_LOADING;
   $('diffBody').innerHTML = '<div class="diff-empty">読み込み中…</div>';
@@ -384,7 +429,7 @@ async function loadDiff(auto3d) {
       <span class="dc-status" id="diff3dStatus"></span>
     </div>
     <div class="legend"><span><i class="la"></i>追加（After のみ・緑）</span><span><i class="ld"></i>削除（Before のみ・赤ゴースト）</span><span><i class="lc"></i>変更（After・黄／Before はゴースト）</span><span>変更なしは After のみ表示</span><span>※ Before／After の対応表はビューア脇の凡例に常時表示</span></div>
-    ${diffMode === 'all' ? '<p class="diff-note">all モードでは 3D ビューアの色分けは行いません（色分けは geometry モードのみ）。all では件数とピン周辺の内訳が対象で、3D 側は版ペアの素表示（Before／After の切替のみ）になります。</p>' : '<p class="diff-note">3D は段階ロードです（After を先に表示し、Before が揃ったら色分けを適用）。表示範囲の既定は「差分フォーカス」（変更要素とその周辺のみ）で、ビューア脇のボタンで「全体表示」に切り替えられます。</p>'}
+    ${diffMode === 'all' ? '<p class="diff-note">all モードでは 3D ビューアの色分けは行いません（色分けは geometry モードのみ）。all では件数とピン周辺の内訳が対象で、3D 側は版ペアの素表示（Before／After の切替のみ）になります。</p>' : '<p class="diff-note">3D は段階ロードです（After を先に表示し、Before が揃ったら色分けを適用）。表示範囲の既定は「差分フォーカス」（変更のない要素は文脈として残し、対象への見通しを遮る部材だけを透明化＋変更要素に引出線ラベル）で、ビューア脇のボタンで「全体表示」に切り替えられます。</p>'}
     <div class="diff-side">${side}</div>
   </div>`;
   for (const b of $('diffBody').querySelectorAll('[data-dmode]')) {
@@ -402,11 +447,18 @@ async function loadDiff(auto3d) {
     // ゴースト切替は見せ方だけの変更なので、分類済みなら再取得せずに適用し直す
     if (diffViewCtx && diffPairShown && selectedPair && diffPairShown.from === selectedPair.from && diffPairShown.to === selectedPair.to) {
       applyDiffViewMode();
+      applyOccluders();
+      buildLabels();
       renderDiffLegend();
     } else reapplyDiff3D();
   });
   $('btnDiff3d').addEventListener('click', () => showDiff3D());
-  if (auto3d) showDiff3D();
+  // 3D は loadDiff の冒頭で即開始済み。描画し直した #diff3dStatus が空なら、
+  // ビューア脇のステータス（最新の状態）で補う
+  const stEl = $('diff3dStatus');
+  if (stEl && !stEl.textContent && diffViewCtx && diffViewCtx.from === from && diffViewCtx.to === to) {
+    stEl.textContent = $('viewerNote').textContent;
+  }
 }
 
 // ============ APS Viewer による 3D 差分表示（sample-d の初期化を移植。CDN 不達の環境では注記のみ） ============
@@ -420,7 +472,7 @@ let diffPairShown = null;             // { from, to } 3D 差分を表示中の�
 let diffElements = null;              // /api/diff/elements の応答（現在のモード）
 let diffBusy = false;
 let diffViewMode = 'overlay';         // 3D 差分の見せ方: 'overlay'（重ねて表示）| 'before'（Before のみ）| 'after'（After のみ）
-let diffScope = 'focus';              // 3D 差分の表示範囲: 'focus'（差分フォーカス＝変更要素とその周辺のみ・既定）| 'full'（全体表示）
+let diffScope = 'focus';              // 3D 差分の表示範囲: 'focus'（差分フォーカス＝文脈を残し見通し確保＋引出線・既定）| 'full'（全体表示）
 let diffViewCtx = null;               // 分類済みの表示コンテキスト（モード切替時は再取得せずこれを使い回す）
 function updateViewerButton() {
   $('btnViewer').disabled = !selectedPair;
@@ -430,17 +482,423 @@ function diffStatus(msg) {
   if (el) el.textContent = msg;
   $('viewerNote').textContent = msg;
 }
-function focusPin() {
-  const i = issue();
-  if (!viewer || !i?.pin?.position) return;
+// ============ カメラ・見通し・引出線ラベル（sample-d の表示方式を移植） ============
+// sample-d（demo-issues-3d）の実証済み方式に合わせる:
+// - カメラ: ピボット＝対象の中心、方位は現在を維持し仰角は 28° 固定、移動はグライド
+//   （イージング付き。ユーザー入力で即キャンセル。sample-d SPEC §6.5）
+// - 見通し: 変更なし要素を全部隠すのではなく、カメラ→対象の視線を遮る部材だけを
+//   ゴースト化する occluder removal（sample-d SPEC §6.7）。静的集合（フォーカス時点の
+//   視点で1回だけ計算し、カメラ移動では再計算しない）
+// - 引出線ラベル: 変更要素を線で指す。画面外は隠し、重なりを避ける配置パッキング、
+//   サイズは構築時に1回だけ測り、更新は transform のみ＋rAF 集約（sample-d §6.6 / v8.21）
+function nodeWorldBox(dbId, model) {
   try {
-    const p = i.pin.position;
-    const THREE = window.THREE;
-    if (!THREE) return;
-    const pos = new THREE.Vector3(p.x + 45, p.y + 45, p.z + 45);
-    const tgt = new THREE.Vector3(p.x, p.y, p.z);
-    viewer.navigation.setView(pos, tgt);
-  } catch (e) { /* フィット失敗は致命的ではない */ }
+    const tree = model.getInstanceTree();
+    const a = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
+    tree.getNodeBox(dbId, a);
+    if (a[0] <= a[3] && a[1] <= a[4] && a[2] <= a[5]) {
+      return { min: { x: a[0], y: a[1], z: a[2] }, max: { x: a[3], y: a[4], z: a[5] } };
+    }
+  } catch (e) {}
+  try {
+    const tree = model.getInstanceTree();
+    const frags = model.getFragmentList();
+    const box = new THREE.Box3();
+    const fb = new THREE.Box3();
+    let found = false;
+    tree.enumNodeFragments(dbId, (fid) => {
+      frags.getWorldBounds(fid, fb);
+      if (fb && !fb.isEmpty()) { box.union(fb); found = true; }
+    }, true);
+    if (found && !box.isEmpty()) return { min: { x: box.min.x, y: box.min.y, z: box.min.z }, max: { x: box.max.x, y: box.max.y, z: box.max.z } };
+  } catch (e) {}
+  return null;
+}
+function boxCenter(b) { return { x: (b.min.x + b.max.x) / 2, y: (b.min.y + b.max.y) / 2, z: (b.min.z + b.max.z) / 2 }; }
+function boxRadius(b) { return Math.max(0.5 * Math.hypot(b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z), 0.5); }
+function unionBoxes(boxes) {
+  const bs = boxes.filter(Boolean);
+  if (!bs.length) return null;
+  const u = { min: { x: Infinity, y: Infinity, z: Infinity }, max: { x: -Infinity, y: -Infinity, z: -Infinity } };
+  for (const b of bs) {
+    u.min.x = Math.min(u.min.x, b.min.x); u.min.y = Math.min(u.min.y, b.min.y); u.min.z = Math.min(u.min.z, b.min.z);
+    u.max.x = Math.max(u.max.x, b.max.x); u.max.y = Math.max(u.max.y, b.max.y); u.max.z = Math.max(u.max.z, b.max.z);
+  }
+  return u;
+}
+// ---- カメラのグライド（sample-d fitToElement の移植） ----
+let focusAnim = null;
+function cancelFocusAnim() {
+  if (focusAnim) { cancelAnimationFrame(focusAnim.raf); focusAnim = null; }
+}
+function glideToBox(box, onArrive) {
+  if (!viewer || !box || !window.THREE) return false;
+  const T = window.THREE;
+  const c0 = boxCenter(box);
+  const c = new T.Vector3(c0.x, c0.y, c0.z);
+  const radius = boxRadius(box);
+  const fov = ((viewer.impl?.camera?.fov ?? 45) * Math.PI) / 180;
+  const dist = (radius / Math.tan(fov / 2)) * 1.9;
+  let camPos;
+  try { camPos = viewer.navigation.getPosition().clone(); } catch (e) { camPos = viewer.impl.camera.position.clone(); }
+  const cur = camPos.clone().sub(c);
+  let az = Math.atan2(cur.y, cur.x);
+  if (!isFinite(az)) az = Math.PI / 4;
+  const el = (28 * Math.PI) / 180;
+  const dir = new T.Vector3(Math.cos(az) * Math.cos(el), Math.sin(az) * Math.cos(el), Math.sin(el));
+  const dest = c.clone().add(dir.multiplyScalar(dist));
+  // setView はピボットを動かさないため、対象の中心へ先に移す（sample-d v8.20 の教訓）
+  try { viewer.navigation.setPivotPoint(c); } catch (e) {}
+  const fromPos = camPos.clone();
+  let fromTgt;
+  try { fromTgt = viewer.navigation.getTarget().clone(); } catch (e) { fromTgt = c.clone(); }
+  const travel = fromPos.distanceTo(dest);
+  const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  cancelFocusAnim();
+  const up = new T.Vector3(0, 0, 1);
+  if (reduceMotion || travel < 1.5) {
+    try { viewer.navigation.setView(dest, c, up); } catch (e) {}
+    if (onArrive) onArrive();
+    return true;
+  }
+  const dur = Math.min(1200, Math.max(650, 450 + travel * 1.2));
+  const t0 = performance.now();
+  const easeInOutCubic = x => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+  const anim = { raf: 0 };
+  focusAnim = anim;
+  const step = (now) => {
+    if (focusAnim !== anim) return;
+    const t = Math.min(1, Math.max(0, (now - t0) / dur));
+    const e = easeInOutCubic(t);
+    try { viewer.navigation.setView(fromPos.clone().lerp(dest, e), fromTgt.clone().lerp(c, e), up); } catch (err) {}
+    if (t < 1) { anim.raf = requestAnimationFrame(step); }
+    else { focusAnim = null; if (onArrive) onArrive(); }
+  };
+  anim.raf = requestAnimationFrame(step);
+  return true;
+}
+function glideToPoint(p, onArrive) {
+  // ピン座標へのフォールバック（対象要素のボックスが取れないとき）。半径は仮置き
+  const r = 8;
+  return glideToBox({ min: { x: p.x - r, y: p.y - r, z: p.z - r }, max: { x: p.x + r, y: p.y + r, z: p.z + r } }, onArrive);
+}
+// ---- 手前の部材の透明化（occluder removal、sample-d computeOccluders の移植） ----
+let occluderRange = (() => {
+  const raw = localStorage.getItem('hgraph-occluder-range');
+  const n = raw === null ? NaN : Number(raw);
+  return Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : 50;
+})();
+let hiddenOccluders = new Map(); // model -> Set(dbId): この機能がゴースト化した要素
+let occHiddenTotal = 0;
+let occCandidatesCache = new Map(); // model -> [{dbId, box}]
+let occTarget = null; // {box} 現在の見通し対象（アンカー要素 or 変更要素全体の合体ボックス）
+function segmentHitsBox(o, d, tMax, b) {
+  let tmin = 0, tmax = tMax;
+  for (const ax of ['x', 'y', 'z']) {
+    const dd = d[ax], oo = o[ax];
+    if (Math.abs(dd) < 1e-9) { if (oo < b.min[ax] || oo > b.max[ax]) return false; }
+    else {
+      let t1 = (b.min[ax] - oo) / dd, t2 = (b.max[ax] - oo) / dd;
+      if (t1 > t2) { const t = t1; t1 = t2; t2 = t; }
+      tmin = Math.max(tmin, t1); tmax = Math.min(tmax, t2);
+      if (tmin > tmax) return false;
+    }
+  }
+  return true;
+}
+function addAncestors(tree, id, set) {
+  let p = id, guard = 0;
+  while (p != null && guard++ < 100) {
+    let parent = null;
+    try { parent = tree.getNodeParentId(p); } catch (e) { break; }
+    if (parent == null || parent === p) break;
+    set.add(parent);
+    p = parent;
+  }
+}
+function occluderCandidates(model) {
+  if (occCandidatesCache.has(model)) return occCandidatesCache.get(model);
+  const tree = model.getInstanceTree();
+  const out = [];
+  if (tree) {
+    const walk = (id) => {
+      let hasFrag = false;
+      tree.enumNodeChildren(id, (c) => walk(c));
+      tree.enumNodeFragments(id, () => { hasFrag = true; }, false);
+      if (hasFrag && id !== tree.getRootId()) {
+        const box = nodeWorldBox(id, model);
+        if (box) out.push({ dbId: id, box });
+      }
+    };
+    walk(tree.getRootId());
+  }
+  occCandidatesCache.set(model, out);
+  return out;
+}
+// 分類済み要素（追加／削除／変更）と対象自身・その祖先は、遮蔽物候補から外す
+function occluderExclusions(model) {
+  const ctx = diffViewCtx;
+  const set = new Set();
+  if (!ctx) return set;
+  const tree = model.getInstanceTree();
+  const lists = model === ctx.toM ? [ctx.addedToDb, ctx.changedToDb] : [ctx.removedDb, ctx.changedFromDb];
+  for (const l of lists) for (const id of l) { set.add(id); if (tree) addAncestors(tree, id, set); }
+  return set;
+}
+function computeOccluders(targetBox) {
+  // カメラ→対象ボックス（範囲ぶん拡大）の 8 隅＋中心への 9 本の線分と交差する要素
+  const range = occluderRange;
+  const out = new Map();
+  if (!viewer || !targetBox || range <= 0) return out;
+  let cam;
+  try { cam = viewer.navigation.getPosition(); } catch (e) { return out; }
+  const o = { x: cam.x, y: cam.y, z: cam.z };
+  const c = boxCenter(targetBox);
+  const f = 1 + (range / 100) * 2;
+  const ex = {
+    min: { x: c.x + (targetBox.min.x - c.x) * f, y: c.y + (targetBox.min.y - c.y) * f, z: c.z + (targetBox.min.z - c.z) * f },
+    max: { x: c.x + (targetBox.max.x - c.x) * f, y: c.y + (targetBox.max.y - c.y) * f, z: c.z + (targetBox.max.z - c.z) * f },
+  };
+  const pts = [c];
+  for (const x of [ex.min.x, ex.max.x]) for (const y of [ex.min.y, ex.max.y]) for (const z of [ex.min.z, ex.max.z]) pts.push({ x, y, z });
+  const segs = pts.map(p => ({ x: p.x - o.x, y: p.y - o.y, z: p.z - o.z }));
+  const distC = Math.hypot(c.x - o.x, c.y - o.y, c.z - o.z);
+  const ctx = diffViewCtx;
+  for (const model of [ctx?.fromM, ctx?.toM].filter(Boolean)) {
+    const excl = occluderExclusions(model);
+    const hits = [];
+    for (const cand of occluderCandidates(model)) {
+      if (excl.has(cand.dbId)) continue;
+      const cc = boxCenter(cand.box);
+      if (Math.hypot(cc.x - o.x, cc.y - o.y, cc.z - o.z) - boxRadius(cand.box) >= distC) continue;
+      if (segs.some(d => segmentHitsBox(o, d, 1, cand.box))) hits.push(cand.dbId);
+    }
+    if (hits.length) out.set(model, new Set(hits));
+  }
+  return out;
+}
+// 前回との差分だけを表示／非表示する（全表示→全非表示の往復によるチラつき回避、sample-d v8.21）
+function applyOccluderSet(next) {
+  if (!viewer) return;
+  for (const model of new Set([...hiddenOccluders.keys(), ...next.keys()])) {
+    const prev = hiddenOccluders.get(model) ?? new Set();
+    const cur = next.get(model) ?? new Set();
+    const toShow = [...prev].filter(id => !cur.has(id));
+    const toHide = [...cur].filter(id => !prev.has(id));
+    if (toShow.length) { try { viewer.show(toShow, model); } catch (e) {} }
+    if (toHide.length) { try { viewer.hide(toHide, model); } catch (e) {} }
+  }
+  hiddenOccluders = next;
+  occHiddenTotal = [...next.values()].reduce((s, set) => s + set.size, 0);
+}
+// フォーカス表示のときだけ、現在の視点で見通しを確保する。カメラ移動では再計算しない
+// （静的集合。sample-d v8.29）。再計算するのは分類適用・グライド到着・スライダ変更・
+// ラベルクリックで対象が変わったときだけ
+function applyOccluders() {
+  if (!viewer || !diffViewCtx || diffViewCtx.plain || diffScope !== 'focus' || !occTarget) {
+    applyOccluderSet(new Map());
+    return;
+  }
+  applyOccluderSet(computeOccluders(occTarget.box));
+}
+function occNote() {
+  return occHiddenTotal ? `／手前の部材 ${occHiddenTotal} 件を透明にして見通しを確保` : '';
+}
+// ---- 引出線ラベル（sample-d のマーカー処理の移植） ----
+const LABEL_MAX = 12; // アンカー優先＋近傍の変更で上限 12 件（画面が線だらけにならない範囲）
+function shortLabelName(name) {
+  const s = String(name ?? '');
+  return s.length > 42 ? s.slice(0, 42) + '…' : s;
+}
+const LABEL_KIND = { added: ['追加', '#1e9e57'], removed: ['削除', '#d43a2f'], changed: ['変更', '#b8860b'] };
+let labelItems = [];
+let labelsRaf = 0;
+function clearLabels() {
+  labelItems = [];
+  const m = $('diffMarkers'), s = $('diffLeaders');
+  if (m) m.innerHTML = '';
+  if (s) s.innerHTML = '';
+}
+function buildLabels() {
+  clearLabels();
+  if (!viewer || !diffViewCtx || diffViewCtx.plain || diffScope !== 'focus' || diffMode !== 'geometry' || !diffElements) return;
+  const ctx = diffViewCtx;
+  const T = window.THREE;
+  if (!T) return;
+  const cand = [];
+  for (const e of diffElements.added) cand.push({ ext: e.externalId, name: e.name, model: ctx.toM, map: ctx.mapTo, kind: 'added' });
+  for (const e of diffElements.changed) cand.push({ ext: e.externalId, name: e.name, model: ctx.toM, map: ctx.mapTo, kind: 'changed' });
+  for (const e of diffElements.removed) cand.push({ ext: e.externalId, name: e.name, model: ctx.fromM, map: ctx.mapFrom, kind: 'removed' });
+  const anchorExt = issue()?.pin?.externalId ?? null;
+  const resolved = [];
+  for (const c of cand) {
+    const db = c.map[c.ext];
+    if (db == null) continue;
+    const box = nodeWorldBox(db, c.model);
+    if (!box) continue;
+    resolved.push({ ...c, db, box, pos: boxCenter(box), corners: [
+      { x: box.min.x, y: box.min.y, z: box.min.z }, { x: box.max.x, y: box.min.y, z: box.min.z },
+      { x: box.min.x, y: box.max.y, z: box.min.z }, { x: box.max.x, y: box.max.y, z: box.min.z },
+      { x: box.min.x, y: box.min.y, z: box.max.z }, { x: box.max.x, y: box.min.y, z: box.max.z },
+      { x: box.min.x, y: box.max.y, z: box.max.z }, { x: box.max.x, y: box.max.y, z: box.max.z },
+    ] });
+  }
+  // アンカー要素を先頭に固定し、残りはアンカー（無ければ全体の重心）からの距離順
+  const anchorItem = anchorExt ? resolved.find(r => r.ext === anchorExt) : null;
+  const ref = anchorItem?.pos ?? (resolved.length ? resolved.reduce((a, r) => ({ x: a.x + r.pos.x / resolved.length, y: a.y + r.pos.y / resolved.length, z: a.z + r.pos.z / resolved.length }), { x: 0, y: 0, z: 0 }) : null);
+  resolved.sort((a, b) => {
+    if (a === anchorItem) return -1;
+    if (b === anchorItem) return 1;
+    const da = Math.hypot(a.pos.x - ref.x, a.pos.y - ref.y, a.pos.z - ref.z);
+    const db2 = Math.hypot(b.pos.x - ref.x, b.pos.y - ref.y, b.pos.z - ref.z);
+    return da - db2;
+  });
+  const picked = resolved.slice(0, LABEL_MAX);
+  const markersEl = $('diffMarkers'), leadersEl = $('diffLeaders');
+  if (!markersEl || !leadersEl) return;
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  for (const r of picked) {
+    const [kindLabel, color] = LABEL_KIND[r.kind];
+    const el = document.createElement('div');
+    el.className = 'diff-label k-' + r.kind;
+    el.innerHTML = `<span class="dl-kind">${kindLabel}</span>${esc(shortLabelName(r.name))}`;
+    el.title = `${kindLabel}: ${r.name}（クリックでこの要素へ移動）`;
+    el.addEventListener('click', () => {
+      occTarget = { box: r.box };
+      glideToBox(r.box, () => applyOccluders());
+    });
+    markersEl.appendChild(el);
+    const line = document.createElementNS(SVGNS, 'polyline');
+    line.setAttribute('class', 'leader-line');
+    leadersEl.appendChild(line);
+    const dot = document.createElementNS(SVGNS, 'circle');
+    dot.setAttribute('class', 'leader-dot');
+    dot.setAttribute('r', '3.5');
+    dot.setAttribute('fill', color);
+    leadersEl.appendChild(dot);
+    // サイズは構築時に1回だけ測る（カメラ移動のたびに読むと強制リフローでチラつく）
+    labelItems.push({ el, line, dot, pos: r.pos, corners: r.corners, w: el.offsetWidth, h: el.offsetHeight });
+  }
+  updateLabels();
+}
+// 画面中央の「青ゾーン」の外側の余白帯にラベルを逃がし、縦方向に詰めて重なりを無くす
+const LABEL_BLUE_ZONE = { l: 0.125, r: 0.875, t: 0.18, b: 0.74 };
+function updateLabels() {
+  if (!viewer || !labelItems.length || !window.THREE) return;
+  const wrap = $('viewerWrap');
+  if (!wrap) return;
+  const W = wrap.clientWidth, H = wrap.clientHeight;
+  if (!W || !H) return;
+  const T = window.THREE;
+  let camPos, camDir;
+  try {
+    camPos = viewer.navigation.getPosition();
+    camDir = viewer.navigation.getWorldDirection(new T.Vector3());
+  } catch (e) { return; }
+  const vis = [];
+  for (const it of labelItems) {
+    let anchor = null;
+    const candidates = [it.pos, ...it.corners];
+    for (const p of candidates) {
+      const v = new T.Vector3(p.x, p.y, p.z);
+      const toP = v.clone().sub(camPos);
+      if (toP.lengthSq() < 1e-9) continue;
+      if (camDir.dot(toP.normalize()) <= 0.02) continue; // カメラの後ろ
+      let c = null;
+      try { c = viewer.worldToClient(v); } catch (e) {}
+      if (!c || c.x < -20 || c.x > W + 20 || c.y < -20 || c.y > H + 20) continue;
+      anchor = { x: c.x, y: c.y };
+      break;
+    }
+    if (anchor) vis.push({ it, anchor });
+  }
+  const B = { l: W * LABEL_BLUE_ZONE.l, r: W * LABEL_BLUE_ZONE.r, t: H * LABEL_BLUE_ZONE.t, b: H * LABEL_BLUE_ZONE.b };
+  const C = { x: W / 2, y: vis.length ? vis.reduce((s, v) => s + v.anchor.y, 0) / vis.length : H / 2 };
+  const rayExitRect = (cx, cy, px, py, r) => {
+    const dx = px - cx, dy = py - cy;
+    if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9) return { x: r.r, y: cy };
+    let t = Infinity;
+    if (dx > 0) t = Math.min(t, (r.r - cx) / dx); else if (dx < 0) t = Math.min(t, (r.l - cx) / dx);
+    if (dy > 0) t = Math.min(t, (r.b - cy) / dy); else if (dy < 0) t = Math.min(t, (r.t - cy) / dy);
+    if (!isFinite(t)) t = 0;
+    return { x: cx + dx * t, y: cy + dy * t };
+  };
+  for (const v of vis) {
+    const e = rayExitRect(C.x, C.y, v.anchor.x, v.anchor.y, B);
+    let side;
+    if (Math.abs(e.x - B.l) < 0.6) side = 'l'; else if (Math.abs(e.x - B.r) < 0.6) side = 'r';
+    else if (Math.abs(e.y - B.t) < 0.6) side = 't'; else side = 'b';
+    let lx, ly;
+    if (side === 'l') { lx = e.x - v.it.w - 4; ly = e.y - v.it.h / 2; }
+    else if (side === 'r') { lx = e.x + 4; ly = e.y - v.it.h / 2; }
+    else if (side === 't') { lx = e.x - v.it.w / 2; ly = e.y - v.it.h - 4; }
+    else { lx = e.x - v.it.w / 2; ly = e.y + 4; }
+    v.side = side; v.lx = lx; v.ly = ly;
+  }
+  // 辺ごとに縦（横）方向へ詰めて最小間隔を確保する
+  const GAP = 6;
+  for (const side of ['l', 'r', 't', 'b']) {
+    const grp = vis.filter(v => v.side === side);
+    if (!grp.length) continue;
+    const vert = side === 'l' || side === 'r';
+    grp.sort((a, b) => (vert ? a.ly - b.ly : a.lx - b.lx));
+    for (let iter = 0; iter < 3; iter++) {
+      for (let k = 1; k < grp.length; k++) {
+        const prev = grp[k - 1], cur = grp[k];
+        const minPos = (vert ? prev.ly + prev.it.h : prev.lx + prev.it.w) + GAP;
+        if (vert ? cur.ly < minPos : cur.lx < minPos) { if (vert) cur.ly = minPos; else cur.lx = minPos; }
+      }
+      for (let k = grp.length - 2; k >= 0; k--) {
+        const next = grp[k + 1], cur = grp[k];
+        const maxPos = (vert ? next.ly - cur.it.h : next.lx - cur.it.w) - GAP;
+        if (vert ? cur.ly > maxPos : cur.lx > maxPos) { if (vert) cur.ly = maxPos; else cur.lx = maxPos; }
+      }
+    }
+    for (let k = 1; k < grp.length; k++) { // 最終パス: 画面内に収めることより間隔を優先する
+      const prev = grp[k - 1], cur = grp[k];
+      const minPos = (vert ? prev.ly + prev.it.h : prev.lx + prev.it.w) + GAP;
+      if (vert ? cur.ly < minPos : cur.lx < minPos) { if (vert) cur.ly = minPos; else cur.lx = minPos; }
+    }
+  }
+  // 四隅で左右帯と上下帯のラベルが衝突したら、上下帯側を自分の軸方向へずらす
+  for (let iter = 0; iter < 4; iter++) {
+    let moved = false;
+    for (const a of vis) for (const b of vis) {
+      if (a === b) continue;
+      const tb = (a.side === 't' || a.side === 'b') ? a : (b.side === 't' || b.side === 'b') ? b : null;
+      const lr = tb === a ? b : tb === b ? a : null;
+      if (!tb || !lr || lr.side === 't' || lr.side === 'b') continue;
+      const overlapX = Math.min(a.lx + a.it.w, b.lx + b.it.w) - Math.max(a.lx, b.lx);
+      const overlapY = Math.min(a.ly + a.it.h, b.ly + b.it.h) - Math.max(a.ly, b.ly);
+      if (overlapX > 0 && overlapY > 0) {
+        const dir = tb.lx + tb.it.w / 2 <= lr.lx + lr.it.w / 2 ? -1 : 1;
+        tb.lx += dir * (overlapX + GAP);
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+  // 位置の書き込みは transform のみ（left/top は触らない）
+  const inSet = new Set(vis.map(v => v.it));
+  for (const it of labelItems) {
+    if (!inSet.has(it)) { it.el.style.display = 'none'; it.line.style.display = 'none'; it.dot.style.display = 'none'; }
+  }
+  for (const v of vis) {
+    const { it, anchor } = v;
+    it.el.style.display = '';
+    it.el.style.transform = `translate(${Math.round(v.lx)}px, ${Math.round(v.ly)}px)`;
+    const ex = v.lx > anchor.x ? v.lx : v.lx + it.w;
+    const ey = Math.min(Math.max(anchor.y, v.ly + 2), v.ly + it.h - 2);
+    it.line.setAttribute('points', `${anchor.x},${anchor.y} ${ex},${ey}`);
+    it.line.style.display = '';
+    it.dot.setAttribute('cx', anchor.x);
+    it.dot.setAttribute('cy', anchor.y);
+    it.dot.style.display = '';
+  }
+}
+function scheduleLabelsUpdate() {
+  if (labelsRaf) return;
+  labelsRaf = requestAnimationFrame(() => { labelsRaf = 0; updateLabels(); });
 }
 function ensureViewer() {
   return new Promise((resolve, reject) => {
@@ -464,6 +922,17 @@ function ensureViewer() {
     Autodesk.Viewing.Initializer(options, () => {
       viewer = new Autodesk.Viewing.GuiViewer3D($('viewerEl'));
       viewer.start();
+      // occluder removal は「消す」のではなくゴースト化する（フレームが残り文脈が読める）
+      try { viewer.setGhosting(true); } catch (e) {}
+      // 引出線ラベルの追随は rAF 集約（カメラ変更のたびに全件再配置しない）
+      try {
+        const camEv = Autodesk.Viewing.CAMERA_CHANGE_EVENT;
+        if (camEv) viewer.addEventListener(camEv, scheduleLabelsUpdate);
+      } catch (e) {}
+      // ユーザーがビューアを触ったらグライドを即中断し、その視点で見通しを1回適用する
+      const onUserNav = () => { if (focusAnim) { cancelFocusAnim(); applyOccluders(); } };
+      $('viewerEl').addEventListener('pointerdown', onUserNav, true);
+      $('viewerEl').addEventListener('wheel', onUserNav, { capture: true, passive: true });
       resolve(viewer);
     });
   });
@@ -480,6 +949,37 @@ function waitGeometry(model) {
     setTimeout(() => { viewer.removeEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, onGeo); resolve(); }, 90000);
   });
 }
+// 表示用 viewable の解決（版ごとに名前で解決する。geometry guid は版間で変動するため
+// guid 直指定はしない）。従来の getDefaultGeometry() は 'Coord - Arch Walls'（壁のみ
+// 1,310 要素）に落ちており、扉・藤棚・植栽・外灯等が表示できなかった。全カテゴリを含む
+// 'New Construction'（7,027 要素）を正とする。解決順: ①guid 明示指定（設定がある場合のみ）
+// ②名前の完全一致 ③名前の部分一致 ④バウンディングボックス体積が最大の 3D viewable
+// ⑤getDefaultGeometry()。
+const viewableNameByVersion = new Map(); // versionNumber -> 実際に選んだ viewable 名（表示確認用）
+function pickViewable(doc, vnum) {
+  const root = doc.getRoot();
+  let nodes = [];
+  try { nodes = root.search({ type: 'geometry', role: '3d' }, true) ?? []; } catch (e) {}
+  if (!nodes.length) { try { nodes = root.search({ type: 'geometry' }, true) ?? []; } catch (e) {} }
+  const wantName = DATA?.model?.viewableName ?? 'New Construction';
+  const wantGuid = DATA?.model?.viewableGuid ?? null;
+  let pick = null;
+  if (wantGuid) pick = nodes.find(n => n.data?.guid === wantGuid) ?? null;
+  if (!pick) pick = nodes.find(n => n.data?.name === wantName) ?? null;
+  if (!pick) pick = nodes.find(n => String(n.data?.name ?? '').includes(wantName)) ?? null;
+  if (!pick) {
+    let bestVol = -1;
+    for (const n of nodes) {
+      const bb = n.data?.boundingBox;
+      if (!bb?.min || !bb?.max) continue;
+      const vol = Math.max(0, bb.max.x - bb.min.x) * Math.max(0, bb.max.y - bb.min.y) * Math.max(0, bb.max.z - bb.min.z);
+      if (vol > bestVol) { bestVol = vol; pick = n; }
+    }
+  }
+  if (!pick) pick = root.getDefaultGeometry();
+  if (vnum != null) viewableNameByVersion.set(vnum, pick?.data?.name ?? '(default)');
+  return pick;
+}
 function loadVersionModel(vnum) {
   if (diffModelByVersion.has(vnum)) return Promise.resolve(diffModelByVersion.get(vnum));
   const ver = DATA.versions.find(v => v.versionNumber === vnum);
@@ -487,7 +987,7 @@ function loadVersionModel(vnum) {
   return new Promise((resolve, reject) => {
     Autodesk.Viewing.Document.load('urn:' + ver.derivativeUrn, (doc) => {
       // keepCurrentModels: もう一方の版を残したまま集約ロードする
-      viewer.loadDocumentNode(doc, doc.getRoot().getDefaultGeometry(), { keepCurrentModels: true })
+      viewer.loadDocumentNode(doc, pickViewable(doc, vnum), { keepCurrentModels: true })
         .then(model => { diffModelByVersion.set(vnum, model); waitGeometry(model).then(() => resolve(model)); })
         .catch(reject);
     }, (code) => reject(new Error(`V${vnum} のドキュメント読み込みに失敗しました（${code}）`)));
@@ -538,7 +1038,7 @@ function baModeLabel() {
   return '重ねて表示（Before と After を重ねる）';
 }
 function scopeLabel() {
-  return diffScope === 'focus' ? '差分フォーカス（変更要素とその周辺のみ表示）' : '全体表示（全要素を表示）';
+  return diffScope === 'focus' ? '差分フォーカス（変更のない要素は文脈として残し、対象への見通しを遮る部材だけを透明化＋変更要素に引出線ラベル）' : '全体表示（全要素を表示）';
 }
 function renderDiffLegend() {
   const el = $('diffLegend');
@@ -563,7 +1063,7 @@ function renderDiffLegend() {
       <li><i class="sw sw-n"></i><b>変更なし</b>: After の要素を通常表示（Before の同要素は重ねない）</li>
     </ul>
     ${diffMode === 'all' ? '<p class="dl-note">現在のモード（all）では 3D の色分けは行いません（色分けは geometry モードのみ）。all の件数と要素の内訳は差分ビュー側で確認してください。3D 側は版ペアの素表示（Before／After の切替のみ）になります。</p>' : ''}
-    ${diffViewCtx && !plain && diffScope === 'focus' ? '<p class="dl-note">差分フォーカス中: 変更要素とその周辺（同じグループの要素）だけを表示しています。全要素を見る場合は「全体表示」に切り替えてください。</p>' : ''}
+    ${diffViewCtx && !plain && diffScope === 'focus' ? '<p class="dl-note">差分フォーカス中: 変更のない要素は文脈として残し、対象（アンカー要素／変更要素）への見通しを遮る部材だけを透明にしています（フレームのみ表示）。変更要素には引出線ラベル（最大12件、アンカー優先＋近傍の変更）が付きます。素の全体像は「全体表示」で確認できます。</p>' : ''}
     ${diffViewCtx ? '' : '<p class="dl-note">「Before のみ／After のみ」「差分フォーカス／全体表示」の切り替えボタンは、3D 差分を表示したあと有効になります。</p>'}`;
 }
 function updateBaControls() {
@@ -577,6 +1077,12 @@ function updateBaControls() {
     b.disabled = !has || plain; // all モード（plain）では分類自体が無いため表示範囲は切り替えない
     b.classList.toggle('active', b.dataset.scope === diffScope);
   }
+  const occ = $('occRange');
+  if (occ) {
+    occ.disabled = !has || plain || diffScope !== 'focus';
+    occ.value = String(occluderRange);
+    $('occVal').textContent = occluderRange + '%';
+  }
   const note = $('baNote');
   if (note) note.textContent = has
     ? (plain ? `表示中: ${pairLabel(diffViewCtx.from, diffViewCtx.to)}（all モード: 3D 色分けなし）` : `表示中: ${pairLabel(diffViewCtx.from, diffViewCtx.to)}`)
@@ -587,6 +1093,8 @@ function setDiffViewMode(m) {
   updateBaControls();
   renderDiffLegend();
   applyDiffViewMode();
+  applyOccluders();
+  buildLabels();
 }
 function setDiffScope(s) {
   if (diffScope === s) return;
@@ -594,36 +1102,15 @@ function setDiffScope(s) {
   updateBaControls();
   renderDiffLegend();
   applyDiffViewMode();
+  applyOccluders();
+  buildLabels();
 }
-// ---- 差分フォーカスの「周辺」計算 ----
-// 変更要素の親グループ配下（兄弟サブツリー）を「周辺」とする。大きすぎるグループ
-// （階全体など）は周辺に含めるとフォーカスにならないため、サイズ上限を超えたら除外する。
-function subtreeIds(tree, root, limit) {
-  const out = [];
-  const walk = (id) => { if (out.length > limit) return; out.push(id); tree.enumNodeChildren(id, c => walk(c)); };
-  walk(root);
-  return out.length > limit ? null : out;
-}
-function siblingContextDbIds(model, seedIds) {
-  const tree = model.getInstanceTree();
-  if (!tree || !seedIds.length) return [];
-  const seeds = new Set(seedIds);
-  const ctx = new Set();
-  const parents = new Set();
-  for (const id of seeds) {
-    let p = null;
-    try { p = tree.getNodeParentId(id); } catch (e) {}
-    if (p != null && p !== tree.getRootId()) parents.add(p);
-  }
-  for (const p of parents) {
-    const sub = subtreeIds(tree, p, 3000);
-    if (!sub) continue;
-    for (const id of sub) if (!seeds.has(id)) ctx.add(id);
-  }
-  return [...ctx];
-}
-// 分類済みコンテキスト（diffViewCtx）に対して、表示モード×表示範囲に応じた表示／非表示と色付けだけを適用する。
+// 分類済みコンテキスト（diffViewCtx）に対して、表示モードに応じた表示／非表示と色付けだけを適用する。
 // モード切替ではモデルも要素リストも再取得しない。
+// 表示範囲（差分フォーカス／全体）の違いは、ここでの基本表示ではなく、この上に重なる
+// 「手前の部材の透明化（applyOccluders）＋引出線ラベル（buildLabels）」で作る:
+// 差分フォーカスでも変更のない要素は文脈として残す（sample-d の occluder removal 方式。
+// 旧方式の「変更要素とその周辺以外を全部隠す」は廃止）。
 function applyDiffViewMode() {
   if (!viewer || !diffViewCtx) return;
   const ctx = diffViewCtx;
@@ -640,6 +1127,10 @@ function applyDiffViewMode() {
   try { viewer.isolate([], toM); } catch (e) {}
   try { viewer.clearThemingColors(fromM); } catch (e) {}
   try { viewer.clearThemingColors(toM); } catch (e) {}
+  // この適用で明示表示される要素は、前に透明化した要素を含めて正の状態に戻るため、
+  // 透明化の台帳はリセットする（直後に applyOccluders が現視点で再適用する）
+  hiddenOccluders = new Map();
+  occHiddenTotal = 0;
   if (ctx.plain) {
     // all モード: 要素単位の分類・色付けはせず、モデル単位で Before／After を切り替えるだけ
     if (diffViewMode === 'before') { show(fromM, ctx.allFrom); hide(toM, ctx.allTo); }
@@ -647,22 +1138,12 @@ function applyDiffViewMode() {
     else { show(fromM, ctx.allFrom); show(toM, ctx.allTo); }
     return;
   }
-  // 表示集合: 表示範囲（全体／フォーカス）× Before/After モードで決める
-  let visFrom, visTo;
-  if (diffScope === 'focus') {
-    // 差分フォーカス: 変更要素とその周辺だけを出す。変更のない要素は両版とも隠す
-    visTo = diffViewMode === 'before' ? [] : [...ctx.addedToDb, ...ctx.changedToDb, ...ctx.contextToDb];
-    visFrom = diffViewMode === 'after' ? []
-      : (diffViewMode === 'before' || diffGhostOld)
-        ? [...ctx.removedDb, ...ctx.changedFromDb, ...ctx.contextFromDb]
-        : [...ctx.removedDb, ...ctx.contextFromDb];
-  } else {
-    // 全体表示: 従来どおり（After は全要素、Before はモードに応じて全要素 or 削除＋変更のみ重ねる）
-    visTo = diffViewMode === 'before' ? [] : ctx.allTo;
-    visFrom = diffViewMode === 'after' ? []
-      : diffViewMode === 'before' ? ctx.allFrom
-      : diffGhostOld ? [...ctx.removedDb, ...ctx.changedFromDb] : [...ctx.removedDb];
-  }
+  // 基本表示（フォーカス／全体で共通）: After は全要素、Before はモードに応じて
+  // 全要素 or 削除＋変更のみ重ねる。フォーカスの「寄せ」は透明化と引出線が担う
+  const visTo = diffViewMode === 'before' ? [] : ctx.allTo;
+  const visFrom = diffViewMode === 'after' ? []
+    : diffViewMode === 'before' ? ctx.allFrom
+    : diffGhostOld ? [...ctx.removedDb, ...ctx.changedFromDb] : [...ctx.removedDb];
   show(toM, visTo);
   hide(toM, rest(ctx.allTo, visTo));
   show(fromM, visFrom);
@@ -693,28 +1174,39 @@ async function applyDiffClassification() {
   const changedFromDb = diffElements.changed.map(e => dbOf(mapFrom, e)).filter(db => db != null);
   const addedToDb = diffElements.added.map(e => dbOf(mapTo, e)).filter(db => db != null);
   const changedToDb = diffElements.changed.map(e => dbOf(mapTo, e)).filter(db => db != null);
-  // 分類結果を表示コンテキストとして保持し、見せ方の適用は applyDiffViewMode に寄せる。
-  // contextFromDb／contextToDb は差分フォーカス用の「周辺」（変更要素の兄弟サブツリー）
+  // 分類結果を表示コンテキストとして保持し、見せ方の適用は applyDiffViewMode に寄せる
   diffViewCtx = {
     from: selectedPair.from, to: selectedPair.to, fromM, toM,
     allFrom: allDbIds(fromM), allTo: allDbIds(toM),
     removedDb, changedFromDb, addedToDb, changedToDb,
-    contextFromDb: siblingContextDbIds(fromM, [...removedDb, ...changedFromDb]),
-    contextToDb: siblingContextDbIds(toM, [...addedToDb, ...changedToDb]),
+    mapFrom, mapTo,
   };
+  // 見通し・カメラの対象: Issue のアンカー要素を最優先。無ければ変更要素全体の合体ボックス
+  const i = issue();
+  const ext = i?.pin?.externalId;
+  let targetBox = null;
+  if (ext) {
+    if (mapTo[ext] != null) targetBox = nodeWorldBox(mapTo[ext], toM);
+    else if (mapFrom[ext] != null) targetBox = nodeWorldBox(mapFrom[ext], fromM);
+  }
+  if (!targetBox) {
+    targetBox = unionBoxes([
+      ...addedToDb.map(db => nodeWorldBox(db, toM)),
+      ...changedToDb.map(db => nodeWorldBox(db, toM)),
+      ...removedDb.map(db => nodeWorldBox(db, fromM)),
+    ]);
+  }
+  occTarget = targetBox ? { box: targetBox } : null;
   applyDiffViewMode();
+  applyOccluders();
+  buildLabels();
   updateBaControls();
   renderDiffLegend();
-  // ピン対象要素があればそこへフィット（無ければピン座標へ）
-  const i = issue();
-  let fitted = false;
-  const ext = i?.pin?.externalId;
-  if (ext) {
-    if (mapTo[ext] != null) { try { viewer.fitToView([mapTo[ext]], toM); fitted = true; } catch (e) {} }
-    else if (mapFrom[ext] != null) { try { viewer.fitToView([mapFrom[ext]], fromM); fitted = true; } catch (e) {} }
-  }
-  if (!fitted) focusPin();
-  diffStatus(`色分け適用済み — 3D 差分を表示中: V${selectedPair.from} → V${selectedPair.to}（追加 ${diffElements.counts.added}／削除 ${diffElements.counts.removed}／変更 ${diffElements.counts.changed}${diffMode === 'geometry' ? '・形状のみ' : '・プロパティのみ含む'}／${scopeLabel()}）`);
+  const status = () => diffStatus(`色分け適用済み — 3D 差分を表示中: V${selectedPair.from} → V${selectedPair.to}（追加 ${diffElements.counts.added}／削除 ${diffElements.counts.removed}／変更 ${diffElements.counts.changed}${diffMode === 'geometry' ? '・形状のみ' : '・プロパティのみ含む'}／${scopeLabel()}${occNote()}）`);
+  status();
+  // カメラは対象の中心へグライドし、到着した視点で見通しを再適用する（静的集合のため）
+  if (targetBox) glideToBox(targetBox, () => { applyOccluders(); status(); });
+  else if (i?.pin?.position) glideToPoint(i.pin.position);
 }
 // モデルの見た目を素の状態（全表示・色なし）に戻す。段階ロードで After を先に見せるときに使う
 function resetModelPresentation(model) {
@@ -739,6 +1231,8 @@ async function showDiff3D() {
       if (v !== from && v !== to) { try { viewer.unloadModel(m); } catch (e) {} diffModelByVersion.delete(v); }
     }
     diffViewCtx = null; // 分類が済むまで切替ボタンは無効（古いペアの分類で切り替える事故防止）
+    occTarget = null;
+    clearLabels();
     updateBaControls();
     renderDiffLegend();
     // 段階 1: After を先に表示する
@@ -747,7 +1241,8 @@ async function showDiff3D() {
     resetModelPresentation(diffModelByVersion.get(to));
     diffPairShown = { from, to };
     diffStatus(`After（V${to}）を表示中 — Before（V${from}・旧版）を読み込み中…`);
-    focusPin();
+    const pinPos = issue()?.pin?.position;
+    if (pinPos) glideToPoint(pinPos);
     // 要素リストの取得は Before のロードと並行して進める（geometry モードのみ）
     let elementsPromise = null, elementsError = null;
     if (mode === 'geometry') {
@@ -865,6 +1360,13 @@ for (const b of document.querySelectorAll('[data-bamode]')) {
 for (const b of document.querySelectorAll('[data-scope]')) {
   b.addEventListener('click', () => setDiffScope(b.dataset.scope));
 }
+// 手前を消す範囲スライダ: 変更は設定として保存し、フォーカス中なら現視点で再適用する
+$('occRange').addEventListener('input', () => {
+  occluderRange = Number($('occRange').value);
+  localStorage.setItem('hgraph-occluder-range', String(occluderRange));
+  $('occVal').textContent = occluderRange + '%';
+  applyOccluders();
+});
 updateBaControls();
 $('btnPair').addEventListener('click', () => {
   const from = Number($('pairFrom').value);

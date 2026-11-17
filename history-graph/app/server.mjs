@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 // ============ 設定 ============
@@ -63,7 +64,13 @@ const OLD_LINEAGE_ID = 'VwJ57NkiQ-Gy0nHLR3UmAA';
 const ARCH = {
   name: process.env.HG_ITEM_NAME ?? 'Snowdon Towers Sample Architectural HG.rvt',
   lineageId: process.env.HG_LINEAGE_ID ?? 'n1BdFAarT-ajJkQvheK5EA',
-  viewableGuid: process.env.HG_VIEWABLE_GUID ?? '7738212f-d458-662f-cb9c-cf7c761af18d',
+  // 表示用 viewable は「New Construction」を版ごとに名前で解決する（2026-11-17 実測）:
+  // 従来の 'Coord - Arch Walls' は壁 1,061＋壁スイープ 249＝1,310 要素しか含まず、
+  // スラブ・扉・藤棚・植栽・外灯は SVF 変換時点で含まれていない。全カテゴリを含むのは
+  // 'New Construction'（7,027 要素）だけ。geometry guid は版間で変動するため guid 直指定は
+  // せず、名前解決を正とする。HG_VIEWABLE_GUID は明示指定された場合のみの上書き。
+  viewableName: process.env.HG_VIEWABLE_NAME ?? 'New Construction',
+  viewableGuid: process.env.HG_VIEWABLE_GUID ?? null,
 };
 ARCH.lineage = `urn:adsk.wipprod:dm.lineage:${ARCH.lineageId}`;
 const IS_OLD_ITEM = ARCH.lineageId === OLD_LINEAGE_ID;
@@ -202,6 +209,9 @@ function enrichIssue(issue, types, users) {
       modelUrn: ld.urn ?? null, viewName: d.viewable?.name ?? null,
       objectId: d.objectId ?? null, externalId: d.externalId ?? null,
       position: d.position ?? null,
+      // ピン時点のカメラ（Forma の画面で作ったピンは完全な viewerState を持つ。
+      // API 作成ピンはキーがあっても中身が空＝カメラなし。自動スクショの視点決定に使う）
+      viewerState: (d.viewerState && Object.keys(d.viewerState).length) ? d.viewerState : null,
       isArchitectural: ld.urn === ARCH.lineage,
     };
   }
@@ -275,6 +285,7 @@ async function fetchVersions() {
     note: VERSION_NOTES[v.attributes?.versionNumber] ?? null,
     derivativeUrn: derivativeUrn(v.attributes?.versionNumber),
     viewableGuid: ARCH.viewableGuid,
+    viewableName: ARCH.viewableName,
   })).filter(v => v.versionNumber != null).sort((a, b) => a.versionNumber - b.versionNumber);
   versionsBox = { at: Date.now(), value };
   return value;
@@ -324,6 +335,26 @@ async function refreshSnapshots() {
     snap.refreshCount++;
     saveSnapshots(snap);
     console.log(`snapshots refreshed: ${issues.length} issues, +${newEvents.length} events (total ${snap.events.length})`);
+    // 新しい版の公開を検出したら、新ペアの自動スクショをキューに入れる（撮影は裏で
+    // 進み、refresh 本体はブロックしない。失敗しても refresh は壊れない）
+    try {
+      const versions = await fetchVersions();
+      const nums = versions.map(v => v.versionNumber);
+      if (!Array.isArray(snap.knownVersions)) {
+        snap.knownVersions = nums; // 初回は基準として記録するだけ（既存ペアへは遡らない）
+        saveSnapshots(snap);
+      } else {
+        const fresh = nums.filter(n => !snap.knownVersions.includes(n));
+        if (fresh.length) {
+          snap.knownVersions = nums;
+          saveSnapshots(snap);
+          for (const n of fresh) {
+            const pair = diffPairFor(n);
+            if (pair) enqueueCapturesForPair(pair.from, pair.to);
+          }
+        }
+      }
+    } catch (e) { console.error('capture trigger failed:', e.message); }
     return { issueCount: issues.length, newEvents: newEvents.length, totalEvents: snap.events.length, updatedAt: now };
   })().finally(() => { snapInflight = null; });
   return snapInflight;
@@ -706,6 +737,294 @@ function getDiffOrStart(from, to) {
   return d2 ? { diff: d2 } : { status: 'dumping' };
 }
 
+// ============ モデル更新時の自動スクショ（サーバ側ヘッドレス撮影） ============
+// 新しい版の公開を検出したら、新ペア（直前版→新版）の変更箇所をサーバ側の
+// ヘッドレス Chrome で撮影する（クライアントのブラウザは不要）。撮影ページ
+// （public/capture.html）が APS Viewer を読み、差分ビューアと同じ見た目
+// （色分け＋見通し確保＋引出線ラベル）で getScreenShot する。
+// 前提: 撮影ホストから Autodesk の Viewer CDN と APS エンドポイントへ到達できること。
+// 到達できない環境では撮影は失敗としてジョブログに理由つきで残り、refresh 本体は壊れない。
+// 設定: HG_CAPTURE_ENABLED=0 で無効化（既定は有効）、HG_CAPTURE_MAX_CLUSTERS で
+// 「その他 geometry 変化」のクラスタ撮影の上限（既定 5）、HG_CHROME_PATH で Chrome を指定。
+const CAPTURE_ENABLED = (process.env.HG_CAPTURE_ENABLED ?? '1') !== '0';
+const CAPTURE_MAX_CLUSTERS = Math.max(0, Number(process.env.HG_CAPTURE_MAX_CLUSTERS ?? 5) || 0);
+const CAPTURE_DIR = path.join(dataDir, 'captures');
+fs.mkdirSync(CAPTURE_DIR, { recursive: true });
+const CAPTURE_INDEX = path.join(CAPTURE_DIR, 'index.json');
+function loadCaptureIndex() {
+  try {
+    const s = JSON.parse(fs.readFileSync(CAPTURE_INDEX, 'utf8'));
+    if (s && Array.isArray(s.jobs)) return s;
+  } catch (e) {}
+  return { version: 1, jobs: [] };
+}
+function saveCaptureIndex(s) { fs.writeFileSync(CAPTURE_INDEX, JSON.stringify(s, null, 1)); }
+async function waitForDiffReady(from, to) {
+  for (let n = 0; n < 160; n++) { // 15 秒 × 160 回 = 最大 40 分（index ジョブの最長実測に合わせる）
+    const s = getDiffOrStart(from, to);
+    if (s.diff) return s.diff;
+    await new Promise(r => setTimeout(r, 15000));
+  }
+  return null;
+}
+function hasPinCamera(pin) {
+  const eye = pin?.viewerState?.viewport?.eye;
+  return Array.isArray(eye) && eye.length === 3 && eye.every(v => Number.isFinite(v));
+}
+// geometry 変化した要素（bbox を持つもの）を近接クラスタにまとめる（決定的な順序）
+function clusterGeometryChanges(diff, excludeExts) {
+  const rows = (diff.bboxRows ?? []).filter(r => {
+    if (!r.externalId || excludeExts.has(r.externalId)) return false;
+    if (!r.bboxMin && !r.prevBboxMin) return false;
+    if (r.type === 'added' || r.type === 'removed') return true;
+    if (r.type === 'modified') {
+      const moved = JSON.stringify(r.bboxMin) !== JSON.stringify(r.prevBboxMin) || JSON.stringify(r.bboxMax) !== JSON.stringify(r.prevBboxMax);
+      return r.geomChanged || moved;
+    }
+    return false;
+  }).map(r => {
+    const mn = r.type === 'removed' ? (r.prevBboxMin ?? r.bboxMin) : (r.bboxMin ?? r.prevBboxMin);
+    const mx = r.type === 'removed' ? (r.prevBboxMax ?? r.bboxMax) : (r.bboxMax ?? r.prevBboxMax);
+    return { externalId: r.externalId, name: r.name, kind: r.type, min: mn, max: mx, center: { x: (mn.x + mx.x) / 2, y: (mn.y + mx.y) / 2, z: (mn.z + mx.z) / 2 } };
+  });
+  rows.sort((a, b) => String(a.externalId).localeCompare(String(b.externalId)));
+  const clusters = [];
+  const CLUSTER_MAX_MEMBERS = 25; // 1クラスタ＝1画に収める上限（中心の連鎖で建物全体を吸わないため）
+  for (const r of rows) {
+    let best = null, bestD = Infinity;
+    for (const c of clusters) {
+      if (c.members.length >= CLUSTER_MAX_MEMBERS) continue;
+      const d = Math.hypot(c.center.x - r.center.x, c.center.y - r.center.y, c.center.z - r.center.z);
+      if (d < bestD) { bestD = d; best = c; }
+    }
+    if (best && bestD <= 40) { // 近接の目安: 中心間 40（モデル単位）以内は同じ画に収める
+      best.members.push(r);
+      best.center = {
+        x: best.members.reduce((s, m) => s + m.center.x, 0) / best.members.length,
+        y: best.members.reduce((s, m) => s + m.center.y, 0) / best.members.length,
+        z: best.members.reduce((s, m) => s + m.center.z, 0) / best.members.length,
+      };
+      best.box = {
+        min: { x: Math.min(best.box.min.x, r.min.x), y: Math.min(best.box.min.y, r.min.y), z: Math.min(best.box.min.z, r.min.z) },
+        max: { x: Math.max(best.box.max.x, r.max.x), y: Math.max(best.box.max.y, r.max.y), z: Math.max(best.box.max.z, r.max.z) },
+      };
+    } else {
+      clusters.push({ members: [r], center: { ...r.center }, box: { min: { ...r.min }, max: { ...r.max } } });
+    }
+  }
+  clusters.sort((a, b) => b.members.length - a.members.length);
+  return clusters;
+}
+// ペアに対する撮影ジョブを計画してキューに入れる（①開いているピン付き Issue の
+// アンカー変化を最優先、②その他 geometry 変化はクラスタ単位で上限つき）
+async function enqueueCapturesForPair(from, to) {
+  if (!CAPTURE_ENABLED) return;
+  try {
+    const diff = await waitForDiffReady(from, to);
+    if (!diff) {
+      console.error(`captures: diff V${from}->V${to} が完了しなかったため撮影を中止しました`);
+      const idx = loadCaptureIndex();
+      idx.jobs.push({
+        id: 'cap-' + Date.now().toString(36) + '-diff', key: `diff:${from}-${to}`, from, to,
+        kind: 'pair', status: 'failed', error: 'diff ジョブが完了しなかったため撮影できませんでした',
+        queuedAt: new Date().toISOString(), finishedAt: new Date().toISOString(),
+      });
+      saveCaptureIndex(idx);
+      return;
+    }
+    const issues = await fetchIssues();
+    const planned = [];
+    for (const i of issues) {
+      if (i.status === 'closed') continue; // 開いている Issue のみ
+      if (!i.pin?.isArchitectural || !i.pin.externalId) continue;
+      const ch = anchorChangeIn(diff, i.pin.externalId);
+      if (!ch) continue;
+      planned.push({
+        key: `a:${i.id}`, kind: 'anchor', issueId: i.id, issueDisplayId: i.displayId,
+        elementName: ch.anchorName ?? i.pin.externalId, externalId: i.pin.externalId,
+        camera: hasPinCamera(i.pin) ? 'pin' : 'fallback', // ピンカメラが無い API ピンは代替カメラ
+      });
+    }
+    const anchorExts = new Set(planned.map(p => p.externalId));
+    const clusters = clusterGeometryChanges(diff, anchorExts);
+    for (const c of clusters.slice(0, CAPTURE_MAX_CLUSTERS)) {
+      planned.push({
+        key: `c:${c.members[0].externalId}`, kind: 'cluster', issueId: null, issueDisplayId: null,
+        elementName: c.members.length > 1 ? `${c.members[0].name} ほか ${c.members.length - 1} 件` : c.members[0].name,
+        externalId: c.members[0].externalId, members: c.members.map(m => m.externalId),
+        box: c.box, camera: 'computed',
+      });
+    }
+    const idx = loadCaptureIndex();
+    let added = 0;
+    for (const p of planned) {
+      const dup = idx.jobs.some(x => x.from === from && x.to === to && x.key === p.key && ['queued', 'running', 'done'].includes(x.status));
+      if (dup) continue;
+      idx.jobs.push({
+        id: 'cap-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
+        from, to, status: 'queued', queuedAt: new Date().toISOString(), ...p,
+      });
+      added++;
+    }
+    if (added) {
+      saveCaptureIndex(idx);
+      console.log(`captures: V${from} -> V${to} の撮影ジョブを ${added} 件キューに入れました`);
+      processCaptureQueue();
+    }
+  } catch (e) {
+    console.error('capture planning failed:', e.message);
+  }
+}
+// 撮影ページへ渡す仕様（対象・カメラ・分類リスト）を組み立てる
+const captureSpecs = new Map();
+function diffElementsPayload(diff) {
+  const pub = (e, extra = {}) => ({ externalId: e.externalId, svf2Id: e.svf2Id, name: e.name, ...extra });
+  const changed = diff.elements.modified.filter(e => e.geomChanged || e.moved);
+  return {
+    counts: { added: diff.elements.added.length, removed: diff.elements.removed.length, changed: changed.length },
+    added: diff.elements.added.map(e => pub(e)),
+    removed: diff.elements.removed.map(e => pub(e)),
+    changed: changed.map(e => pub(e, { geomChanged: e.geomChanged, moved: e.moved })),
+  };
+}
+async function buildCaptureSpec(job) {
+  const [versions, diff] = await Promise.all([fetchVersions(), waitForDiffReady(job.from, job.to)]);
+  if (!diff) throw new Error('diff が取得できませんでした');
+  const base = {
+    job: { id: job.id, from: job.from, to: job.to, kind: job.kind, camera: job.camera },
+    versions: versions.map(v => ({ versionNumber: v.versionNumber, derivativeUrn: v.derivativeUrn, viewableName: v.viewableName, viewableGuid: v.viewableGuid })),
+    viewableName: ARCH.viewableName, viewableGuid: ARCH.viewableGuid,
+    elements: diffElementsPayload(diff),
+  };
+  if (job.kind === 'anchor') {
+    const issues = await fetchIssues();
+    const i = issues.find(x => x.id === job.issueId);
+    const brow = (diff.bboxRows ?? []).find(r => r.externalId === job.externalId) ?? null;
+    return {
+      ...base,
+      target: {
+        externalIds: [job.externalId], anchorExternalId: job.externalId,
+        box: brow ? { min: brow.bboxMin ?? brow.prevBboxMin, max: brow.bboxMax ?? brow.prevBboxMax } : null,
+        members: [{ externalId: job.externalId, name: job.elementName, kind: brow?.type ?? 'modified' }],
+      },
+      camera: { type: job.camera, viewerState: i?.pin?.viewerState ?? null, pinPosition: i?.pin?.position ?? null },
+    };
+  }
+  const byExt = new Map((diff.bboxRows ?? []).map(r => [r.externalId, r]));
+  return {
+    ...base,
+    target: {
+      externalIds: job.members, anchorExternalId: null, box: job.box,
+      members: job.members.map(ext => ({ externalId: ext, name: byExt.get(ext)?.name ?? ext, kind: byExt.get(ext)?.type ?? 'modified' })),
+    },
+    camera: { type: 'computed' },
+  };
+}
+// 撮影用 Chrome の解決順: ①HG_CHROME_PATH（明示指定）②Playwright の Chromium
+// ③/opt/meta-chromium/chrome ④PATH 上の google-chrome / chromium。
+// （この VM の /opt/meta-chromium は WebGL ドメインポリシーで素の起動ができないため、
+// 標準の Chromium を優先する。実機では HG_CHROME_PATH で任意の Chrome を指定できる）
+function resolveChromePath() {
+  if (process.env.HG_CHROME_PATH) return process.env.HG_CHROME_PATH;
+  try {
+    const base = path.join(os.homedir(), '.cache', 'ms-playwright');
+    const dirs = fs.readdirSync(base).filter(d => d.startsWith('chromium-')).sort().reverse();
+    for (const d of dirs) {
+      const p = path.join(base, d, 'chrome-linux64', 'chrome');
+      if (fs.existsSync(p)) return p;
+    }
+  } catch (e) {}
+  for (const p of ['/opt/meta-chromium/chrome', '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser']) {
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
+// ヘッドレス Chrome を DevTools プロトコルで駆動し、撮影ページの完了報告を待つ
+async function driveHeadlessCapture(job) {
+  const chromePath = resolveChromePath();
+  if (!chromePath || !fs.existsSync(chromePath)) throw new Error('ヘッドレス Chrome が見つかりません（HG_CHROME_PATH で指定できます）');
+  const port = 9600 + Math.floor(Math.random() * 400);
+  const profile = `/tmp/hg-cap-${job.id}`;
+  const proc = spawn(chromePath, [
+    '--headless=new', '--disable-gpu', '--no-sandbox', '--hide-scrollbars',
+    `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`,
+    '--window-size=1100,850', 'about:blank',
+  ], { stdio: 'ignore' });
+  try {
+    let ok = false;
+    for (let n = 0; n < 40 && !ok; n++) {
+      try { const r = await fetch(`http://127.0.0.1:${port}/json/version`); ok = r.ok; } catch (e) {}
+      if (!ok) await new Promise(r => setTimeout(r, 500));
+    }
+    if (!ok) throw new Error('ヘッドレス Chrome の DevTools に接続できませんでした');
+    const appPort = process.env.PORT ?? 3100;
+    const target = await (await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(`http://localhost:${appPort}/capture.html?job=${job.id}`)}`, { method: 'PUT' })).json();
+    if (!target.webSocketDebuggerUrl) throw new Error('撮影ページのタブを作成できませんでした');
+    const ws = new WebSocket(target.webSocketDebuggerUrl);
+    await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+    let seq = 0;
+    const pending = new Map();
+    ws.onmessage = (ev) => {
+      try {
+        const m = JSON.parse(ev.data);
+        if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); }
+      } catch (e) {}
+    };
+    const cdp = (method, params = {}) => new Promise(res => { const id = ++seq; pending.set(id, res); ws.send(JSON.stringify({ id, method, params })); });
+    await cdp('Runtime.enable');
+    const deadline = Date.now() + 240000;
+    let final = null;
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 2000));
+      const res = await cdp('Runtime.evaluate', { expression: 'JSON.stringify(window.__capture ?? null)', returnByValue: true });
+      const raw = res?.result?.result?.value;
+      if (!raw) continue;
+      const st = JSON.parse(raw);
+      if (st.status === 'done' || st.status === 'failed') { final = st; break; }
+    }
+    try { ws.close(); } catch (e) {}
+    if (!final) throw new Error('撮影がタイムアウトしました（240 秒）');
+    if (final.status === 'failed') throw new Error(final.error ?? '撮影ページが失敗を報告しました');
+    const idx = loadCaptureIndex();
+    const rec = idx.jobs.find(x => x.id === job.id);
+    if (!rec || rec.status !== 'done') throw new Error('撮影ページから画像が届きませんでした');
+  } finally {
+    try { proc.kill('SIGKILL'); } catch (e) {}
+    try { fs.rmSync(profile, { recursive: true, force: true }); } catch (e) {}
+  }
+}
+let captureRunning = false;
+async function processCaptureQueue() {
+  if (captureRunning || !CAPTURE_ENABLED) return;
+  captureRunning = true;
+  try {
+    for (;;) {
+      const idx = loadCaptureIndex();
+      const job = idx.jobs.find(x => x.status === 'queued');
+      if (!job) break;
+      job.status = 'running';
+      job.startedAt = new Date().toISOString();
+      saveCaptureIndex(idx);
+      try {
+        captureSpecs.set(job.id, await buildCaptureSpec(job));
+        await driveHeadlessCapture(job);
+      } catch (e) {
+        const idx2 = loadCaptureIndex();
+        const rec = idx2.jobs.find(x => x.id === job.id);
+        if (rec && rec.status !== 'done') {
+          rec.status = 'failed';
+          rec.error = String(e.message ?? e).slice(0, 300);
+          rec.finishedAt = new Date().toISOString();
+          saveCaptureIndex(idx2);
+        }
+        console.error(`capture ${job.id} failed:`, e.message);
+      } finally {
+        captureSpecs.delete(job.id);
+      }
+    }
+  } finally { captureRunning = false; }
+}
+
 // ============ HTTP ルーティング ============
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -740,7 +1059,7 @@ const server = http.createServer(async (req, res) => {
       });
       return sendJson(res, 200, {
         project: { id: PROJECT_ID, name: 'Snowdon Towers' },
-        model: { name: ARCH.name, lineage: ARCH.lineage },
+        model: { name: ARCH.name, lineage: ARCH.lineage, viewableName: ARCH.viewableName, viewableGuid: ARCH.viewableGuid },
         versions, issues: merged,
         snapshot: { updatedAt: snap.updatedAt, refreshCount: snap.refreshCount, eventCount: snap.events.length },
         fetchedAt: new Date().toISOString(),
@@ -769,6 +1088,73 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/refresh' && req.method === 'POST') {
       const r = await refreshSnapshots();
       return sendJson(res, 200, r);
+    }
+    // ---- 自動スクショ ----
+    if (url.pathname === '/api/captures' && req.method === 'GET') {
+      const idx = loadCaptureIndex();
+      let jobs = idx.jobs;
+      const f = Number(url.searchParams.get('from')), t = Number(url.searchParams.get('to'));
+      if (Number.isFinite(f) && Number.isFinite(t)) jobs = jobs.filter(x => x.from === f && x.to === t);
+      return sendJson(res, 200, { enabled: CAPTURE_ENABLED, maxClusters: CAPTURE_MAX_CLUSTERS, jobs });
+    }
+    const capSpecMatch = url.pathname.match(/^\/api\/captures\/spec\/([\w-]+)$/);
+    if (capSpecMatch && req.method === 'GET') {
+      const spec = captureSpecs.get(capSpecMatch[1]);
+      if (!spec) return sendJson(res, 404, { error: '撮影仕様が見つかりません（ジョブ実行中のみ有効）' });
+      return sendJson(res, 200, spec);
+    }
+    const capImgMatch = url.pathname.match(/^\/api\/captures\/([\w-]+)\/image$/);
+    if (capImgMatch && req.method === 'GET') {
+      const idx = loadCaptureIndex();
+      const rec = idx.jobs.find(x => x.id === capImgMatch[1]);
+      if (!rec?.file) return sendJson(res, 404, { error: '画像がありません' });
+      const filePath = path.join(CAPTURE_DIR, rec.file);
+      if (!fs.existsSync(filePath)) return sendJson(res, 404, { error: '画像ファイルがありません' });
+      res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' });
+      return res.end(fs.readFileSync(filePath));
+    }
+    if (capImgMatch && req.method === 'POST') {
+      let body = {};
+      try { body = JSON.parse(await readBody(req)); } catch (e) {}
+      const idx = loadCaptureIndex();
+      const rec = idx.jobs.find(x => x.id === capImgMatch[1]);
+      if (!rec) return sendJson(res, 404, { error: 'capture job not found' });
+      if (!body.png) return sendJson(res, 400, { error: 'png が必要です' });
+      const file = `${rec.id}.png`;
+      fs.writeFileSync(path.join(CAPTURE_DIR, file), Buffer.from(body.png, 'base64'));
+      rec.status = 'done';
+      rec.file = file;
+      rec.error = null;
+      rec.finishedAt = new Date().toISOString();
+      saveCaptureIndex(idx);
+      return sendJson(res, 200, { ok: true });
+    }
+    const capFailMatch = url.pathname.match(/^\/api\/captures\/([\w-]+)\/fail$/);
+    if (capFailMatch && req.method === 'POST') {
+      let body = {};
+      try { body = JSON.parse(await readBody(req)); } catch (e) {}
+      const idx = loadCaptureIndex();
+      const rec = idx.jobs.find(x => x.id === capFailMatch[1]);
+      if (!rec) return sendJson(res, 404, { error: 'capture job not found' });
+      if (rec.status !== 'done') {
+        rec.status = 'failed';
+        rec.error = String(body.error ?? '撮影ページが失敗を報告しました').slice(0, 300);
+        rec.finishedAt = new Date().toISOString();
+        saveCaptureIndex(idx);
+      }
+      return sendJson(res, 200, { ok: true });
+    }
+    if (url.pathname === '/api/captures/run' && req.method === 'POST') {
+      let body = {};
+      try { body = JSON.parse(await readBody(req)); } catch (e) {}
+      const from = Number(body.from), to = Number(body.to);
+      const versions = await fetchVersions();
+      const okPair = Number.isFinite(from) && Number.isFinite(to) && from < to &&
+        versions.some(v => v.versionNumber === from) && versions.some(v => v.versionNumber === to);
+      if (!okPair) return sendJson(res, 400, { error: '版ペアが不正です' });
+      if (!CAPTURE_ENABLED) return sendJson(res, 400, { error: '自動スクショは無効化されています（HG_CAPTURE_ENABLED=0）' });
+      enqueueCapturesForPair(from, to);
+      return sendJson(res, 202, { ok: true, queued: true, from, to });
     }
     if (url.pathname === '/api/diff') {
       const from = Number(url.searchParams.get('from'));

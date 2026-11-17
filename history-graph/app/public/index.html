@@ -147,6 +147,17 @@ table.issues .c-due.overdue{color:var(--red);font-weight:700}
 /* ---------- Viewer ---------- */
 #viewerWrap{height:380px;background:#1a1d20;border-radius:0 0 8px 8px;position:relative}
 #viewerEl{position:absolute;inset:0}
+#diffMarkers{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:6}
+#diffLeaders{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:5}
+.leader-line{stroke:#41586c;stroke-width:1.2;fill:none;opacity:.85}
+.leader-dot{stroke:#fff;stroke-width:1.2}
+.diff-label{position:absolute;left:0;top:0;background:#fff;border:1px solid #b9c9d6;border-left:4px solid #999;border-radius:6px;padding:2px 8px;font-size:11.5px;line-height:1.5;color:#1c2733;white-space:nowrap;max-width:210px;overflow:hidden;text-overflow:ellipsis;cursor:pointer;pointer-events:auto;box-shadow:0 1px 4px rgba(20,40,60,.25)}
+.diff-label .dl-kind{font-weight:900;margin-right:5px}
+.diff-label.k-added{border-left-color:var(--add)} .diff-label.k-added .dl-kind{color:var(--add)}
+.diff-label.k-removed{border-left-color:var(--del)} .diff-label.k-removed .dl-kind{color:var(--del)}
+.diff-label.k-changed{border-left-color:var(--chg)} .diff-label.k-changed .dl-kind{color:var(--chg)}
+.ba-bar input[type=range]{width:130px;accent-color:var(--sd-primary);cursor:pointer}
+.ba-bar input[type=range]:disabled{opacity:.45;cursor:not-allowed}
 .viewer-note{padding:10px 14px;font-size:12px;color:var(--muted)}
 .ba-bar{display:flex;align-items:center;gap:10px;padding:10px 14px 0;flex-wrap:wrap}
 .ba-label{font-size:12px;color:var(--muted);font-weight:700}
@@ -189,6 +200,11 @@ table.issues .c-due.overdue{color:var(--red);font-weight:700}
 .timeline{position:relative;margin:10px 0 0 6px;padding-left:26px}
 .timeline:before{content:"";position:absolute;left:6px;top:10px;bottom:10px;width:2px;background:var(--line)}
 .ev{position:relative;padding:7px 0}
+.ev-caps{margin:6px 0 2px 4px}
+.ev-caps-head{font-size:11px;font-weight:700;color:var(--sd-sub)}
+.ev-caps-imgs{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;align-items:flex-start}
+.ev-cap img{height:56px;border:1px solid var(--sd-line);border-radius:6px;display:block;background:#fff}
+.ev-cap-fail{font-size:11px;color:var(--del);background:#fdf0ef;border:1px dashed #e5b3ae;border-radius:6px;padding:4px 8px}
 .ev-dot{position:absolute;left:-26px;top:11px;width:14px;height:14px;border-radius:50%;background:var(--surface);border:3px solid var(--muted);z-index:1}
 .ev.open .ev-dot{background:var(--ink);border-color:var(--ink)}
 .ev.goal .ev-dot{width:18px;height:18px;left:-28px;top:9px;border-radius:5px;background:var(--gold-bg);border-color:var(--gold)}
@@ -286,7 +302,7 @@ footer{margin-top:16px;font-size:11.5px;color:var(--muted);text-align:center}
           <span style="flex:1"></span>
           <button class="btn" id="btnViewer" type="button" disabled>差分を 3D で表示</button>
         </div>
-        <div id="viewerWrap"><div id="viewerEl"></div></div>
+        <div id="viewerWrap"><div id="viewerEl"></div><svg id="diffLeaders"></svg><div id="diffMarkers"></div></div>
         <div class="ba-bar">
           <span class="ba-label">Before／After 表示:</span>
           <div class="ba-seg" role="group" aria-label="Before After 表示切替">
@@ -300,6 +316,9 @@ footer{margin-top:16px;font-size:11.5px;color:var(--muted);text-align:center}
             <button type="button" class="ba-btn active" data-scope="focus" disabled>差分フォーカス</button>
             <button type="button" class="ba-btn" data-scope="full" disabled>全体表示</button>
           </div>
+          <span class="ba-label">手前を消す範囲:</span>
+          <input type="range" id="occRange" min="0" max="100" step="5" value="50" disabled aria-label="対象の手前を消す範囲">
+          <span class="ba-note" id="occVal">50%</span>
         </div>
         <div class="diff-legend" id="diffLegend"><p class="dl-empty">差分ペアを選ぶと、Before／After の対応と色の意味がここに出ます。</p></div>
       </section>
