@@ -1,5 +1,5 @@
-// app.js — 履歴グラフ実アプリ v1 の画面ロジック
-// Issue 表（sample-d のトンマナ＋モックのページング/ソート/検索）／タイムライン／差分ビュー／APS Viewer
+// app.js — 履歴グラフ実アプリの画面ロジック
+// Issue 表／タイムライン／最新版との照合／APS Viewer（3D 差分）
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 // Forma 風ステータス表示（色バー＋英語。sample-d の FSTATUS を移植）
@@ -21,7 +21,7 @@ function fmtDateTime(s) {
 
 let DATA = null;             // /api/issues の応答
 let selectedId = null;
-let selectedPair = null;     // { from, to, version } 選択中のモデル更新イベントの diff ペア
+let selectedPair = null;     // { from, to, version } 3D 差分の比較ペア（ピン時点の版 → 最新版。ピッカーは置かない）
 let commentsCache = new Map();
 const flt = { q: '', status: 'all', sort: null, page: 1, pageSize: 10 };
 
@@ -172,28 +172,28 @@ const VERDICT_LABEL = {
 };
 function verdictChip(v) {
   if (!v?.verdict) return '';
-  return `<span class="vchip ${esc(v.verdict)}" title="ピン時点と最新版 V${v.comparedVersion ?? '—'} の照合結果">${esc(VERDICT_LABEL[v.verdict] ?? v.verdict)}</span>`;
+  return `<span class="vchip ${esc(v.verdict)}" title="ピン時点と最新版の照合結果">${esc(VERDICT_LABEL[v.verdict] ?? v.verdict)}</span>`;
 }
 function fmtPropVal(v) {
   if (v == null) return '（なし）';
   const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
   return s.length > 60 ? s.slice(0, 60) + '…' : s;
 }
-function renderPinSnap(i, ps) {
+function renderVerify(i, ps) {
   const wrap = $('pinSnapWrap');
   if (!wrap) return;
   if (!ps) {
     // スナップショットが無い場合: 対象モデルにピンされた Issue だけ、生成ボタンを出す
     if (i.pin?.isArchitectural && i.pin?.externalId) {
       wrap.hidden = false;
-      wrap.innerHTML = `<div class="pinsnap"><h3>ピン時点スナップショット（デモ）</h3>
-        <p class="demo-note">Webhook 受信はデモ用シミュレーションです（本物の Webhook は登録していません）。</p>
-        <p style="color:var(--muted)">まだスナップショットがありません。起票 Webhook の受信をシミュレートすると、ピン時点の要素状態（座標・形状・プロパティ）を保存し、最新版と照合します。</p>
+      wrap.innerHTML = `<div class="pinsnap"><h3>最新版との照合</h3>
+        <p class="demo-note">Webhook 受信はデモ用シミュレーションです。</p>
+        <p class="muted">まだ照合がありません。起票 Webhook の受信をシミュレートすると、ピン時点の要素状態を保存し、最新版と照合します。</p>
         <button type="button" class="sim-btn" id="pinSnapSimBtn">起票 Webhook の受信をシミュレート</button></div>`;
       $('pinSnapSimBtn').addEventListener('click', async () => {
         const btn = $('pinSnapSimBtn');
         btn.disabled = true;
-        btn.textContent = '処理中…（インデックス照合のため時間がかかる場合があります）';
+        btn.textContent = '処理中…';
         try {
           const r = await fetch('/api/sim/webhook', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -202,7 +202,7 @@ function renderPinSnap(i, ps) {
           if (!r.ok) throw new Error('HTTP ' + r.status);
           pinSnapCache.delete(i.id);
           const rec = await loadPinSnap(i.id);
-          if (selectedId === i.id) renderPinSnap(i, rec);
+          if (selectedId === i.id) { renderVerify(i, rec); applyViewerTarget(rec); }
           buildTimeline(); // Close イベント側の判定チップも付け直す
         } catch (e) {
           btn.disabled = false;
@@ -217,29 +217,13 @@ function renderPinSnap(i, ps) {
   }
   const el = ps.element ?? {};
   const v = ps.verification ?? {};
-  const pos = ps.pin?.position;
-  const props = (el.props ?? []).filter(p => !String(p.category ?? '').startsWith('__'));
-  const main = props.slice(0, 8);
-  const rest = props.slice(8);
-  const bbox = el.bboxMin && el.bboxMax
-    ? `(${el.bboxMin.x.toFixed(1)}, ${el.bboxMin.y.toFixed(1)}, ${el.bboxMin.z.toFixed(1)}) 〜 (${el.bboxMax.x.toFixed(1)}, ${el.bboxMax.y.toFixed(1)}, ${el.bboxMax.z.toFixed(1)})`
-    : '—';
   wrap.hidden = false;
   wrap.innerHTML = `<div class="pinsnap">
-    <h3>ピン時点スナップショット（デモ）</h3>
-    <p class="demo-note">Webhook 受信はデモ用シミュレーションです（本物の Webhook は登録していません）。受信後の処理（Issue 取得 → ピン保存 → 最新版との照合）は本物の受け口と同じ経路で、保存先はローカルの data/pin-snapshots.json（外部ストレージのモック）です。</p>
-    <dl>
-      <dt>ピン座標</dt><dd>${pos ? `x ${pos.x}, y ${pos.y}, z ${pos.z}（Viewer 座標）` : '—'}</dd>
-      <dt>ピンした版</dt><dd>V${ps.pinnedVersion ?? '—'}（${esc(ps.event ?? 'issue.created')} 受信時に保存）</dd>
-      <dt>対象要素</dt><dd>${esc(el.name ?? ps.pin?.externalId ?? '—')}${el.category ? `（${esc(el.category)}）` : ''}</dd>
-      <dt>外形 (bbox)</dt><dd>${esc(bbox)}</dd>
-      <dt>形状ハッシュ</dt><dd>${esc(el.geomHash ?? '—')}</dd>
-    </dl>
-    ${main.length ? `<div><b>主要プロパティ（ピン時点）</b><ul class="props">${main.map(p => `<li>${esc(p.name)}: ${esc(fmtPropVal(p.value))}</li>`).join('')}</ul>${rest.length ? `<details><summary>その他のプロパティ ${rest.length} 件（ピン時点の全件を保存）</summary><ul class="props">${rest.map(p => `<li>${esc(p.name)}: ${esc(fmtPropVal(p.value))}</li>`).join('')}</ul></details>` : ''}</div>` : ''}
-    <div class="verify"><b>最新版 V${v.comparedVersion ?? '—'} との照合（Close 検証）</b>${verdictChip(v)}
-      ${v.summary?.length ? `<ul class="vsum">${v.summary.map(s => `<li>${esc(s)}</li>`).join('')}</ul>` : ''}
-      ${v.changedProps?.length ? `<ul class="vprops">${v.changedProps.slice(0, 6).map(c => `<li>${esc(c.name)}: ${esc(fmtPropVal(c.from))} → ${esc(fmtPropVal(c.to))}</li>`).join('')}</ul>` : ''}
-    </div>
+    <h3>最新版との照合</h3>
+    <p class="demo-note">Webhook 受信はデモ用シミュレーションです。</p>
+    <div>対象要素: <b>${esc(el.name ?? ps.pin?.externalId ?? '—')}</b>${el.category ? `（${esc(el.category)}）` : ''}${verdictChip(v)}</div>
+    ${v.summary?.length ? `<ul>${v.summary.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+    ${v.changedProps?.length ? `<ul>${v.changedProps.slice(0, 6).map(c => `<li>${esc(c.name)}: ${esc(fmtPropVal(c.from))} → ${esc(fmtPropVal(c.to))}</li>`).join('')}</ul>` : ''}
   </div>`;
 }
 async function buildTimeline() {
@@ -255,20 +239,9 @@ async function buildTimeline() {
     `<span>起票: ${esc(i.createdByName ?? i.createdBy ?? '—')}</span>`,
     i.pin ? `<span>ピン: ${esc(i.pin.viewName ?? 'あり')}</span>` : '<span>ピンなし</span>',
   ].join('');
-  // ピン時点のサムネイル（Forma が Issue 作成時に保存したビュー画像）。
-  // snapshotUrn が無い Issue では表示自体を省略する（プレースホルダは出さない）
-  const tw = $('tlThumbWrap'), timg = $('tlThumb');
-  if (i.snapshotUrn) {
-    tw.hidden = false;
-    timg.onerror = () => { tw.hidden = true; };
-    timg.src = `/api/issues/${encodeURIComponent(i.id)}/thumbnail`;
-  } else {
-    tw.hidden = true;
-    timg.removeAttribute('src');
-  }
   const [comments, pinSnap] = await Promise.all([loadComments(i.id), loadPinSnap(i.id)]);
   if (selectedId !== myId) return; // 待っている間に選択が切り替わっていたら、古い描画で上書きしない
-  renderPinSnap(i, pinSnap);
+  renderVerify(i, pinSnap);
   const evs = [];
   evs.push({ t: i.createdAt, cls: 'open', html: `<b>起票</b> — ${esc(i.createdByName ?? '')} が Open` });
   for (const c of comments) {
@@ -276,26 +249,25 @@ async function buildTimeline() {
   }
   for (const e of i.history.events) {
     if (e.kind === 'status') {
-      if (e.to === 'closed') evs.push({ t: e.detectedAt, cls: 'goal', html: `<b>Close 🏁</b> — ${esc(STATUS_JA[e.from] ?? e.from)} <span class="st-arrow">→</span> 完了`, note: 'スナップショット検出時刻', verifyChip: pinSnap ? verdictChip(pinSnap.verification) : '' });
-      else if (e.from === 'closed') evs.push({ t: e.detectedAt, cls: 'reopen', html: `<b>Reopen</b> — 完了 <span class="st-arrow">→</span> ${esc(STATUS_JA[e.to] ?? e.to)}`, note: 'スナップショット検出時刻' });
-      else evs.push({ t: e.detectedAt, cls: 'status', html: `<b>状態変更</b> — ${esc(STATUS_JA[e.from] ?? e.from)} <span class="st-arrow">→</span> ${esc(STATUS_JA[e.to] ?? e.to)}`, note: 'スナップショット検出時刻' });
+      if (e.to === 'closed') evs.push({ t: e.detectedAt, cls: 'goal', html: `<b>Close 🏁</b> — ${esc(STATUS_JA[e.from] ?? e.from)} <span class="st-arrow">→</span> 完了`, verifyChip: pinSnap ? verdictChip(pinSnap.verification) : '' });
+      else if (e.from === 'closed') evs.push({ t: e.detectedAt, cls: 'reopen', html: `<b>Reopen</b> — 完了 <span class="st-arrow">→</span> ${esc(STATUS_JA[e.to] ?? e.to)}` });
+      else evs.push({ t: e.detectedAt, cls: 'status', html: `<b>状態変更</b> — ${esc(STATUS_JA[e.from] ?? e.from)} <span class="st-arrow">→</span> ${esc(STATUS_JA[e.to] ?? e.to)}` });
     } else if (e.kind === 'assignee') {
-      evs.push({ t: e.detectedAt, cls: 'status', html: `<b>担当変更</b> — ${esc(e.from ?? '—')} <span class="st-arrow">→</span> ${esc(e.to ?? '—')}`, note: 'スナップショット検出時刻' });
+      evs.push({ t: e.detectedAt, cls: 'status', html: `<b>担当変更</b> — ${esc(e.from ?? '—')} <span class="st-arrow">→</span> ${esc(e.to ?? '—')}` });
     }
   }
   for (const m of i.history.modelUpdates) {
     evs.push({
-      t: m.publishedAt, cls: 'model', pair: m.diffPair, version: m.version,
+      t: m.publishedAt, cls: 'model',
       html: `<b>モデル更新 V${m.version}</b> — ${esc(DATA.model.name)}${m.createdBy ? `（公開者: ${esc(m.createdBy)}）` : ''}`,
-      note: m.note ?? (m.diffPair ? `差分: ${m.diffPair.label}` : ''),
     });
   }
   for (const rp of i.history.relatedPairs ?? []) {
     const chg = rp.change === 'added' ? '追加' : rp.change === 'removed' ? '削除' : '変更';
     evs.push({
-      t: rp.publishedAt, cls: 'model', pair: { from: rp.from, to: rp.to, label: rp.label }, version: rp.version,
+      t: rp.publishedAt, cls: 'model',
       html: `<b>関連するモデル更新 — ${esc(rp.label)}</b>`,
-      note: `ピン対象要素${rp.anchorName ? `「${esc(rp.anchorName)}」` : ''}がこのペアで${chg}されました（ライブ diff で判定）`,
+      note: `ピン対象要素${rp.anchorName ? `「${esc(rp.anchorName)}」` : ''}が${chg}されました`,
     });
   }
   evs.sort((a, b) => String(a.t ?? '').localeCompare(String(b.t ?? '')));
@@ -303,258 +275,16 @@ async function buildTimeline() {
     evs.push({ t: null, cls: 'model', html: '<b>関連するモデル更新</b> — ライブ diff で確認中…', note: 'diff ジョブの完了後に自動で表示されます' });
   }
   if (i.status !== 'closed') evs.push({ t: null, cls: 'now', html: '<b>現在</b> — オープン中' });
-  // モデル更新イベントの下に、そのペアの自動スクショ（サーバ側撮影）を付ける
-  const pairList = [...new Map(evs.filter(e => e.pair).map(e => [`${e.pair.from}-${e.pair.to}`, e.pair])).values()];
-  await Promise.all(pairList.map(p => fetchCaptures(p.from, p.to)));
-  for (const e of evs) if (e.pair) e.capsHtml = capsHtmlFor(e.pair, i.id);
-  $('tlBody').innerHTML = evs.map((e, idx) => `
-    <div class="ev ${e.cls}${e.pair && selectedPair && e.pair.from === selectedPair.from && e.pair.to === selectedPair.to ? ' selected' : ''}">
+  $('tlBody').innerHTML = evs.map(e => `
+    <div class="ev ${e.cls}">
       <span class="ev-dot"></span>
-      ${e.pair
-        ? `<button type="button" class="ev-row" data-ev="${idx}"><span class="ev-when">${esc(fmtDateTime(e.t))}</span><span class="ev-text">${e.html}${e.note ? `<div class="ev-body">${esc(e.note)}</div>` : ''}</span></button>`
-        : `<div class="ev-row"><span class="ev-when">${e.t ? esc(fmtDateTime(e.t)) : ''}</span><span class="ev-text">${e.html}${e.verifyChip ?? ''}${e.body ? `<div class="ev-body">${esc(e.body)}</div>` : ''}${e.note ? `<div class="ev-body">${esc(e.note)}</div>` : ''}</span></div>`}
-      ${e.capsHtml ?? ''}
+      <div class="ev-row"><span class="ev-when">${e.t ? esc(fmtDateTime(e.t)) : ''}</span><span class="ev-text">${e.html}${e.verifyChip ?? ''}${e.body ? `<div class="ev-body">${esc(e.body)}</div>` : ''}${e.note ? `<div class="ev-body">${esc(e.note)}</div>` : ''}</span></div>
     </div>`).join('');
-  for (const b of $('tlBody').querySelectorAll('button.ev-row')) {
-    b.addEventListener('click', () => {
-      const e = evs[Number(b.dataset.ev)];
-      if (e?.pair) applyPair({ ...e.pair, version: e.version }, true);
-    });
-  }
 }
 
-// ---- 自動スクショ（サーバ側撮影）のタイムライン表示 ----
-const captureCache = new Map(); // "from-to" -> そのペアの撮影ジョブ（key ごとに最新のみ）
-async function fetchCaptures(from, to) {
-  const key = `${from}-${to}`;
-  if (captureCache.has(key)) return captureCache.get(key);
-  try {
-    const r = await fetch(`/api/captures?from=${from}&to=${to}`);
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const j = await r.json();
-    const latest = new Map();
-    for (const job of j.jobs ?? []) {
-      const cur = latest.get(job.key);
-      if (!cur || String(job.queuedAt) > String(cur.queuedAt)) latest.set(job.key, job);
-    }
-    const list = [...latest.values()];
-    captureCache.set(key, list);
-    return list;
-  } catch (e) { return []; }
-}
-function capsHtmlFor(pair, issueId) {
-  const list = captureCache.get(`${pair.from}-${pair.to}`) ?? [];
-  if (!list.length) return '';
-  const mine = list.filter(x => x.kind === 'anchor' && x.issueId === issueId);
-  const rest = list.filter(x => !(x.kind === 'anchor' && x.issueId === issueId));
-  const ordered = [...mine, ...rest];
-  const done = ordered.filter(x => x.status === 'done');
-  const failed = ordered.filter(x => x.status === 'failed');
-  const pending = ordered.filter(x => x.status === 'queued' || x.status === 'running');
-  const camLabel = { pin: 'ピンカメラ再現', fallback: '代替カメラ', computed: '計算カメラ' };
-  const imgs = done.map(x => `<a class="ev-cap" href="/api/captures/${x.id}/image" target="_blank" rel="noopener" title="${esc(x.elementName ?? '')}（${esc(camLabel[x.camera] ?? x.camera)}）"><img src="/api/captures/${x.id}/image" alt="${esc(x.elementName ?? '変更箇所')}の自動スクショ"></a>`).join('');
-  const fails = failed.map(x => `<span class="ev-cap-fail" title="${esc(x.error ?? '')}">撮影失敗: ${esc(x.elementName ?? x.key ?? '')}${x.error ? `（${esc(x.error.slice(0, 40))}）` : ''}</span>`).join('');
-  return `<div class="ev-caps"><div class="ev-caps-head">自動スクショ（V${pair.from} → V${pair.to}）: 成功 ${done.length} 件／失敗 ${failed.length} 件${pending.length ? `／撮影中・待ち ${pending.length} 件` : ''}</div><div class="ev-caps-imgs">${imgs}${fails}</div></div>`;
-}
-
-// ============ 差分ビュー ============
-let diffMode = 'geometry';   // 3D 表示の「変更」の範囲: 'geometry'（形状のみ・既定）| 'all'（プロパティのみも含む）
-let diffGhostOld = true;     // 変更前の形状をゴースト表示するか
-function countsChips(stats, geom) {
-  let s = `<span class="dc a">追加 ${stats.added}</span><span class="dc d">削除 ${stats.removed}</span><span class="dc c">変更 ${stats.modified}</span>`;
-  if (geom) s += `<span class="dc g">うち形状シグナル 追加 ${geom.added}／削除 ${geom.removed}／変更 ${geom.modified}</span>`;
-  return s;
-}
-// ---- ピン周辺リストの描画（UIUX レビュー H2） ----
-// 対象要素（アンカー）自身を先頭に固定し、同種要素の繰り返しはグループ化して折りたたむ。
-function changeLabel(t) { return t === 'added' ? '追加' : t === 'removed' ? '削除' : '変更'; }
-function baseElementName(name) { // 末尾の [要素ID] を除いた基底名
-  return String(name ?? '').replace(/\s*\[\d+\]\s*$/, '') || String(name ?? '');
-}
-function nearRowHtml(r) {
-  const props = r.changedProps?.length ? `（${esc(r.changedProps.slice(0, 4).join('、'))}）` : '';
-  return `<li class="${r.signal ? 'sig' : ''}">${esc(changeLabel(r.type))}：${esc(r.name ?? r.externalId ?? '')}${props}</li>`;
-}
-function nearListHtml(rows) {
-  const groups = new Map();
-  for (const r of rows) {
-    const key = [r.type, baseElementName(r.name), (r.changedProps ?? []).join(','), r.signal ? 1 : 0].join('|');
-    if (!groups.has(key)) groups.set(key, { head: r, items: [] });
-    groups.get(key).items.push(r);
-  }
-  return [...groups.values()].map(g => {
-    if (g.items.length === 1) return nearRowHtml(g.head);
-    const props = g.head.changedProps?.length ? `（${esc(g.head.changedProps.slice(0, 4).join('、'))}）` : '';
-    return `<li class="grp"><details><summary>${esc(changeLabel(g.head.type))}：${esc(baseElementName(g.head.name))} ほか ${g.items.length - 1} 件${props}</summary><ul class="grp-items">${g.items.map(nearRowHtml).join('')}</ul></details></li>`;
-  }).join('');
-}
-function anchorBlockHtml(np) {
-  const ac = np.anchorChange;
-  if (!ac) {
-    return `<div class="diff-anchor"><span class="da-tag">対象要素</span><span class="da-name">${esc(np.anchorName ?? '')}</span><span class="da-desc">このペアでは対象要素自体に変更はありません（下記は周辺の変更です）</span></div>`;
-  }
-  const sig = [];
-  if (ac.geomChanged) sig.push('形状変化');
-  if (ac.moved) sig.push('位置の移動');
-  if (!ac.geomChanged && !ac.moved && ac.valueChanged) sig.push('プロパティ値の変更');
-  const props = ac.changedProps?.length ? `／変更プロパティ: ${esc(ac.changedProps.slice(0, 6).join('、'))}` : '';
-  return `<div class="diff-anchor"><span class="da-tag">対象要素</span><span class="da-name">${esc(ac.name ?? np.anchorName ?? '')}</span><span class="da-desc">${esc(changeLabel(ac.type))}${sig.length ? `（${esc(sig.join('・'))}）` : ''}${props}</span></div>`;
-}
-// bbox を持たない要素（部屋など）の変更は近傍リストに入らないため、別枠でグループ表示する
-function noBboxHtml(nb) {
-  if (!nb || !nb.total) return '';
-  const rows = nb.groups.map(g => {
-    if (g.count === 1) return `<li>変更：${esc(g.items[0]?.name ?? g.baseName)}</li>`;
-    const items = g.items.map(it => `<li>変更：${esc(it.name ?? '')}</li>`).join('');
-    const more = g.count > g.items.length ? `<li>…ほか ${g.count - g.items.length} 件</li>` : '';
-    return `<li class="grp"><details><summary>変更：${esc(g.baseName)} ほか ${g.count - 1} 件</summary><ul class="grp-items">${items}${more}</ul></details></li>`;
-  }).join('');
-  return `<details class="diff-nobbox"><summary>位置（bbox）を持たない要素の変更 ${nb.total} 件 — 部屋の名称変更などはこちらに現れます</summary><ul>${rows}</ul>${nb.groupsTruncated ? '<p class="diff-note">グループ数が多いため一部を省略しています。</p>' : ''}</details>`;
-}
-// ---- 版ペアのピッカー（Issue やイベントの選択とは独立に任意ペアを指定できる） ----
-function pairLabel(from, to) {
-  if (from === 2 && to === 4) return 'V2 → V4（実質 V3）';
-  return `V${from} → V${to}`;
-}
-function populatePairPicker() {
-  const opts = (DATA?.versions ?? []).map(v =>
-    `<option value="${v.versionNumber}">V${v.versionNumber}${v.note ? '（変換不可）' : ''}</option>`).join('');
-  $('pairFrom').innerHTML = opts;
-  $('pairTo').innerHTML = opts;
-  const vers = (DATA?.versions ?? []).map(v => v.versionNumber);
-  if (vers.length) {
-    $('pairFrom').value = String(vers[0]);
-    $('pairTo').value = String(vers[vers.length - 1]);
-  }
-  syncPairPicker();
-}
-function syncPairPicker() {
-  if (!selectedPair) return;
-  if ([...$('pairFrom').options].some(o => Number(o.value) === selectedPair.from)) $('pairFrom').value = String(selectedPair.from);
-  if ([...$('pairTo').options].some(o => Number(o.value) === selectedPair.to)) $('pairTo').value = String(selectedPair.to);
-}
-// 件数チップの「取得中」プレースホルダ。ペア確定の時点で前ペアの数字を消し、
-// 見出しのペアと数字のペアが食い違う状態を作らない（UIUX レビュー H1）
-const COUNTS_LOADING = '<span class="dc g">取得中…</span>';
-// ペアを確定し、ピッカー・タイムラインのハイライト・差分表示を一貫して動かす
-function applyPair(pair, auto3d) {
-  selectedPair = {
-    from: pair.from, to: pair.to,
-    version: pair.version ?? pair.to,
-    label: pair.label ?? pairLabel(pair.from, pair.to),
-  };
-  $('diffCounts').innerHTML = COUNTS_LOADING;
-  diffViewCtx = null; // ペアが変わったら分類コンテキストは破棄（モード切替ボタンは無効に戻る）
-  updateBaControls();
-  renderDiffLegend();
-  $('pairNote').textContent = '';
-  syncPairPicker();
-  buildTimeline().then(() => loadDiff(auto3d));
-  updateViewerButton();
-}
-async function loadDiff() {
-  const i = issue();
-  if (!selectedPair) {
-    $('diffTitle').textContent = '差分ビュー';
-    $('diffCounts').innerHTML = '';
-    $('diffBody').innerHTML = '<div class="diff-empty">タイムラインのモデル更新イベントを選ぶか、上のピッカーで版ペアを指定すると差分が出ます。</div>';
-    occTarget = null;
-    clearLabels();
-    return;
-  }
-  const { from, to } = selectedPair;
-  $('diffTitle').textContent = `差分ビュー — ${selectedPair.label ?? `V${from} → V${to}`}`;
-  renderDiffLegend();
-  // 3D モデル確認は業務フローの必須ステップ: 件数の取得を待たず、ペアが決まった
-  // この時点で Viewer の初期化とモデル読み込み（段階ロードで After 優先）を即開始する。
-  // ユーザーが 3D を見ようとしたときには表示済みになっている状態を目指す。
-  showDiff3D();
-  // 取得が終わるまで件数チップは「取得中」にしておく（前ペアの数字を残さない。H1）
-  $('diffCounts').innerHTML = COUNTS_LOADING;
-  $('diffBody').innerHTML = '<div class="diff-empty">読み込み中…</div>';
-  const pairStillCurrent = () => selectedPair && selectedPair.from === from && selectedPair.to === to;
-  let d;
-  try {
-    const r = await fetch(`/api/diff?from=${from}&to=${to}${i ? `&issue=${encodeURIComponent(i.id)}` : ''}`);
-    d = await r.json();
-    if (!pairStillCurrent()) return; // 取得中にペアが切り替わっていたら、古い結果で上書きしない
-    if (r.status === 202) {
-      $('diffBody').innerHTML = `<div class="diff-empty">実 API で diff ジョブを実行中です（${esc(d.status ?? '')}）。10 秒後に自動で再取得します。</div>`;
-      setTimeout(() => { if (selectedPair && selectedPair.from === from && selectedPair.to === to) loadDiff(auto3d); }, 10000);
-      return;
-    }
-    if (!r.ok) throw new Error(d.error ?? ('HTTP ' + r.status));
-  } catch (e) {
-    if (!pairStillCurrent()) return;
-    $('diffCounts').innerHTML = '';
-    $('diffBody').innerHTML = `<div class="diff-empty">差分を取得できませんでした: ${esc(e.message)}</div>`;
-    return;
-  }
-  $('diffCounts').innerHTML = countsChips(d.stats, null);
-  const np = d.nearPin;
-  const nbHtml = noBboxHtml(d.noBbox);
-  let side = '';
-  if (!i) {
-    side = '<p class="diff-note">Issue を選ぶと、そのピンの周辺にある変更の内訳も表示します。</p>';
-  } else if (d.pinNote) {
-    side = `<p class="diff-note">${esc(d.pinNote)}</p>${nbHtml}`;
-  } else if (np) {
-    $('diffCounts').innerHTML = countsChips(d.stats, np.geomCounts);
-    // 対象要素自身の行は先頭の固定ブロックで出すため、周辺リストからは除く
-    const restRows = np.rows.filter(r => !np.anchorExternalId || r.externalId !== np.anchorExternalId);
-    side = `
-      <p class="diff-near">ピン周辺（対象要素「${esc(np.anchorName ?? '')}」の中心から水平 ${np.radiusFt}ft／上下 ±${np.dzFt}ft）: 追加 ${np.counts.added}／削除 ${np.counts.removed}／変更 ${np.counts.modified} 件（bbox を持つ行のみ）</p>
-      ${anchorBlockHtml(np)}
-      <ul>${nearListHtml(restRows) || '<li>対象要素以外の周辺の変更はありません</li>'}</ul>
-      ${np.rowsTruncated ? `<p class="diff-note">周辺 ${np.rowsTotal} 件中 ${np.rows.length} 件を、同種要素はグループ化して表示しています。</p>` : ''}
-      <p class="diff-note">「変更」件数には Revit の再保存に伴うプロパティ表記の揺れ（ロケール差など）が大量に含まれます。実際に形が変わった目安は「形状シグナル」（形状ハッシュ変化・bbox 移動）の件数です。近傍の判定はヒューリスティクスであり、この Issue の修正そのものとは限りません。</p>
-      ${nbHtml}`;
-  }
-  if (d.jobRunAt) side += `<p class="diff-note">diff データはこのアプリが ${esc(fmtDateTime(d.jobRunAt))} に Model Properties API のジョブで取得しました。</p>`;
-  $('diffBody').innerHTML = `<div class="diff-body">
-    <div class="diff-controls">
-      <div class="dc-group" role="group" aria-label="3D表示の対象">
-        <span class="dc-label">3D表示の「変更」:</span>
-        <button type="button" class="dc-btn${diffMode === 'geometry' ? ' active' : ''}" data-dmode="geometry">形状が変わったもののみ（既定）</button>
-        <button type="button" class="dc-btn${diffMode === 'all' ? ' active' : ''}" data-dmode="all">プロパティのみの変更も含める</button>
-      </div>
-      <label class="dc-check"><input type="checkbox" id="diffGhostOld" ${diffGhostOld ? 'checked' : ''}> 変更前の形状をゴースト表示</label>
-      <button type="button" class="btn primary" id="btnDiff3d">差分を 3D で表示</button>
-      <span class="dc-status" id="diff3dStatus"></span>
-    </div>
-    <div class="legend"><span><i class="la"></i>追加（After のみ・緑）</span><span><i class="ld"></i>削除（Before のみ・赤ゴースト）</span><span><i class="lc"></i>変更（After・黄／Before はゴースト）</span><span>変更なしは After のみ表示</span><span>※ Before／After の対応表はビューア脇の凡例に常時表示</span></div>
-    ${diffMode === 'all' ? '<p class="diff-note">all モードでは 3D ビューアの色分けは行いません（色分けは geometry モードのみ）。all では件数とピン周辺の内訳が対象で、3D 側は版ペアの素表示（Before／After の切替のみ）になります。</p>' : '<p class="diff-note">3D は段階ロードです（After を先に表示し、Before が揃ったら色分けを適用）。表示範囲の既定は「差分フォーカス」（変更のない要素は文脈として残し、対象への見通しを遮る部材だけを透明化＋変更要素に引出線ラベル）で、ビューア脇のボタンで「全体表示」に切り替えられます。</p>'}
-    <div class="diff-side">${side}</div>
-  </div>`;
-  for (const b of $('diffBody').querySelectorAll('[data-dmode]')) {
-    b.addEventListener('click', () => {
-      if (diffMode === b.dataset.dmode) return;
-      diffMode = b.dataset.dmode;
-      for (const x of $('diffBody').querySelectorAll('[data-dmode]')) x.classList.toggle('active', x.dataset.dmode === diffMode);
-      diffViewCtx = null; // 要素リストが変わるので分類コンテキストは破棄する
-      updateBaControls();
-      reapplyDiff3D();
-    });
-  }
-  $('diffGhostOld').addEventListener('change', () => {
-    diffGhostOld = $('diffGhostOld').checked;
-    // ゴースト切替は見せ方だけの変更なので、分類済みなら再取得せずに適用し直す
-    if (diffViewCtx && diffPairShown && selectedPair && diffPairShown.from === selectedPair.from && diffPairShown.to === selectedPair.to) {
-      applyDiffViewMode();
-      applyOccluders();
-      buildLabels();
-      renderDiffLegend();
-    } else reapplyDiff3D();
-  });
-  $('btnDiff3d').addEventListener('click', () => showDiff3D());
-  // 3D は loadDiff の冒頭で即開始済み。描画し直した #diff3dStatus が空なら、
-  // ビューア脇のステータス（最新の状態）で補う
-  const stEl = $('diff3dStatus');
-  if (stEl && !stEl.textContent && diffViewCtx && diffViewCtx.from === from && diffViewCtx.to === to) {
-    stEl.textContent = $('viewerNote').textContent;
-  }
-}
-
+// ============ 3D 差分の分類モード（UI 簡素化後は geometry 固定） ============
+let diffMode = 'geometry';   // 3D 表示の「変更」の範囲: 'geometry'（形状のみ）固定
+let diffGhostOld = true;     // 変更前の形状をゴースト表示するか（常時 ON）
 // ============ APS Viewer による 3D 差分表示（sample-d の初期化を移植。CDN 不達の環境では注記のみ） ============
 // 版ペアの2モデルを1つの Viewer に集約ロードし、diff の要素リストで表示を振り分ける:
 //   変更なし: 新版のみ（旧版の同要素は隠す）／追加: 新版のみ・緑／削除: 旧版のみ・赤ゴースト
@@ -568,12 +298,7 @@ let diffBusy = false;
 let diffViewMode = 'overlay';         // 3D 差分の見せ方: 'overlay'（重ねて表示）| 'before'（Before のみ）| 'after'（After のみ）
 let diffScope = 'focus';              // 3D 差分の表示範囲: 'focus'（差分フォーカス＝文脈を残し見通し確保＋引出線・既定）| 'full'（全体表示）
 let diffViewCtx = null;               // 分類済みの表示コンテキスト（モード切替時は再取得せずこれを使い回す）
-function updateViewerButton() {
-  $('btnViewer').disabled = !selectedPair;
-}
 function diffStatus(msg) {
-  const el = $('diff3dStatus');
-  if (el) el.textContent = msg;
   $('viewerNote').textContent = msg;
 }
 // ============ カメラ・見通し・引出線ラベル（sample-d の表示方式を移植） ============
@@ -1123,43 +848,6 @@ async function fetchDiffElements() {
   }
   throw new Error('diff ジョブが時間内に完了しませんでした');
 }
-// ---- Before／After の凡例と表示モード切替 ----
-// 凡例はビューア脇に常時表示し、版ペアが変われば版番号が追従する。
-function baModeLabel() {
-  if (!selectedPair) return '';
-  if (diffViewMode === 'before') return `Before のみ（V${selectedPair.from} の姿だけを表示）`;
-  if (diffViewMode === 'after') return `After のみ（V${selectedPair.to} の姿だけを表示）`;
-  return '重ねて表示（Before と After を重ねる）';
-}
-function scopeLabel() {
-  return diffScope === 'focus' ? '差分フォーカス（変更のない要素は文脈として残し、対象への見通しを遮る部材だけを透明化＋変更要素に引出線ラベル）' : '全体表示（全要素を表示）';
-}
-function renderDiffLegend() {
-  const el = $('diffLegend');
-  if (!el) return;
-  if (!selectedPair) {
-    el.innerHTML = '<p class="dl-empty">差分ペアを選ぶと、Before／After の対応と色の意味がここに出ます。</p>';
-    return;
-  }
-  const { from, to } = selectedPair;
-  const plain = !!diffViewCtx?.plain;
-  el.innerHTML = `
-    <div class="dl-head">
-      <span class="dl-ver dl-before">Before = V${from}（旧版）</span>
-      <span class="dl-arrow">→</span>
-      <span class="dl-ver dl-after">After = V${to}（新版）</span>
-      <span class="dl-cur">現在の表示: ${esc(baModeLabel())}${plain ? '（all モード: 色分けなし）' : `／${esc(scopeLabel())}`}</span>
-    </div>
-    <ul class="dl-list">
-      <li><i class="sw sw-a"></i><b>追加</b>（After にのみ存在する要素）: After の要素を<b>緑</b>で表示</li>
-      <li><i class="sw sw-d"></i><b>削除</b>（Before にのみ存在する要素）: Before の要素を<b>赤いゴースト</b>で表示</li>
-      <li><i class="sw sw-c"></i><b>変更</b>（両版に存在し変化した要素）: After の要素を<b>黄</b>で表示し、Before の要素を<b>薄黄ゴースト</b>で重ねて表示（ゴースト OFF のときは After のみ）</li>
-      <li><i class="sw sw-n"></i><b>変更なし</b>: After の要素を通常表示（Before の同要素は重ねない）</li>
-    </ul>
-    ${diffMode === 'all' ? '<p class="dl-note">現在のモード（all）では 3D の色分けは行いません（色分けは geometry モードのみ）。all の件数と要素の内訳は差分ビュー側で確認してください。3D 側は版ペアの素表示（Before／After の切替のみ）になります。</p>' : ''}
-    ${diffViewCtx && !plain && diffScope === 'focus' ? '<p class="dl-note">差分フォーカス中: 変更のない要素は文脈として残し、対象（アンカー要素／変更要素）への見通しを遮る部材だけを透明にしています（フレームのみ表示）。変更要素には引出線ラベル（最大12件、アンカー優先＋近傍の変更）が付きます。素の全体像は「全体表示」で確認できます。</p>' : ''}
-    ${diffViewCtx ? '' : '<p class="dl-note">「Before のみ／After のみ」「差分フォーカス／全体表示」の切り替えボタンは、3D 差分を表示したあと有効になります。</p>'}`;
-}
 function updateBaControls() {
   const has = !!diffViewCtx;
   const plain = !!diffViewCtx?.plain;
@@ -1177,15 +865,10 @@ function updateBaControls() {
     occ.value = String(occluderRange);
     $('occVal').textContent = occluderRange + '%';
   }
-  const note = $('baNote');
-  if (note) note.textContent = has
-    ? (plain ? `表示中: ${pairLabel(diffViewCtx.from, diffViewCtx.to)}（all モード: 3D 色分けなし）` : `表示中: ${pairLabel(diffViewCtx.from, diffViewCtx.to)}`)
-    : '3D 差分を表示すると切り替えできます';
 }
 function setDiffViewMode(m) {
   diffViewMode = m;
   updateBaControls();
-  renderDiffLegend();
   applyDiffViewMode();
   applyOccluders();
   buildLabels();
@@ -1194,7 +877,6 @@ function setDiffScope(s) {
   if (diffScope === s) return;
   diffScope = s;
   updateBaControls();
-  renderDiffLegend();
   applyDiffViewMode();
   applyOccluders();
   buildLabels();
@@ -1242,18 +924,27 @@ function applyDiffViewMode() {
   hide(toM, rest(ctx.allTo, visTo));
   show(fromM, visFrom);
   hide(fromM, rest(ctx.allFrom, visFrom));
+  // 変更がかかっていない要素は白で表示する（UI 簡素化の要件、2026-11-17）。
+  // 透明化ではなくテーマカラー白（不透明）を選んだ理由: 変更要素の色付けと同じ
+  // setThemingColor の経路で数行で済み、描画も不透明パスのまま（透明化は
+  // 透明パス＋ソートが全要素にかかり、ゴーストも結局は描画されるため重い）。
+  const unchangedTo = rest(ctx.allTo, [...ctx.addedToDb, ...ctx.changedToDb]);
+  const unchangedFrom = rest(ctx.allFrom, [...ctx.removedDb, ...ctx.changedFromDb]);
   if (diffViewMode === 'before') {
-    // Before のみ: 旧版の姿で見せる（削除=赤、変更=黄）
+    // Before のみ: 旧版の姿で見せる（削除=赤、変更=黄、変更なし=白）
     theme(fromM, ctx.removedDb, V4(0.85, 0.16, 0.1, 0.9));
     theme(fromM, ctx.changedFromDb, V4(0.95, 0.72, 0.08, 0.9));
+    theme(fromM, unchangedFrom, V4(1, 1, 1, 1));
   } else if (diffViewMode === 'after') {
-    // After のみ: 新版の姿で見せる（追加=緑、変更=黄）
+    // After のみ: 新版の姿で見せる（追加=緑、変更=黄、変更なし=白）
     theme(toM, ctx.addedToDb, V4(0.1, 0.65, 0.3, 1));
     theme(toM, ctx.changedToDb, V4(0.95, 0.72, 0.08, 1));
+    theme(toM, unchangedTo, V4(1, 1, 1, 1));
   } else {
-    // 重ねて表示: 新版に色を付け、旧版は削除（＋ゴースト ON 時は変更の旧形状）を重ねる
+    // 重ねて表示: 新版に色を付け（変更なしは白）、旧版は削除（＋ゴースト ON 時は変更の旧形状）を重ねる
     theme(toM, ctx.addedToDb, V4(0.1, 0.65, 0.3, 1));
     theme(toM, ctx.changedToDb, V4(0.95, 0.72, 0.08, 1));
+    theme(toM, unchangedTo, V4(1, 1, 1, 1));
     theme(fromM, ctx.removedDb, V4(0.85, 0.16, 0.1, 0.45));
     if (diffGhostOld) theme(fromM, ctx.changedFromDb, V4(0.9, 0.7, 0.15, 0.35));
   }
@@ -1295,8 +986,7 @@ async function applyDiffClassification() {
   applyOccluders();
   buildLabels();
   updateBaControls();
-  renderDiffLegend();
-  const status = () => diffStatus(`色分け適用済み — 3D 差分を表示中: V${selectedPair.from} → V${selectedPair.to}（追加 ${diffElements.counts.added}／削除 ${diffElements.counts.removed}／変更 ${diffElements.counts.changed}${diffMode === 'geometry' ? '・形状のみ' : '・プロパティのみ含む'}／${scopeLabel()}${occNote()}）`);
+  const status = () => diffStatus('差分を表示中' + occNote());
   status();
   // カメラは対象の中心へグライドし、到着した視点で見通しを再適用する（静的集合のため）
   if (targetBox) glideToBox(targetBox, () => { applyOccluders(); status(); });
@@ -1328,13 +1018,12 @@ async function showDiff3D() {
     occTarget = null;
     clearLabels();
     updateBaControls();
-    renderDiffLegend();
-    // 段階 1: After を先に表示する
-    if (!diffModelByVersion.has(to)) { diffStatus(`After（V${to}・新版）を読み込み中…`); await loadVersionModel(to); }
+    // 段階 1: After（最新版）を先に表示する
+    if (!diffModelByVersion.has(to)) { diffStatus('モデルを読み込み中…'); await loadVersionModel(to); }
     if (stale()) return;
     resetModelPresentation(diffModelByVersion.get(to));
     diffPairShown = { from, to };
-    diffStatus(`After（V${to}）を表示中 — Before（V${from}・旧版）を読み込み中…`);
+    diffStatus('差分を準備中…');
     const pinPos = issue()?.pin?.position;
     if (pinPos) glideToPoint(pinPos);
     // 要素リストの取得は Before のロードと並行して進める（geometry モードのみ）
@@ -1351,41 +1040,78 @@ async function showDiff3D() {
       diffViewCtx = { plain: true, from, to, fromM, toM, allFrom: allDbIds(fromM), allTo: allDbIds(toM) };
       applyDiffViewMode();
       updateBaControls();
-      renderDiffLegend();
-      diffStatus(`3D 表示中: V${from} → V${to}（all モードのため 3D 色分けはなし — 色分けは geometry モードのみ）`);
+      diffStatus('差分を表示中');
       return;
     }
     // 段階 3: 分類・色分けを適用する
-    diffStatus(`Before（V${from}）の読み込み完了 — 分類と色分けを適用中…`);
+    diffStatus('色分けを適用中…');
     const els = await elementsPromise;
     if (stale()) return;
     if (!els) throw elementsError ?? new Error('要素リストを取得できませんでした');
     await applyDiffClassification();
   } catch (e) {
     if (!stale()) diffStatus('3D 差分を表示できませんでした: ' + e.message);
-  } finally { diffBusy = false; }
-}
-function reapplyDiff3D() {
-  // モード／ゴーストの切替: 表示中のペアが現在の選択と同じなら、モデルは再利用して分類だけやり直す
-  if (diffPairShown && selectedPair && diffPairShown.from === selectedPair.from && diffPairShown.to === selectedPair.to) {
-    showDiff3D();
+  } finally {
+    diffBusy = false;
+    // 読み込み中に選択ペアが変わっていたら、新しいペアで読み直す
+    if (selectedPair && (selectedPair.from !== from || selectedPair.to !== to)) showDiff3D();
   }
 }
-
 // ============ 選択・初期化 ============
-function defaultPairFor(i) {
-  // 既定の差分ペア：diffPair を持つ最新のモデル更新。無ければ関連するモデル更新の最新ペア
-  const withPair = (i?.history.modelUpdates ?? []).filter(m => m.diffPair);
-  if (withPair.length) {
-    const m = withPair[withPair.length - 1];
-    return { ...m.diffPair, version: m.version };
+function latestVersionNumber() {
+  const vs = (DATA?.versions ?? []).map(v => v.versionNumber).filter(n => n != null);
+  return vs.length ? Math.max(...vs) : null;
+}
+// ピン時点の版: スナップショットがあればその pinnedVersion。無ければサーバの
+// pinnedVersionFor と同じ規則（Issue 作成時刻以前に公開された最新の版）で求める。
+// 対象モデルにピンが無い Issue では null（＝差分なし、最新版のみ表示）。
+function pinnedVersionOf(i, ps) {
+  if (ps?.pinnedVersion != null) return ps.pinnedVersion;
+  if (!i?.pin?.isArchitectural) return null;
+  const cands = (DATA?.versions ?? []).filter(v => v.createdAt && i.createdAt && v.createdAt <= i.createdAt);
+  if (cands.length) return cands[cands.length - 1].versionNumber;
+  return DATA?.versions?.[0]?.versionNumber ?? null;
+}
+// ビューアの比較ペアは「ピン時点の版 → 最新版」に固定する（ピッカーは置かない）。
+// ピンが無い／ピン時点が最新版そのものの場合は、最新版のみを差分配色なしで表示する。
+function applyViewerTarget(ps) {
+  const i = issue();
+  const latest = latestVersionNumber();
+  const pinned = i ? pinnedVersionOf(i, ps) : null;
+  if (pinned != null && latest != null && pinned < latest) {
+    selectedPair = { from: pinned, to: latest, version: latest };
+    showDiff3D();
+  } else {
+    selectedPair = null;
+    showLatestOnly();
   }
-  const rel = i?.history.relatedPairs ?? [];
-  if (rel.length) {
-    const rp = rel[rel.length - 1];
-    return { from: rp.from, to: rp.to, version: rp.version, label: rp.label };
+}
+// ピンが無い Issue 用: 最新版だけを読み込んで素の状態で表示する
+async function showLatestOnly() {
+  const latest = latestVersionNumber();
+  if (latest == null) return;
+  const mySel = selectedId;
+  const still = () => selectedId === mySel && !selectedPair;
+  try {
+    await ensureViewer();
+    if (!still()) return;
+    for (const [v, m] of [...diffModelByVersion]) {
+      if (v !== latest) { try { viewer.unloadModel(m); } catch (e) {} diffModelByVersion.delete(v); }
+    }
+    diffViewCtx = null;
+    occTarget = null;
+    clearLabels();
+    updateBaControls();
+    if (!diffModelByVersion.has(latest)) { diffStatus('モデルを読み込み中…'); await loadVersionModel(latest); }
+    if (!still()) return;
+    resetModelPresentation(diffModelByVersion.get(latest));
+    diffPairShown = null;
+    diffStatus('最新版を表示中（ピンが無いため差分なし）');
+    const pinPos = issue()?.pin?.position;
+    if (pinPos) glideToPoint(pinPos);
+  } catch (e) {
+    if (still()) diffStatus('モデルを表示できませんでした: ' + e.message);
   }
-  return null;
 }
 // 関連ペアの判定はサーバ側でライブ diff ジョブが要るため、初回は pending になることがある。
 // ジョブ完了後に自動でタイムラインへ反映するため、pending の間は /api/issues を取り直す。
@@ -1405,36 +1131,31 @@ function scheduleRelatedPoll() {
         buildTable();
         await buildTimeline();
         if (!selectedPair) {
-          const p = defaultPairFor(issue());
-          if (p) { selectedPair = p; syncPairPicker(); loadDiff(false); updateViewerButton(); }
+          const ps = await loadPinSnap(keepId);
+          if (selectedId === keepId && pinnedVersionOf(issue(), ps) != null) applyViewerTarget(ps);
         }
       }
     } catch (e) { /* 次回に再試行 */ }
     scheduleRelatedPoll();
   }, 15000);
 }
-function selectIssue(id, scrollTimeline) {
+async function selectIssue(id) {
   if (selectedId !== id) relatedPollTries = 0;
   selectedId = id;
-  const i = issue();
-  selectedPair = defaultPairFor(i);
-  // Issue が変わった時点で前 Issue のペアの数字を残さない（H1 と同じ原則）
-  $('diffCounts').innerHTML = selectedPair ? COUNTS_LOADING : '';
   diffViewCtx = null; // Issue が変われば表示中の分類は別ペアのものになり得るため破棄
   updateBaControls();
-  renderDiffLegend();
-  syncPairPicker();
   buildTable();
-  buildTimeline().then(() => { loadDiff(); });
-  updateViewerButton();
+  const ps = await loadPinSnap(id);
+  if (selectedId !== id) return; // 待っている間に選択が切り替わっていたら中断
+  applyViewerTarget(ps);
+  await buildTimeline();
   scheduleRelatedPoll();
 }
 async function loadAll() {
   const r = await fetch('/api/issues');
   if (!r.ok) throw new Error('Issue の取得に失敗しました（HTTP ' + r.status + '）');
   DATA = await r.json();
-  $('headNote').textContent = `${DATA.project.name} — ${DATA.model.name}（V${DATA.versions.map(v => v.versionNumber).join(' / ')}）／履歴スナップショット: ${DATA.snapshot.refreshCount} 回・変化イベント ${DATA.snapshot.eventCount} 件`;
-  populatePairPicker();
+  $('headNote').textContent = `${DATA.project.name} — ${DATA.model.name}`;
   buildChips();
   buildTable();
   // 初期選択は、現在の対象モデルにピンされた最新の Issue を既定にする
@@ -1447,7 +1168,6 @@ $('fltQ').addEventListener('input', () => { flt.q = $('fltQ').value.trim(); flt.
 $('pageSize').addEventListener('change', () => { flt.pageSize = Number($('pageSize').value); flt.page = 1; buildTable(); });
 $('btnPrev').addEventListener('click', () => { if (flt.page > 1) { flt.page--; buildTable(); } });
 $('btnNext').addEventListener('click', () => { flt.page++; buildTable(); });
-$('btnViewer').addEventListener('click', () => showDiff3D());
 for (const b of document.querySelectorAll('[data-bamode]')) {
   b.addEventListener('click', () => setDiffViewMode(b.dataset.bamode));
 }
@@ -1462,15 +1182,6 @@ $('occRange').addEventListener('input', () => {
   applyOccluders();
 });
 updateBaControls();
-$('btnPair').addEventListener('click', () => {
-  const from = Number($('pairFrom').value);
-  const to = Number($('pairTo').value);
-  if (!Number.isInteger(from) || !Number.isInteger(to) || from === to) {
-    $('pairNote').textContent = 'From と To には異なる版を選んでください';
-    return;
-  }
-  applyPair({ from, to, version: to }, true);
-});
 $('btnRefresh').addEventListener('click', async () => {
   $('btnRefresh').disabled = true;
   try {

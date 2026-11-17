@@ -102,48 +102,6 @@ table.issues .c-due.overdue{color:var(--red);font-weight:700}
 .mini-line{flex:1;height:2px;background:var(--sd-accent);min-width:8px;margin:0 2px;opacity:.45}
 .mini-line.open-end{background:repeating-linear-gradient(90deg,var(--sd-accent) 0 4px,transparent 4px 8px)}
 
-/* ---------- 差分ビュー ---------- */
-.pair-picker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;padding:10px 14px;border-bottom:1px solid var(--line)}
-.pair-picker select{padding:5px 6px;border:1px solid var(--sd-chip-border);border-radius:6px;font-size:12.5px;background:var(--surface);color:var(--ink)}
-.pp-label{font-size:12.5px;font-weight:700;color:var(--muted);display:inline-flex;align-items:center;gap:5px}
-.pp-arrow{color:var(--muted);font-weight:900}
-.diff-counts{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}
-.dc{font-size:11.5px;font-weight:900;padding:2px 9px;border-radius:999px;white-space:nowrap}
-.dc.a{background:var(--add-bg);color:var(--add)}
-.dc.d{background:var(--del-bg);color:var(--del)}
-.dc.c{background:var(--chg-bg);color:var(--chg)}
-.dc.g{background:var(--blue-soft);color:var(--blue-dark)}
-.diff-body{padding:14px}
-.diff-controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin-bottom:10px}
-.dc-group{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.dc-label{font-size:12px;font-weight:700;color:var(--muted)}
-.dc-btn{border:1px solid var(--sd-chip-border);background:var(--sd-chip-bg);border-radius:6px;padding:5px 10px;font-size:12px;color:var(--ink)}
-.dc-btn:hover{border-color:var(--sd-primary)}
-.dc-btn.active{background:var(--sd-primary);border-color:var(--sd-primary);color:#fff;font-weight:700}
-.dc-check{font-size:12.5px;display:inline-flex;align-items:center;gap:6px;cursor:pointer}
-.btn.primary{background:var(--sd-primary);border-color:var(--sd-primary);color:#fff;font-weight:700}
-.dc-status{font-size:12px;color:var(--muted)}
-.diff-side{font-size:12.5px}
-.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;font-weight:700;color:var(--muted);margin-bottom:10px}
-.legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
-.legend .la{background:var(--add-bg);border:1.5px solid var(--add)}
-.legend .ld{background:var(--del-bg);border:1.5px dashed var(--del)}
-.legend .lc{background:var(--chg-bg);border:1.5px solid var(--chg)}
-.diff-near{font-weight:700;font-size:13px}
-.diff-side ul{margin:6px 0 0 18px;line-height:1.6;color:var(--muted);font-size:12px}
-.diff-side li.sig{color:var(--ink);font-weight:600}
-.diff-anchor{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;border:1.5px solid var(--sd-accent);background:var(--blue-soft);border-radius:6px;padding:7px 10px;margin:8px 0 2px;font-size:12.5px;color:var(--ink)}
-.diff-anchor .da-tag{font-size:11px;font-weight:900;background:var(--sd-primary);color:#fff;border-radius:9px;padding:0 8px;line-height:1.8;white-space:nowrap}
-.diff-anchor .da-name{font-weight:700}
-.diff-anchor .da-desc{color:var(--muted)}
-.diff-side li.grp summary{cursor:pointer;color:var(--ink);font-weight:600}
-.diff-side ul.grp-items{margin:2px 0 4px 16px}
-.diff-nobbox{margin-top:10px;font-size:12px;color:var(--muted)}
-.diff-nobbox>summary{cursor:pointer;font-weight:700;color:var(--ink)}
-.diff-nobbox ul{margin:6px 0 0 18px;line-height:1.6}
-.diff-note{margin-top:8px;font-size:11.5px;color:var(--muted)}
-.diff-empty{padding:26px 14px;text-align:center;color:var(--muted);font-size:13px}
-
 /* ---------- Viewer ---------- */
 #viewerWrap{height:380px;background:#1a1d20;border-radius:0 0 8px 8px;position:relative}
 #viewerEl{position:absolute;inset:0}
@@ -170,22 +128,6 @@ table.issues .c-due.overdue{color:var(--red);font-weight:700}
 .ba-btn:disabled{opacity:.45;cursor:not-allowed}
 .ba-btn.active:disabled{opacity:1}
 .ba-note{font-size:12px;color:var(--muted)}
-.diff-legend{margin:10px 14px 14px;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--surface2)}
-.dl-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}
-.dl-ver{font-weight:700;font-size:13px;padding:2px 9px;border-radius:4px}
-.dl-before{background:var(--blue-soft);color:var(--blue-dark)}
-.dl-after{background:var(--add-bg);color:var(--add)}
-.dl-arrow{color:var(--muted);font-weight:700}
-.dl-cur{margin-left:auto;font-size:12px;color:var(--muted);font-weight:700}
-.dl-list{list-style:none;margin:0;padding:0;font-size:12.5px;line-height:1.75}
-.dl-list .sw{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:7px;vertical-align:-1px}
-.sw-a{background:var(--add-bg);border:1.5px solid var(--add)}
-.sw-d{background:var(--del-bg);border:1.5px dashed var(--del)}
-.sw-c{background:var(--chg-bg);border:1.5px solid var(--chg)}
-.sw-n{background:var(--surface);border:1.5px solid var(--line)}
-.dl-note{font-size:11.5px;color:var(--muted);margin:6px 0 0}
-.dl-empty{font-size:12px;color:var(--muted);margin:0}
-
 /* ---------- 右カラム：タイムライン ---------- */
 .tl-panel{position:sticky;top:12px;max-height:calc(100vh - 24px);display:flex;flex-direction:column}
 @media(max-width:960px){.tl-panel{position:static;max-height:none}}
@@ -193,24 +135,13 @@ table.issues .c-due.overdue{color:var(--red);font-weight:700}
 .tl-head .kicker{font-size:11px;font-weight:900;color:var(--blue-dark);letter-spacing:.06em}
 .tl-head h2{font-size:16px;line-height:1.45;margin-top:3px}
 .tl-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;font-size:12px;color:var(--muted)}
-#tlThumbWrap{padding:12px 16px 2px}
-#tlThumb{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:6px;background:var(--surface2)}
-.tl-thumb-cap{font-size:11px;color:var(--muted);margin-top:5px}
 /* ---------- ピン時点スナップショット（デモスライス） ---------- */
 #pinSnapWrap{padding:10px 16px 2px}
 .pinsnap{border:1px solid var(--line);border-radius:8px;background:var(--surface2);padding:10px 12px;font-size:12.5px}
 .pinsnap h3{font-size:13px;margin:0 0 2px}
 .pinsnap .demo-note{font-size:11px;color:var(--muted);background:#fff8e1;border:1px dashed #d9b23a;border-radius:6px;padding:5px 8px;margin:6px 0;line-height:1.5}
-.pinsnap dl{display:grid;grid-template-columns:88px 1fr;gap:2px 8px;margin:6px 0}
-.pinsnap dt{color:var(--muted);font-weight:700}
-.pinsnap dd{margin:0;word-break:break-all}
-.pinsnap .props{margin:4px 0 0;padding-left:16px}
-.pinsnap .props li{margin:1px 0;word-break:break-all}
-.pinsnap details{margin-top:4px}
-.pinsnap summary{cursor:pointer;color:var(--blue-dark);font-weight:700;font-size:12px}
-.pinsnap .verify{margin-top:8px;border-top:1px solid var(--line);padding-top:8px}
-.pinsnap .vsum{margin:4px 0 0;padding-left:16px;color:var(--muted)}
-.pinsnap .vprops{margin:4px 0 0;padding-left:16px}
+.pinsnap ul{margin:4px 0 0;padding-left:18px}
+.pinsnap .muted{color:var(--muted)}
 .pinsnap .sim-btn{margin-top:6px;font:inherit;font-weight:700;font-size:12.5px;background:var(--blue);color:#fff;border:none;border-radius:6px;padding:7px 12px;cursor:pointer}
 .pinsnap .sim-btn:disabled{opacity:.55;cursor:wait}
 .vchip{display:inline-block;font-size:11.5px;font-weight:900;border-radius:999px;padding:2px 10px;margin-left:6px;vertical-align:1px;white-space:nowrap}
@@ -222,11 +153,6 @@ table.issues .c-due.overdue{color:var(--red);font-weight:700}
 .timeline{position:relative;margin:10px 0 0 6px;padding-left:26px}
 .timeline:before{content:"";position:absolute;left:6px;top:10px;bottom:10px;width:2px;background:var(--line)}
 .ev{position:relative;padding:7px 0}
-.ev-caps{margin:6px 0 2px 4px}
-.ev-caps-head{font-size:11px;font-weight:700;color:var(--sd-sub)}
-.ev-caps-imgs{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;align-items:flex-start}
-.ev-cap img{height:56px;border:1px solid var(--sd-line);border-radius:6px;display:block;background:#fff}
-.ev-cap-fail{font-size:11px;color:var(--del);background:#fdf0ef;border:1px dashed #e5b3ae;border-radius:6px;padding:4px 8px}
 .ev-dot{position:absolute;left:-26px;top:11px;width:14px;height:14px;border-radius:50%;background:var(--surface);border:3px solid var(--muted);z-index:1}
 .ev.open .ev-dot{background:var(--ink);border-color:var(--ink)}
 .ev.goal .ev-dot{width:18px;height:18px;left:-28px;top:9px;border-radius:5px;background:var(--gold-bg);border-color:var(--gold)}
@@ -246,7 +172,6 @@ button.ev-row:hover{background:var(--surface2)}
 .ev.model .ev-text{font-weight:700}
 .ev .st-arrow{font-weight:900}
 .ev-body{font-size:12.5px;color:var(--muted);white-space:pre-wrap;margin-top:2px}
-footer{margin-top:16px;font-size:11.5px;color:var(--muted);text-align:center}
 .err{background:var(--red-bg);color:var(--red);border-radius:6px;padding:10px 14px;font-size:13px;margin-bottom:12px;display:none}
 
 @media(max-width:720px){
@@ -301,28 +226,10 @@ footer{margin-top:16px;font-size:11.5px;color:var(--muted);text-align:center}
         </div>
       </section>
 
-      <section class="panel" aria-label="差分ビュー">
-        <div class="panel-head">
-          <h2 id="diffTitle">差分ビュー</h2>
-          <div class="diff-counts" id="diffCounts"></div>
-        </div>
-        <div class="pair-picker">
-          <span class="dc-label">版ペアを指定して差分確認:</span>
-          <label class="pp-label">From <select id="pairFrom" aria-label="差分の旧版"></select></label>
-          <span class="pp-arrow">→</span>
-          <label class="pp-label">To <select id="pairTo" aria-label="差分の新版"></select></label>
-          <button type="button" class="btn primary" id="btnPair">差分を表示</button>
-          <span class="dc-status" id="pairNote"></span>
-        </div>
-        <div id="diffBody"><div class="diff-empty">タイムラインのモデル更新イベントを選ぶか、上のピッカーで版ペアを指定すると差分が出ます。</div></div>
-      </section>
-
       <section class="panel" aria-label="3Dビューア">
         <div class="panel-head">
           <h2>3D ビューア（差分）</h2>
-          <span class="ph-note" id="viewerNote">モデル更新イベントを選ぶか、差分ビューのピッカーで版ペアを指定すると、そのペアの差分を 3D で表示します</span>
-          <span style="flex:1"></span>
-          <button class="btn" id="btnViewer" type="button" disabled>差分を 3D で表示</button>
+          <span class="ph-note" id="viewerNote"></span>
         </div>
         <div id="viewerWrap"><div id="viewerEl"></div><svg id="diffLeaders"></svg><div id="diffMarkers"></div></div>
         <div class="ba-bar">
@@ -332,7 +239,6 @@ footer{margin-top:16px;font-size:11.5px;color:var(--muted);text-align:center}
             <button type="button" class="ba-btn" data-bamode="before" disabled>Before のみ</button>
             <button type="button" class="ba-btn" data-bamode="after" disabled>After のみ</button>
           </div>
-          <span class="ba-note" id="baNote">3D 差分を表示すると切り替えできます</span>
           <span class="ba-label">表示範囲:</span>
           <div class="ba-seg" role="group" aria-label="表示範囲切替">
             <button type="button" class="ba-btn active" data-scope="focus" disabled>差分フォーカス</button>
@@ -342,7 +248,6 @@ footer{margin-top:16px;font-size:11.5px;color:var(--muted);text-align:center}
           <input type="range" id="occRange" min="0" max="100" step="5" value="50" disabled aria-label="対象の手前を消す範囲">
           <span class="ba-note" id="occVal">50%</span>
         </div>
-        <div class="diff-legend" id="diffLegend"><p class="dl-empty">差分ペアを選ぶと、Before／After の対応と色の意味がここに出ます。</p></div>
       </section>
     </div>
 
@@ -352,19 +257,14 @@ footer{margin-top:16px;font-size:11.5px;color:var(--muted);text-align:center}
         <h2 id="tlTitle">—</h2>
         <div class="tl-meta" id="tlMeta"></div>
       </div>
-      <div id="tlThumbWrap" hidden>
-        <img id="tlThumb" alt="ピンした時点のビュー（Forma が保存したサムネイル）">
-        <p class="tl-thumb-cap">ピンした時点のビュー（Forma が保存したサムネイル）</p>
-      </div>
       <div id="pinSnapWrap" hidden></div>
       <div class="tl-scroll"><div class="timeline" id="tlBody"></div></div>
     </aside>
   </div>
-
-  <footer>実アプリ v1 — Issue は Forma（Snowdon Towers）の実データ。状態変更・担当変更の履歴はアプリ側スナップショットで記録します（Webhook はデモ用シミュレーションのみ実装。本物の登録はしていません）。diff は実行時に Model Properties API のジョブで取得します（事前投入データは使いません）。</footer>
 </div>
 
 <script src="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/viewer3D.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
+
