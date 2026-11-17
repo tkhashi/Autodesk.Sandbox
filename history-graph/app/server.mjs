@@ -605,7 +605,7 @@ function findPinAnchor(issue, primaryDiff) {
   if (!ext) return null;
   const fromRow = (diff) => {
     const r = diff?.bboxRows?.find(x => x.externalId === ext);
-    return r ? { center: bboxCenter(r), name: r.name, bboxMin: r.bboxMin ?? r.prevBboxMin, bboxMax: r.bboxMax ?? r.prevBboxMax } : null;
+    return r ? { center: bboxCenter(r), name: r.name, externalId: ext, bboxMin: r.bboxMin ?? r.prevBboxMin, bboxMax: r.bboxMax ?? r.prevBboxMax } : null;
   };
   const a = fromRow(primaryDiff);
   if (a) return a;
@@ -625,6 +625,44 @@ function isMoved(r) { // bbox の純平行移動（最小・最大が同じベ�
   const d2 = ['x', 'y', 'z'].map(k => Math.round((r.bboxMax[k] - r.prevBboxMax[k]) * 1000));
   return d.join() === d2.join() && d.some(v => v !== 0);
 }
+// アンカー要素自身がこのペアでどう変化したか（要素リスト＋bbox 行から引く）。
+// diff に現れなければ null（＝このペアでは対象要素自体に変更はない）。
+function anchorSelfChange(diff, externalId) {
+  if (!externalId || !diff) return null;
+  const brow = (diff.bboxRows ?? []).find(x => x.externalId === externalId) ?? null;
+  const els = diff.elements ?? {};
+  for (const t of ['added', 'removed', 'modified']) {
+    const e = (els[t] ?? []).find(x => x.externalId === externalId);
+    if (e) return {
+      type: t, name: e.name ?? brow?.name ?? null,
+      geomChanged: !!e.geomChanged, moved: !!e.moved, valueChanged: !!e.valueChanged,
+      changedProps: brow?.changedProps ?? [],
+    };
+  }
+  if (brow) return { type: brow.type, name: brow.name ?? null, geomChanged: !!brow.geomChanged, moved: isMoved(brow), valueChanged: false, changedProps: brow.changedProps ?? [] };
+  return null;
+}
+// bbox を持たない要素（部屋など）は近傍判定（bbox 中心ベース）に入らないため、そのままでは
+// 室名変更のような値変化が画面のどこにも現れない。ファイル全体の「bbox を持たない modified で
+// 実変化シグナルがある要素」を、名前の基底名（末尾の [要素ID] を除いたもの）でグループ化して返す。
+function noBboxChangeGroups(diff) {
+  const withBbox = new Set((diff.bboxRows ?? []).map(r => r.externalId));
+  const groups = new Map();
+  let total = 0;
+  for (const e of diff.elements?.modified ?? []) {
+    if (!e.externalId || withBbox.has(e.externalId)) continue;
+    if (!(e.geomChanged || e.moved || e.valueChanged)) continue; // ロケールノイズのみの行は出さない
+    total++;
+    const base = String(e.name ?? '').replace(/\s*\[\d+\]\s*$/, '') || String(e.name ?? '');
+    if (!groups.has(base)) groups.set(base, { baseName: base, count: 0, items: [] });
+    const g = groups.get(base);
+    g.count++;
+    if (g.items.length < 20) g.items.push({ name: e.name ?? null, externalId: e.externalId });
+  }
+  // 単独のもの（部屋など名前で特定できる対象）を先に、同数の繰り返しは後ろに
+  const list = [...groups.values()].sort((a, b) => (a.count - b.count) || a.baseName.localeCompare(b.baseName));
+  return { total, groups: list.slice(0, 200), groupsTruncated: list.length > 200 };
+}
 function nearPinRows(diff, anchor) {
   const p = anchor.center;
   const all = [];
@@ -643,7 +681,9 @@ function nearPinRows(diff, anchor) {
   }
   all.sort((a, b) => (b.signal - a.signal) || String(a.name).localeCompare(String(b.name)));
   return {
-    anchorName: anchor.name, anchorCenter: p, anchorBbox: { min: anchor.bboxMin, max: anchor.bboxMax },
+    anchorName: anchor.name, anchorExternalId: anchor.externalId ?? null,
+    anchorChange: anchorSelfChange(diff, anchor.externalId),
+    anchorCenter: p, anchorBbox: { min: anchor.bboxMin, max: anchor.bboxMax },
     radiusFt: 30, dzFt: 6, counts, geomCounts,
     rows: all.slice(0, 400), rowsTotal: all.length, rowsTruncated: all.length > 400,
   };
@@ -758,6 +798,7 @@ const server = http.createServer(async (req, res) => {
         from, to, source: diff.source, jobRunAt: diff.jobRunAt ?? null, stats: diff.stats,
         totalRows: diff.totalRows, bboxRowCount: diff.bboxRowCount,
         byCategory: diff.byCategory, nearPin, pinNote,
+        noBbox: issueId ? noBboxChangeGroups(diff) : null,
       });
     }
     if (url.pathname === '/api/diff/elements') {

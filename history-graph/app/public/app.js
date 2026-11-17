@@ -23,7 +23,7 @@ let DATA = null;             // /api/issues の応答
 let selectedId = null;
 let selectedPair = null;     // { from, to, version } 選択中のモデル更新イベントの diff ペア
 let commentsCache = new Map();
-const flt = { q: '', status: 'all', sort: null, page: 1, pageSize: 5 };
+const flt = { q: '', status: 'all', sort: null, page: 1, pageSize: 10 };
 
 // ============ Issue 表 ============
 const COLUMNS = [
@@ -54,7 +54,8 @@ function filteredIssues() {
       });
     }
   } else {
-    list.sort((a, b) => (a.displayId ?? 0) - (b.displayId ?? 0));
+    // 既定の並びは表示番号の降順（新しい Issue＝現在の対象モデルの Issue が先頭に来る）
+    list.sort((a, b) => (b.displayId ?? 0) - (a.displayId ?? 0));
   }
   return list;
 }
@@ -231,6 +232,52 @@ function countsChips(stats, geom) {
   if (geom) s += `<span class="dc g">うち形状シグナル 追加 ${geom.added}／削除 ${geom.removed}／変更 ${geom.modified}</span>`;
   return s;
 }
+// ---- ピン周辺リストの描画（UIUX レビュー H2） ----
+// 対象要素（アンカー）自身を先頭に固定し、同種要素の繰り返しはグループ化して折りたたむ。
+function changeLabel(t) { return t === 'added' ? '追加' : t === 'removed' ? '削除' : '変更'; }
+function baseElementName(name) { // 末尾の [要素ID] を除いた基底名
+  return String(name ?? '').replace(/\s*\[\d+\]\s*$/, '') || String(name ?? '');
+}
+function nearRowHtml(r) {
+  const props = r.changedProps?.length ? `（${esc(r.changedProps.slice(0, 4).join('、'))}）` : '';
+  return `<li class="${r.signal ? 'sig' : ''}">${esc(changeLabel(r.type))}：${esc(r.name ?? r.externalId ?? '')}${props}</li>`;
+}
+function nearListHtml(rows) {
+  const groups = new Map();
+  for (const r of rows) {
+    const key = [r.type, baseElementName(r.name), (r.changedProps ?? []).join(','), r.signal ? 1 : 0].join('|');
+    if (!groups.has(key)) groups.set(key, { head: r, items: [] });
+    groups.get(key).items.push(r);
+  }
+  return [...groups.values()].map(g => {
+    if (g.items.length === 1) return nearRowHtml(g.head);
+    const props = g.head.changedProps?.length ? `（${esc(g.head.changedProps.slice(0, 4).join('、'))}）` : '';
+    return `<li class="grp"><details><summary>${esc(changeLabel(g.head.type))}：${esc(baseElementName(g.head.name))} ほか ${g.items.length - 1} 件${props}</summary><ul class="grp-items">${g.items.map(nearRowHtml).join('')}</ul></details></li>`;
+  }).join('');
+}
+function anchorBlockHtml(np) {
+  const ac = np.anchorChange;
+  if (!ac) {
+    return `<div class="diff-anchor"><span class="da-tag">対象要素</span><span class="da-name">${esc(np.anchorName ?? '')}</span><span class="da-desc">このペアでは対象要素自体に変更はありません（下記は周辺の変更です）</span></div>`;
+  }
+  const sig = [];
+  if (ac.geomChanged) sig.push('形状変化');
+  if (ac.moved) sig.push('位置の移動');
+  if (!ac.geomChanged && !ac.moved && ac.valueChanged) sig.push('プロパティ値の変更');
+  const props = ac.changedProps?.length ? `／変更プロパティ: ${esc(ac.changedProps.slice(0, 6).join('、'))}` : '';
+  return `<div class="diff-anchor"><span class="da-tag">対象要素</span><span class="da-name">${esc(ac.name ?? np.anchorName ?? '')}</span><span class="da-desc">${esc(changeLabel(ac.type))}${sig.length ? `（${esc(sig.join('・'))}）` : ''}${props}</span></div>`;
+}
+// bbox を持たない要素（部屋など）の変更は近傍リストに入らないため、別枠でグループ表示する
+function noBboxHtml(nb) {
+  if (!nb || !nb.total) return '';
+  const rows = nb.groups.map(g => {
+    if (g.count === 1) return `<li>変更：${esc(g.items[0]?.name ?? g.baseName)}</li>`;
+    const items = g.items.map(it => `<li>変更：${esc(it.name ?? '')}</li>`).join('');
+    const more = g.count > g.items.length ? `<li>…ほか ${g.count - g.items.length} 件</li>` : '';
+    return `<li class="grp"><details><summary>変更：${esc(g.baseName)} ほか ${g.count - 1} 件</summary><ul class="grp-items">${items}${more}</ul></details></li>`;
+  }).join('');
+  return `<details class="diff-nobbox"><summary>位置（bbox）を持たない要素の変更 ${nb.total} 件 — 部屋の名称変更などはこちらに現れます</summary><ul>${rows}</ul>${nb.groupsTruncated ? '<p class="diff-note">グループ数が多いため一部を省略しています。</p>' : ''}</details>`;
+}
 // ---- 版ペアのピッカー（Issue やイベントの選択とは独立に任意ペアを指定できる） ----
 function pairLabel(from, to) {
   if (from === 2 && to === 4) return 'V2 → V4（実質 V3）';
@@ -253,6 +300,9 @@ function syncPairPicker() {
   if ([...$('pairFrom').options].some(o => Number(o.value) === selectedPair.from)) $('pairFrom').value = String(selectedPair.from);
   if ([...$('pairTo').options].some(o => Number(o.value) === selectedPair.to)) $('pairTo').value = String(selectedPair.to);
 }
+// 件数チップの「取得中」プレースホルダ。ペア確定の時点で前ペアの数字を消し、
+// 見出しのペアと数字のペアが食い違う状態を作らない（UIUX レビュー H1）
+const COUNTS_LOADING = '<span class="dc g">取得中…</span>';
 // ペアを確定し、ピッカー・タイムラインのハイライト・差分表示を一貫して動かす
 function applyPair(pair, auto3d) {
   selectedPair = {
@@ -260,6 +310,7 @@ function applyPair(pair, auto3d) {
     version: pair.version ?? pair.to,
     label: pair.label ?? pairLabel(pair.from, pair.to),
   };
+  $('diffCounts').innerHTML = COUNTS_LOADING;
   diffViewCtx = null; // ペアが変わったら分類コンテキストは破棄（モード切替ボタンは無効に戻る）
   updateBaControls();
   renderDiffLegend();
@@ -279,11 +330,15 @@ async function loadDiff(auto3d) {
   const { from, to } = selectedPair;
   $('diffTitle').textContent = `差分ビュー — ${selectedPair.label ?? `V${from} → V${to}`}`;
   renderDiffLegend();
+  // 取得が終わるまで件数チップは「取得中」にしておく（前ペアの数字を残さない。H1）
+  $('diffCounts').innerHTML = COUNTS_LOADING;
   $('diffBody').innerHTML = '<div class="diff-empty">読み込み中…</div>';
+  const pairStillCurrent = () => selectedPair && selectedPair.from === from && selectedPair.to === to;
   let d;
   try {
     const r = await fetch(`/api/diff?from=${from}&to=${to}${i ? `&issue=${encodeURIComponent(i.id)}` : ''}`);
     d = await r.json();
+    if (!pairStillCurrent()) return; // 取得中にペアが切り替わっていたら、古い結果で上書きしない
     if (r.status === 202) {
       $('diffBody').innerHTML = `<div class="diff-empty">実 API で diff ジョブを実行中です（${esc(d.status ?? '')}）。10 秒後に自動で再取得します。</div>`;
       setTimeout(() => { if (selectedPair && selectedPair.from === from && selectedPair.to === to) loadDiff(auto3d); }, 10000);
@@ -291,27 +346,30 @@ async function loadDiff(auto3d) {
     }
     if (!r.ok) throw new Error(d.error ?? ('HTTP ' + r.status));
   } catch (e) {
+    if (!pairStillCurrent()) return;
+    $('diffCounts').innerHTML = '';
     $('diffBody').innerHTML = `<div class="diff-empty">差分を取得できませんでした: ${esc(e.message)}</div>`;
     return;
   }
   $('diffCounts').innerHTML = countsChips(d.stats, null);
   const np = d.nearPin;
+  const nbHtml = noBboxHtml(d.noBbox);
   let side = '';
   if (!i) {
     side = '<p class="diff-note">Issue を選ぶと、そのピンの周辺にある変更の内訳も表示します。</p>';
   } else if (d.pinNote) {
-    side = `<p class="diff-note">${esc(d.pinNote)}</p>`;
+    side = `<p class="diff-note">${esc(d.pinNote)}</p>${nbHtml}`;
   } else if (np) {
     $('diffCounts').innerHTML = countsChips(d.stats, np.geomCounts);
-    const listItems = np.rows.slice(0, 30).map(r => {
-      const props = r.changedProps?.length ? `（${esc(r.changedProps.slice(0, 4).join('、'))}）` : '';
-      return `<li class="${r.signal ? 'sig' : ''}">${esc(r.type === 'added' ? '追加' : r.type === 'removed' ? '削除' : '変更')}：${esc(r.name ?? r.externalId ?? '')}${props}</li>`;
-    }).join('');
+    // 対象要素自身の行は先頭の固定ブロックで出すため、周辺リストからは除く
+    const restRows = np.rows.filter(r => !np.anchorExternalId || r.externalId !== np.anchorExternalId);
     side = `
       <p class="diff-near">ピン周辺（対象要素「${esc(np.anchorName ?? '')}」の中心から水平 ${np.radiusFt}ft／上下 ±${np.dzFt}ft）: 追加 ${np.counts.added}／削除 ${np.counts.removed}／変更 ${np.counts.modified} 件（bbox を持つ行のみ）</p>
-      <ul>${listItems || '<li>周辺に bbox を持つ変更はありません</li>'}</ul>
-      ${np.rowsTruncated ? `<p class="diff-note">周辺 ${np.rowsTotal} 件中、形状シグナルのある行を優先して ${np.rows.length} 件まで表示しています。</p>` : ''}
-      <p class="diff-note">「変更」件数には Revit の再保存に伴うプロパティ表記の揺れ（ロケール差など）が大量に含まれます。実際に形が変わった目安は「形状シグナル」（形状ハッシュ変化・bbox 移動）の件数です。近傍の判定はヒューリスティクスであり、この Issue の修正そのものとは限りません。</p>`;
+      ${anchorBlockHtml(np)}
+      <ul>${nearListHtml(restRows) || '<li>対象要素以外の周辺の変更はありません</li>'}</ul>
+      ${np.rowsTruncated ? `<p class="diff-note">周辺 ${np.rowsTotal} 件中 ${np.rows.length} 件を、同種要素はグループ化して表示しています。</p>` : ''}
+      <p class="diff-note">「変更」件数には Revit の再保存に伴うプロパティ表記の揺れ（ロケール差など）が大量に含まれます。実際に形が変わった目安は「形状シグナル」（形状ハッシュ変化・bbox 移動）の件数です。近傍の判定はヒューリスティクスであり、この Issue の修正そのものとは限りません。</p>
+      ${nbHtml}`;
   }
   if (d.jobRunAt) side += `<p class="diff-note">diff データはこのアプリが ${esc(fmtDateTime(d.jobRunAt))} に Model Properties API のジョブで取得しました。</p>`;
   $('diffBody').innerHTML = `<div class="diff-body">
@@ -771,6 +829,8 @@ function selectIssue(id, scrollTimeline) {
   selectedId = id;
   const i = issue();
   selectedPair = defaultPairFor(i);
+  // Issue が変わった時点で前 Issue のペアの数字を残さない（H1 と同じ原則）
+  $('diffCounts').innerHTML = selectedPair ? COUNTS_LOADING : '';
   diffViewCtx = null; // Issue が変われば表示中の分類は別ペアのものになり得るため破棄
   updateBaControls();
   renderDiffLegend();
@@ -788,7 +848,10 @@ async function loadAll() {
   populatePairPicker();
   buildChips();
   buildTable();
-  const first = DATA.issues.slice().sort((a, b) => (a.displayId ?? 0) - (b.displayId ?? 0))[0];
+  // 初期選択は、現在の対象モデルにピンされた最新の Issue を既定にする
+  // （旧アイテム等、別モデルにピンされた Issue が初期選択にならないようにする）
+  const byDesc = DATA.issues.slice().sort((a, b) => (b.displayId ?? 0) - (a.displayId ?? 0));
+  const first = byDesc.find(i => i.pin?.isArchitectural) ?? byDesc.find(i => i.pin) ?? byDesc[0];
   if (first) selectIssue(first.id, false);
 }
 $('fltQ').addEventListener('input', () => { flt.q = $('fltQ').value.trim(); flt.page = 1; buildTable(); });
